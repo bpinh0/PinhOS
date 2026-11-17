@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PinhOS // Live Cyberdeck Portal</title>
+<style>
+*{box-sizing:border-box}
+body{background:#0d0d11;color:#ff8200;font-family:'Courier New',monospace;margin:0;padding:12px;display:flex;flex-direction:column;align-items:center}
+.wrap{display:flex;flex-wrap:wrap;gap:16px;justify-content:center;max-width:960px;width:100%}
+.panel{border:2px solid #ff8200;background:#141210;padding:12px;border-radius:4px;flex:1;min-width:320px;max-width:460px}
+.hdr{background:#ff8200;color:#000;padding:6px 10px;font-weight:bold;font-size:16px;margin:-12px -12px 12px -12px;display:flex;justify-content:space-between}
+canvas{border:3px solid #000;outline:2px solid #ff8200;display:block;margin:0 auto;cursor:pointer;image-rendering:pixelated;width:320px;height:320px}
+.dpad{display:grid;grid-template-columns:repeat(3,86px);gap:6px;justify-content:center;margin:10px 0}
+button{background:#1c1610;color:#ff8200;border:2px solid #ff8200;padding:9px 8px;font-family:inherit;font-weight:bold;font-size:13px;cursor:pointer;border-radius:3px}
+button:hover{background:#2c2010}
+button:active{background:#ff8200;color:#000}
+.fkeys{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;font-size:13px}
+.stat-box{border:1px solid #553000;padding:6px;background:#0a0908}
+.bar-bg{width:100%;height:10px;border:1px solid #ff8200;margin-top:4px;background:#000}
+.bar-fg{height:100%;background:#ff8200;width:0%;transition:width 0.2s}
+.ctrl-row{display:flex;gap:6px;margin-top:8px;align-items:center}
+input[type=text]{flex:1;background:#000;color:#ff8200;border:1px solid #ff8200;padding:8px;font-family:inherit}
+pre#term_out{background:#050505;color:#ff8200;border:1px solid #553000;padding:8px;height:130px;overflow-y:auto;font-size:12px;margin:8px 0 0 0;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="panel" style="max-width:356px">
+    <div class="hdr"><span>[ PinhOS LIVE SCREEN ]</span><span id="st_ver">v1.5.0</span></div>
+    <canvas id="lcd" width="320" height="320" title="Click any menu row to activate"></canvas>
+    <div style="text-align:center;font-size:11px;margin-top:6px;opacity:0.8">LIVE 320x320 SYNCED VIEW (CLICK ROWS OR USE DPAD)</div>
+    <div class="fkeys">
+      <button onclick="sendKey('F1')">F1:DASH</button>
+      <button onclick="sendKey('F2')">F2:WEB</button>
+      <button onclick="sendKey('F3')">F3:MOUSE</button>
+      <button onclick="sendKey('BACK')">ESC/BACK</button>
+    </div>
+    <div class="dpad">
+      <div></div><button onclick="sendKey('UP')">&#9650; UP</button><div></div>
+      <button onclick="sendKey('LEFT')">&#9664; LEFT</button>
+      <button onclick="sendKey('ENTER')" style="background:#ff8200;color:#000">ENTER</button>
+      <button onclick="sendKey('RIGHT')">RIGHT &#9654;</button>
+      <div></div><button onclick="sendKey('DOWN')">&#9660; DOWN</button><div></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="hdr"><span>[ TELEMETRY &amp; BUSYBOX ]</span><span id="st_ip">ONLINE</span></div>
+    <div class="stat-grid">
+      <div class="stat-box">CPU LOAD: <b id="st_cpu">0%</b> (<span id="st_mhz">150</span>MHz)<div class="bar-bg"><div class="bar-fg" id="bar_cpu"></div></div></div>
+      <div class="stat-box">RAM LOAD: <b id="st_ram">0%</b> (<span id="st_ramkb">0</span>KB Free)<div class="bar-bg"><div class="bar-fg" id="bar_ram"></div></div></div>
+      <div class="stat-box">BATTERY: <b id="st_bat">100%</b> | TEMP: <b id="st_tmp">28C</b></div>
+      <div class="stat-box">WIFI: <b id="st_rssi">-55dBm</b> | UP: <b id="st_up">0m</b></div>
+    </div>
+
+    <div style="border-top:1px solid #553000;padding-top:8px">
+      <div style="font-size:12px;margin-bottom:4px">REMOTE BUSYBOX SHELL (ls, df, free, ifconfig, ping, i2cdetect, dmesg):</div>
+      <div class="ctrl-row">
+        <input type="text" id="sh_in" placeholder="root@pinhos:/sd# (e.g. help, ls, df, dmesg)" onkeydown="if(event.key==='Enter')runSh()">
+        <button onclick="runSh()">EXEC</button>
+      </div>
+      <pre id="term_out">Type 'help' and click EXEC to run BusyBox troubleshooting commands remotely...</pre>
+    </div>
+
+    <div style="border-top:1px solid #553000;padding-top:8px;margin-top:8px">
+      <div class="fkeys">
+        <button onclick="sendAct('ACT:CYCLE_THEME')">THEME</button>
+        <button onclick="sendAct('ACT:CYCLE_LCD')">LCD BRT</button>
+        <button onclick="sendAct('ACT:CYCLE_KB')">KB BRT</button>
+        <button onclick="sendAct('ACT:TEST_CHIME')">CHIME</button>
+      </div>
+      <div class="ctrl-row">
+        <input type="text" id="toast_in" placeholder="Send live toast to PicoCalc...">
+        <button onclick="sendToast()">TOAST</button>
+      </div>
+      <div class="ctrl-row" style="margin-top:8px">
+        <button style="flex:1" onclick="sendAct('ACT:BACKUP')">SAVE CFG</button>
+        <button style="flex:1" onclick="if(confirm('Reboot PicoCalc?'))sendAct('ACT:HW_REBOOT')">REBOOT</button>
+        <button style="flex:1" onclick="sendAct('ACT:SLEEP')">SLEEP</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const cv = document.getElementById('lcd');
+const ctx = cv.getContext('2d');
+let lastState = null;
+
+cv.addEventListener('click', (e) => {
+  const r = cv.getBoundingClientRect();
+  const y = (e.clientY - r.top) * (320 / r.height);
+  if (lastState && !lastState.view && y >= 50 && y <= 246) {
+    const row = Math.floor((y - 50) / 28);
+    fetch('/api/click_row/' + row).then(() => setTimeout(pollState, 80));
+  }
+});
+
+function sendKey(k) { fetch('/api/key/' + k).then(() => setTimeout(pollState, 60)); }
+function sendAct(a) { fetch('/api/act/' + encodeURIComponent(a)).then(() => setTimeout(pollState, 80)); }
+function sendToast() {
+  const v = document.getElementById('toast_in').value;
+  if (!v) return;
+  fetch('/api/toast/' + encodeURIComponent(v)).then(() => {
+    document.getElementById('toast_in').value = '';
+    setTimeout(pollState, 80);
+  });
+}
+function runSh() {
+  const el = document.getElementById('sh_in');
+  const cmd = el.value.trim();
+  if (!cmd) return;
+  el.value = '';
+  fetch('/api/sh/' + encodeURIComponent(cmd)).then(r => r.text()).then(txt => {
+    const out = document.getElementById('term_out');
+    out.textContent = '$ ' + cmd + '\n' + txt;
+    out.scrollTop = out.scrollHeight;
+    setTimeout(pollState, 80);
+  });
+}
+
+function getThemeColors(t) {
+  if (t === 'MATRIX') return {bg:'#000000', fg:'#28ff5a'};
+  if (t === 'CYBER')  return {bg:'#000000', fg:'#00f0ff'};
+  if (t === 'MONO')   return {bg:'#000000', fg:'#ffffff'};
+  return {bg:'#ff8200', fg:'#000000'};
+}
+
+function renderMirror(st) {
+  lastState = st;
+  const c = getThemeColors(st.theme);
+  ctx.fillStyle = c.bg;
+  ctx.fillRect(0, 0, 320, 320);
+  ctx.font = 'bold 11px Courier New, monospace';
+  ctx.textBaseline = 'top';
+
+  ctx.fillStyle = c.fg;
+  ctx.fillRect(0, 0, 320, 26);
+  ctx.fillStyle = c.bg;
+  ctx.fillText('PinhOS', 24, 8);
+  ctx.strokeStyle = c.bg;
+  ctx.beginPath();
+  ctx.moveTo(13,5); ctx.lineTo(7,11); ctx.moveTo(13,5); ctx.lineTo(19,11);
+  ctx.moveTo(13,10); ctx.lineTo(7,17); ctx.moveTo(13,10); ctx.lineTo(19,17);
+  ctx.moveTo(13,5); ctx.lineTo(13,20); ctx.stroke();
+
+  ctx.strokeRect(268, 6, 44, 14);
+  ctx.fillRect(312, 9, 3, 8);
+  ctx.fillText(st.bat + '%', 274, 8);
+  ctx.fillText(st.rssi + 'dB', 224, 8);
+  for (let i=0; i<4; i++) {
+    let bh = (i+1)*3;
+    ctx.fillRect(202 + i*4, 19 - bh, 3, bh);
+  }
+  ctx.strokeRect(170, 6, 26, 14);
+  ctx.fillText('LNK', 173, 8);
+
+  ctx.fillStyle = c.fg;
+  ctx.fillRect(0, 46, 320, 2);
+  ctx.fillText('DECK // ' + st.menu + (st.view ? ' > ' + st.view : ''), 8, 31);
+
+  if (st.view === 'DASH') {
+    ctx.strokeStyle = c.fg;
+    ctx.strokeRect(6, 50, 308, 238);
+    ctx.fillRect(8, 52, 304, 20);
+    ctx.fillStyle = c.bg;
+    ctx.fillText('[ RP2350 CYBERDECK TELEMETRY ]', 24, 57);
+    ctx.fillStyle = c.fg;
+    const lines = [
+      'OS BUILD  : PinhOS v' + st.ver,
+      'CPU CORE  : RP2350 @ ' + st.mhz + 'MHz (' + st.cpu + '% Load)',
+      'MEMORY    : ' + st.ram_free + 'KB FREE (' + st.ram_pct + '% Used)',
+      'BATTERY   : ' + st.bat + '% | TEMP: ' + st.temp + 'C',
+      'WIFI IP   : ' + st.ip + ' (' + st.rssi + 'dBm)',
+      'BACKLIGHT : LCD ' + st.lcd + '% | KB ' + st.kb + '%',
+      'UPTIME    : ' + st.uptime
+    ];
+    lines.forEach((ln, i) => ctx.fillText(ln, 16, 78 + i*17));
+    ctx.fillText('CPU:', 16, 205);
+    ctx.strokeRect(54, 204, 246, 12);
+    ctx.fillRect(56, 206, Math.floor(st.cpu * 2.42), 8);
+    ctx.fillText('RAM:', 16, 223);
+    ctx.strokeRect(54, 222, 246, 12);
+    ctx.fillRect(56, 224, Math.floor(st.ram_pct * 2.42), 8);
+  } else if (st.vlines && st.vlines.length) {
+    ctx.strokeStyle = c.fg;
+    ctx.strokeRect(6, 50, 308, 238);
+    st.vlines.forEach((ln, idx) => {
+      if (idx === st.vsel) {
+        ctx.fillStyle = c.fg;
+        ctx.fillRect(10, 56 + idx*20, 300, 18);
+        ctx.fillStyle = c.bg;
+        ctx.fillText('> ' + ln, 14, 59 + idx*20);
+      } else {
+        ctx.fillStyle = c.fg;
+        ctx.fillText('  ' + ln, 14, 59 + idx*20);
+      }
+    });
+  } else if (st.items) {
+    let y = 52;
+    st.items.forEach((it, idx) => {
+      if (idx === st.sel) {
+        ctx.fillStyle = c.fg;
+        ctx.fillRect(6, y, 308, 24);
+        ctx.fillStyle = c.bg;
+        ctx.fillText('> ' + it, 14, y + 7);
+      } else {
+        ctx.strokeStyle = c.fg;
+        ctx.strokeRect(6, y, 308, 24);
+        ctx.fillStyle = c.fg;
+        ctx.fillText('  ' + it, 14, y + 7);
+      }
+      y += 28;
+    });
+    ctx.strokeStyle = c.fg;
+    ctx.strokeRect(6, 248, 308, 42);
+    ctx.fillStyle = c.fg;
+    ctx.fillText(st.desc || '', 14, 255);
+    ctx.fillText('IP:' + st.ip + ' | CPU:' + st.cpu + '% | RAM:' + st.ram_free + 'K', 14, 272);
+  }
+
+  ctx.fillStyle = c.fg;
+  ctx.fillRect(0, 294, 320, 26);
+  ctx.fillStyle = c.bg;
+  ctx.fillText(st.toast ? ('! ' + st.toast) : 'F1:Dash F2:Web F3:Mouse ESC:Back', 10, 302);
+}
+
+function pollState() {
+  fetch('/api/state').then(r => r.json()).then(st => {
+    document.getElementById('st_ver').textContent = 'v' + st.ver;
+    document.getElementById('st_ip').textContent = st.ip;
+    document.getElementById('st_cpu').textContent = st.cpu + '%';
+    document.getElementById('st_mhz').textContent = st.mhz;
+    document.getElementById('bar_cpu').style.width = st.cpu + '%';
+    document.getElementById('st_ram').textContent = st.ram_pct + '%';
+    document.getElementById('st_ramkb').textContent = st.ram_free;
+    document.getElementById('bar_ram').style.width = st.ram_pct + '%';
+    document.getElementById('st_bat').textContent = st.bat + '%';
+    document.getElementById('st_tmp').textContent = st.temp + 'C';
+    document.getElementById('st_rssi').textContent = st.rssi + 'dBm';
+    document.getElementById('st_up').textContent = st.uptime;
+    renderMirror(st);
+  }).catch(() => {});
+}
+setInterval(pollState, 650);
+pollState();
+</script>
+</body>
+</html>
