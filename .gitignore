@@ -1,5 +1,6 @@
 ﻿# --- PinhOS Runtime & Device Artifacts ---
 config.json
+secrets.py
 crash.log
 .swap/
 .versions/
