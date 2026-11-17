@@ -3,7 +3,7 @@
 - **Target Hardware:** ClockworkPi PicoCalc (Raspberry Pi Pico 2W / RP2350, Dual-Core Cortex-M33 @ 150 MHz, 520 KB SRAM, CYW43439 Wi-Fi + BLE 5.2, 320×320 16-Color RGB565 LUT Display)
 - **Runtime:** MicroPython on RP2350 + Immutable Flash Bootloader (`/sd/pinhos/` live payload)
 - **Versioning Schema:** SemVer 2.0.0 (`1.0.0-dev.<build>+<sha>`, `1.0.0-beta.<n>+<sha>`, `1.0.0-rc.<n>+<sha>`, `1.0.0`) tracked in `/sd/pinhos/version.json`
-- **Visual & Theme Targets:** Match `docs/mockups/` (`ui_native_*.jpg` for `NATIVE` + `LIST`, `ui_lvgl_*.jpg` for `LVGL` + `MOSAIC`, `ui_desktop_mode.jpg` & `ui_desktop_black_forest.jpg` for Desktop Mode, `webportal_studio.jpg` for WebPortal) and `themes/*.json` schema.
+- **Visual & Theme Targets:** Match `docs/mockups/` (`ui_native_*.jpg` for `NATIVE` + `LIST`, `ui_lvgl_*.jpg` for `LVGL` + `MOSAIC`, `ui_desktop_mode.jpg` for Desktop Mode, `webportal_studio.jpg` for WebPortal) and `themes/*.json` schema.
 
 ---
 
@@ -36,12 +36,14 @@
 │   └── ble.py               # BLE 5.2 HID over GATT (HOGP) central for keyboards, mice & gamepads
 ├── web/
 │   └── server.py            # Non-blocking HTTP server, REST API & theme-synced WebPortal
-└── apps/
-    ├── shell.py             # BusyBox shell (ping, scan, wol, nslookup, ifconfig, py)
-    ├── files.py             # File Commander (/sd), F5 info, Open With, .bmp screenshots
-    ├── store.py             # Git App Store & APP_META manifest inspector
-    ├── studio.py            # On-device & WebPortal App Studio sandbox runner
-    └── lab.py               # GPIO inspector, I2C scanner, PWM signal gen & RTC timer
+├── apps/
+│   ├── shell.py             # BusyBox shell (ping, scan, wol, nslookup, ifconfig, py)
+│   ├── files.py             # File Commander (/sd), F5 info, Open With, .bmp screenshots
+│   ├── store.py             # Git App Store & APP_META manifest inspector
+│   ├── studio.py            # On-device & WebPortal App Studio sandbox runner
+│   └── lab.py               # GPIO inspector, I2C scanner, PWM signal gen & RTC timer
+└── tests/
+    └── selftest.py          # Automated on-device hardware, SRAM, UI, OTA & WebPortal test suite
 ```
 
 ---
@@ -68,9 +70,10 @@
   - BusyBox TCP `ping` (RTT ms) + ICMP/discovery toggle.
   - Clean `HOT_RELOAD` teardown loop in `main.py` (deinit sockets/timers before reload).
   - Forced `TEST_AUTH` modal verification for WebPortal PIN/token auth.
-- [ ] **Deployment Script (`picocalc.ps1`):**
+- [ ] **Deployment & Test CLI (`picocalc.ps1`):**
   - Replace hardcoded `COM4` with automatic Raspberry Pi USB VID (`2E8A`) port discovery, optional `-Port COMx` override, and pre-flight serial port lock/busy detection (reporting a clear error if Thonny, PuTTY, or another monitor holds the port).
-  - Update `upload_and_start` to recursively sync `/sd/pinhos/` (excluding `.git/`, `docs/`, `README.md`, `ROADMAP.md`, `LICENSE`) with active theme colors on the progress bar.
+  - Update `upload_and_start` to recursively sync `/sd/pinhos/` (excluding `.git/`, `docs/`, `tests/`, `README.md`, `ROADMAP.md`, `LICENSE`) with active theme colors on the progress bar.
+  - Add `.\picocalc.ps1 test` to push and execute `/sd/pinhos/tests/selftest.py` over serial and report pass/fail telemetry.
 
 ---
 
@@ -119,3 +122,21 @@
 - [ ] **Unified Input Router (`core/input.py`):** Consolidate keystrokes and pointer deltas from the built-in PicoCalc QWERTY matrix, WebPortal virtual input, and BLE HID devices into a single event queue.
 - [ ] **BLE HID Central (`net/ble.py`):** Scan, pair, and bond with BLE HID over GATT (HOGP) keyboards, mice (driving the Desktop Mode cursor), and gamepads using `ubluetooth`/`aioble`, persisting bonded MAC addresses and LTK keys in `config.json`.
 - [ ] **Radio & SRAM Coexistence Mode:** Add `Bluetooth & Peripherals` under `System, Network & OTA`, a top-bar `BT` status badge alongside `Wi-Fi` and `LNK`, and an optional **Radio Exclusive / Swap** toggle that spills cold buffers via `core/swap.py` when BLE and Wi-Fi run concurrently.
+
+---
+
+## Automated Regression & Self-Test Suite (`tests/selftest.py`)
+**Goal:** Provide a repeatable, zero-brick on-device verification harness invoked via `.\picocalc.ps1 test` before tagging releases.
+
+- [ ] **Core, Swap & Sandbox Integrity:**
+  - Measure `gc.mem_free()` before and after launching a dummy `APP_META` app inside `core/sandbox.py` to assert zero `sys.modules` or heap leaks.
+  - Perform round-trip cold-buffer spill/restore cycles in `/sd/pinhos/.swap/` and verify cleanup.
+  - Inject synthetic keystrokes/pointer events via `core/input.py` and confirm Sleep/Wake transitions reset the UI route back to the default home screen.
+- [ ] **UI & Theme Compiler Validation:**
+  - Parse every preset in `/sd/pinhos/themes/*.json` and assert all 12 semantic color tokens compile cleanly into RGB565 LUTs and WebPortal CSS tokens without `KeyError`.
+  - Exercise the 1-second dirty-rectangle header tick and verify graceful fallback from `LVGL` to `NATIVE` mode under low-SRAM conditions.
+- [ ] **Network, OTA & Auth Checks:**
+  - Validate `version.json` SemVer parsing, `.versions/` snapshot/rollback dry-run, and non-blocking NTP failure logging to `crash.log`.
+  - Verify `TEST_AUTH` PIN/token rejection and acceptance on `web/server.py` and run BusyBox TCP `ping` against the local gateway.
+- [ ] **Hardware Sanity Sweep:**
+  - Run a non-destructive I2C bus scan (confirming STM32 PMU/keyboard controller ACK) and validate ADC battery voltage telemetry bounds.
