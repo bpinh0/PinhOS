@@ -1,0 +1,14 @@
+﻿{
+  "id": "phosphor_green",
+  "name": "Phosphor Green",
+  "author": "bpinh0",
+  "version": "1.0.0",
+  "layout": "LIST",
+  "font_scale": 1.0,
+  "lvgl": { "card_radius": 4, "border_width": 1, "glow_alpha": 35 },
+  "colors": {
+    "bg": "#050A06", "surface": "#0B140D", "fg": "#00FF66", "fg_muted": "#00993D",
+    "accent": "#66FF99", "accent_fg": "#050A06", "border": "#00AA44",
+    "sel_bg": "#00FF66", "sel_fg": "#050A06", "ok": "#00FF66", "warn": "#CCFF00", "err": "#FF3B30"
+  }
+}

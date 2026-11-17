@@ -1,0 +1,14 @@
+﻿{
+  "id": "cyber_amber",
+  "name": "Cyber Amber",
+  "author": "bpinh0",
+  "version": "1.0.0",
+  "layout": "LIST",
+  "font_scale": 1.0,
+  "lvgl": { "card_radius": 8, "border_width": 2, "glow_alpha": 40 },
+  "colors": {
+    "bg": "#0A0C10", "surface": "#12161F", "fg": "#FFB000", "fg_muted": "#9E7216",
+    "accent": "#00E5FF", "accent_fg": "#0A0C10", "border": "#FFB000",
+    "sel_bg": "#FFB000", "sel_fg": "#0A0C10", "ok": "#00FF9C", "warn": "#FF9900", "err": "#FF3355"
+  }
+}
