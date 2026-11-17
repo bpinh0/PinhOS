@@ -1,0 +1,14 @@
+﻿{
+  "id": "arctic_daylight",
+  "name": "Arctic Daylight",
+  "author": "bpinh0",
+  "version": "1.0.0",
+  "layout": "LIST",
+  "font_scale": 1.0,
+  "lvgl": { "card_radius": 6, "border_width": 1, "glow_alpha": 0 },
+  "colors": {
+    "bg": "#E8F1F5", "surface": "#D6E5EC", "fg": "#0D1B2A", "fg_muted": "#415A77",
+    "accent": "#006D77", "accent_fg": "#FFFFFF", "border": "#1B263B",
+    "sel_bg": "#006D77", "sel_fg": "#FFFFFF", "ok": "#1B7F5C", "warn": "#C86D00", "err": "#C1121F"
+  }
+}

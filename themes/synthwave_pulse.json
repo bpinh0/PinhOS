@@ -1,0 +1,14 @@
+﻿{
+  "id": "synthwave_pulse",
+  "name": "Synthwave Pulse",
+  "author": "bpinh0",
+  "version": "1.0.0",
+  "layout": "MOSAIC",
+  "font_scale": 1.0,
+  "lvgl": { "card_radius": 10, "border_width": 2, "glow_alpha": 55 },
+  "colors": {
+    "bg": "#0B091A", "surface": "#15112E", "fg": "#E6E1FF", "fg_muted": "#8A7FB8",
+    "accent": "#FF2A85", "accent_fg": "#FFFFFF", "border": "#00E5FF",
+    "sel_bg": "#FF2A85", "sel_fg": "#FFFFFF", "ok": "#00F5D4", "warn": "#FEE440", "err": "#FF2A85"
+  }
+}
