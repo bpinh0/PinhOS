@@ -1,0 +1,5 @@
+﻿docs/mockups/
+.git/
+.versions/
+.swap/
+*.uf2
