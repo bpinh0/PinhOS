@@ -6,13 +6,9 @@
 
 ## 🖼️ UI & WebPortal Previews
 
-| Native Menu List (`Black Forest`) | Desktop Mode (`Black Forest`) | 
-| ----- | ----- | 
-| <img src="docs/mockups/ui_native_black_forest.jpg" width="380" alt="PinhOS Native Menu List - Black Forest" /> | <img src="docs/mockups/ui_desktop_black_forest.jpg" width="380" alt="PinhOS Desktop Mode - Black Forest" /> | 
-
 | Desktop Mode (`Cyber Amber`) | WebPortal Studio | 
 | ----- | ----- | 
-| <img src="docs/mockups/ui_desktop_mode.jpg" width="380" alt="PinhOS Desktop Mode - Cyber Amber" /> | <img src="docs/mockups/webportal_studio.jpg" width="380" alt="PinhOS WebPortal Studio" /> | 
+| <img src="docs/mockups/ui_lvgl_cyber_amber.jpg" width="380" alt="PinhOS Desktop Mode - Cyber Amber" /> | <img src="docs/mockups/webportal_studio.jpg" width="380" alt="PinhOS WebPortal Studio" /> | 
 
 | Native 16-Color LUT (`Cyber Amber`) | LVGL Mosaic Grid (`Synthwave Pulse`) | 
 | ----- | ----- | 
