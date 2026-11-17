@@ -1,8 +1,38 @@
-__pycache__/
-*.pyc
-.DS_Store
-Thumbs.db
-.staging/
+﻿# --- PinhOS Runtime & Device Artifacts ---
+config.json
+crash.log
 .swap/
 .versions/
-*.tmp
+*.bmp
+*.log
+
+# --- Python & MicroPython ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.mpy
+.pytest_cache/
+.venv/
+venv/
+
+# --- Firmware & Build Outputs ---
+build/
+build-*/
+*.uf2
+*.elf
+*.bin
+*.hex
+*.map
+
+# --- IDEs & Editors (VS Code / Antigravity) ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- OS Junk (Windows / macOS / Linux) ---
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
