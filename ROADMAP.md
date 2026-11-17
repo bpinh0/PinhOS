@@ -43,13 +43,13 @@
 │   ├── studio.py            # On-device & WebPortal App Studio sandbox runner
 │   └── lab.py               # GPIO inspector, I2C scanner, PWM signal gen & RTC timer
 └── tests/
-    └── selftest.py          # Automated on-device hardware, SRAM, UI, OTA & WebPortal test suite
+    └── selftest.py          # Incremental on-device regression suite (grown across Phases 1–6)
 ```
 
 ---
 
-## Phase 1: Modular Refactor, 6-Domain Main Deck & Core Bug Fixes
-**Goal:** Break monolithic `pinhos_os.py` into `/sd/pinhos/`, introduce `version.json`, clean up legacy branding, and fix all core runtime bugs.
+## Phase 1: Modular Refactor, 6-Domain Main Deck, Core Fixes & Test Harness
+**Goal:** Break monolithic `pinhos_os.py` into `/sd/pinhos/`, introduce `version.json`, clean up legacy branding, fix all core runtime bugs, and establish the automated regression gate.
 
 - [ ] **Modularize Codebase:** Refactor `pinhos_os.py` into `main.py`, `core/`, `ui/`, `net/`, and `apps/`. Replace legacy `Plugins` terminology with `Apps` (`APP_META`).
 - [ ] **Scrub Personal Strings & Set Defaults:** Remove personal/author names from default UI banners/boot screens; default `git_repo` to `"PinhOS/PinhOS"`.
@@ -74,6 +74,8 @@
   - Replace hardcoded `COM4` with automatic Raspberry Pi USB VID (`2E8A`) port discovery, optional `-Port COMx` override, and pre-flight serial port lock/busy detection (reporting a clear error if Thonny, PuTTY, or another monitor holds the port).
   - Update `upload_and_start` to recursively sync `/sd/pinhos/` (excluding `.git/`, `docs/`, `tests/`, `README.md`, `ROADMAP.md`, `LICENSE`) with active theme colors on the progress bar.
   - Add `.\picocalc.ps1 test` to push and execute `/sd/pinhos/tests/selftest.py` over serial and report pass/fail telemetry.
+- [ ] **Phase 1 Self-Test Foundation (`tests/selftest.py`):**
+  - Build the lightweight on-device test runner and initial Phase 1 checks: `gc.mem_free()` sandbox leak verification (`core/sandbox.py`), `.swap/` round-trip spill/cleanup (`core/swap.py`), synthetic input & Sleep/Wake home reset verification (`core/input.py`), non-blocking NTP failure logging, and non-destructive I2C PMU/keyboard ACK + ADC battery bounds check.
 
 ---
 
@@ -83,6 +85,7 @@
 - [ ] **GitHub OTA (`net/ota.py`):** Query GitHub Releases/Trees APIs filtered by SemVer channel (`STABLE`, `BETA`, `DEV`), verify SHA hashes so only changed files are fetched, stream-download to staging, and atomically swap into `/sd/pinhos/`.
 - [ ] **Offline `.versions/` Snapshots:** Archive prior working `/sd/pinhos/` builds into `/sd/pinhos/.versions/<ver>/` (retaining last 2) for 1-click offline rollback.
 - [ ] **Immutable Flash Bootloader (`tools/build_boot_uf2.sh` & `tools/setup_persistent_boot.py`):** Flash-resident `boot.py`/`main.py` stub that mounts `/sd`, checks 3-strike boot failure counter, and boots `/sd/pinhos/main.py` (or enters Safe Mode recovery shell).
+- [ ] **Phase 2 Regression Hook (`tests/selftest.py`):** Append `test_ota_and_rollback()` to validate `version.json` SemVer parsing and `.versions/` snapshot/rollback dry-runs.
 
 ---
 
@@ -93,6 +96,7 @@
 - [ ] **App Developer Studio (`apps/studio.py`):** Browser + on-device Python editor, drag-and-drop upload, `dev_watch.ps1` USB hot-push, and isolated sandbox runner (`core/sandbox.py`) with live console streaming.
 - [ ] **Scratchpad Notes:** Lightweight Markdown/text notes synced between PicoCalc and WebPortal.
 - [ ] **File Commander Enhancements (`apps/files.py`):** `F5` file/metadata inspector, custom extension-to-app associations (`APP_META["ext"]` + `Open With...`), `F10`/`Ctrl+P` `.bmp` framebuffer screenshots, and storage analyzer.
+- [ ] **Phase 3 Regression Hook (`tests/selftest.py`):** Append `test_webportal_auth_and_studio()` to verify `TEST_AUTH` PIN/token rejection vs. acceptance and sandboxed Studio execution.
 
 ---
 
@@ -103,6 +107,7 @@
 - [ ] **Cooperative SD Swap (`core/swap.py`):** Spill cold logs, terminal scrollback, and store caches to `/sd/pinhos/.swap/` before initializing LVGL or launching heavy apps.
 - [ ] **Optional LVGL Backend (`ui/lvgl_backend.py`):** Render `MOSAIC` 6-card grid and anti-aliased widgets when `ui_backend == "LVGL"`, automatically falling back to `NATIVE` if `lvgl` module is absent or free SRAM is below threshold.
 - [ ] **Optional Desktop Mode (`ui/desktop.py`):** Icon workspace (`Term`, `Files`, `Studio`, `Lab`, `MP3`, `Notes`), floating telemetry/notes widgets, and bottom taskbar (`[PINHOS]` launcher, active app indicator, clock/telemetry) toggleable as the default home screen (also respected on Sleep/Wake reset), configurable `F1`–`F10` multi-page hotkeys, and idle screensaver.
+- [ ] **Phase 4 Regression Hook (`tests/selftest.py`):** Append `test_themes_and_ui_fallback()` to compile all `themes/*.json` presets into RGB565 LUTs/CSS tokens and verify graceful `LVGL -> NATIVE` fallback under low SRAM.
 
 ---
 
@@ -113,6 +118,7 @@
 - [ ] **Serial UART Console (`minicom` mode):** Interactive UART terminal over exposed `UART0`/`UART1` pins (`9600`–`921600` baud) with `/sd` session logging.
 - [ ] **Hardware & Diagnostics Lab (`apps/lab.py`):** Live GPIO/Pinout inspector (`IN`/`OUT`/`ADC`), I2C bus scanner, PWM / square-wave signal generator (`1 Hz`–`100 kHz`), crash forensics viewer, and background RTC Pomodoro/Alarm timer.
 - [ ] **USB / SD Transfer Bridge:** Expose `/sd` over USB Mass Storage (when supported by firmware) or high-speed WebPortal transfer.
+- [ ] **Phase 5 Regression Hook (`tests/selftest.py`):** Append `test_toolkit_and_lab()` to verify BusyBox TCP `ping`/port scan non-blocking timeouts and PWM/GPIO state cleanup.
 
 ---
 
@@ -122,21 +128,4 @@
 - [ ] **Unified Input Router (`core/input.py`):** Consolidate keystrokes and pointer deltas from the built-in PicoCalc QWERTY matrix, WebPortal virtual input, and BLE HID devices into a single event queue.
 - [ ] **BLE HID Central (`net/ble.py`):** Scan, pair, and bond with BLE HID over GATT (HOGP) keyboards, mice (driving the Desktop Mode cursor), and gamepads using `ubluetooth`/`aioble`, persisting bonded MAC addresses and LTK keys in `config.json`.
 - [ ] **Radio & SRAM Coexistence Mode:** Add `Bluetooth & Peripherals` under `System, Network & OTA`, a top-bar `BT` status badge alongside `Wi-Fi` and `LNK`, and an optional **Radio Exclusive / Swap** toggle that spills cold buffers via `core/swap.py` when BLE and Wi-Fi run concurrently.
-
----
-
-## Automated Regression & Self-Test Suite (`tests/selftest.py`)
-**Goal:** Provide a repeatable, zero-brick on-device verification harness invoked via `.\picocalc.ps1 test` before tagging releases.
-
-- [ ] **Core, Swap & Sandbox Integrity:**
-  - Measure `gc.mem_free()` before and after launching a dummy `APP_META` app inside `core/sandbox.py` to assert zero `sys.modules` or heap leaks.
-  - Perform round-trip cold-buffer spill/restore cycles in `/sd/pinhos/.swap/` and verify cleanup.
-  - Inject synthetic keystrokes/pointer events via `core/input.py` and confirm Sleep/Wake transitions reset the UI route back to the default home screen.
-- [ ] **UI & Theme Compiler Validation:**
-  - Parse every preset in `/sd/pinhos/themes/*.json` and assert all 12 semantic color tokens compile cleanly into RGB565 LUTs and WebPortal CSS tokens without `KeyError`.
-  - Exercise the 1-second dirty-rectangle header tick and verify graceful fallback from `LVGL` to `NATIVE` mode under low-SRAM conditions.
-- [ ] **Network, OTA & Auth Checks:**
-  - Validate `version.json` SemVer parsing, `.versions/` snapshot/rollback dry-run, and non-blocking NTP failure logging to `crash.log`.
-  - Verify `TEST_AUTH` PIN/token rejection and acceptance on `web/server.py` and run BusyBox TCP `ping` against the local gateway.
-- [ ] **Hardware Sanity Sweep:**
-  - Run a non-destructive I2C bus scan (confirming STM32 PMU/keyboard controller ACK) and validate ADC battery voltage telemetry bounds.
+- [ ] **Phase 6 Regression Hook (`tests/selftest.py`):** Append `test_ble_hid_coexistence()` to verify BLE HID report injection into `core/input.py` and SRAM swap stability alongside Wi-Fi.
