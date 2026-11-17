@@ -7,11 +7,11 @@
 ## 🖼️ UI & WebPortal Previews
 
 | Desktop Mode (`Cyber Amber`) | WebPortal Studio | 
-| ----- | ----- | 
-| <img src="docs/mockups/ui_lvgl_cyber_amber.jpg" width="380" alt="PinhOS Desktop Mode - Cyber Amber" /> | <img src="docs/mockups/webportal_studio.jpg" width="380" alt="PinhOS WebPortal Studio" /> | 
+| :---: | :---: | 
+| <img src="docs/mockups/ui_desktop_mode.jpg" width="380" alt="PinhOS Desktop Mode - Cyber Amber" /> | <img src="docs/mockups/webportal_studio.jpg" width="380" alt="PinhOS WebPortal Studio" /> | 
 
 | Native 16-Color LUT (`Cyber Amber`) | LVGL Mosaic Grid (`Synthwave Pulse`) | 
-| ----- | ----- | 
+| :---: | :---: | 
 | <img src="docs/mockups/ui_native_cyber_amber.jpg" width="380" alt="PinhOS Native 16-Color LUT - Cyber Amber" /> | <img src="docs/mockups/ui_lvgl_synthwave_pulse.jpg" width="380" alt="PinhOS LVGL Mosaic Grid - Synthwave Pulse" /> | 
 
 ## 🚀 Why PinhOS?
@@ -60,7 +60,7 @@ Most microcontroller firmwares force a trade-off between raw scripting freedom a
 
 ## 🏗️ System Architecture
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────────┐
 │  IMMUTABLE BOOTLOADER (.uf2 on RP2350 Flash)                       │
 │  └─ Mounts /sd ──▶ Checks 3-Strike Breadcrumb ──▶ Boots /sd/pinhos │
@@ -82,7 +82,7 @@ Most microcontroller firmwares force a trade-off between raw scripting freedom a
 │  │   ├── lvgl_backend.py  # Optional LVGL adapter + auto-fallback  │
 │  │   ├── themes.py        # Unified LUT + LVGL JSON theme engine   │
 │  │   └── desktop.py       # Optional icon & taskbar workspace      │
-│  ├── themes/              # Starter JSON themes (Forest, Amber...) │
+│  ├── themes/              # Starter JSON themes (Amber, Forest...) │
 │  ├── net/                 # Wi-Fi, NTP, GitHub OTA & BLE HID Host  │
 │  ├── web/                 # Non-blocking HTTP server & WebPortal   │
 │  └── apps/                # Shell, Files, Store, Dev Studio, Lab   │
@@ -95,13 +95,13 @@ PinhOS uses a **single-source JSON theme architecture** (`/sd/pinhos/themes/<the
 
 | Theme ID | Name | Palette Highlights | 
 | ----- | ----- | ----- | 
-| `black_forest` | **Black Forest** | Deep pine-charcoal `#080E0B`, forest emerald `#2ECC71`, warm birch gold `#D4A373` | 
 | `cyber_amber` | **Cyber Amber** | Dark slate `#0A0C10`, phosphor amber `#FFB000`, electric cyan `#00E5FF` | 
 | `phosphor_green` | **Phosphor Green** | Terminal black `#050A06`, classic P1 green `#33FF66`, lime accents | 
 | `synthwave_pulse` | **Synthwave Pulse** | Midnight violet `#0D0618`, neon magenta `#FF2A85`, laser cyan `#00F0FF` | 
 | `arctic_daylight` | **Arctic Daylight** | Crisp paper `#F4F7FA`, ink slate `#101820`, cobalt accent `#0066CC` | 
+| `black_forest` | **Black Forest** | Deep pine-charcoal `#080E0B`, forest emerald `#2ECC71`, warm birch gold `#D4A373` | 
 
-### Example Theme (`themes/black_forest.json`)
+### Example Custom Theme (`themes/black_forest.json`)
 
 ```json
 {
