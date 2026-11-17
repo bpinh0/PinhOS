@@ -1,9 +1,9 @@
 # PinhOS — Master Engineering Roadmap & Architecture Spec
 
-- **Target Hardware:** ClockworkPi PicoCalc (Raspberry Pi Pico 2W / RP2350, 520 KB SRAM, CYW43439 Wi-Fi, 320×320 16-Color RGB565 LUT Display)
+- **Target Hardware:** ClockworkPi PicoCalc (Raspberry Pi Pico 2W / RP2350, Dual-Core Cortex-M33 @ 150 MHz, 520 KB SRAM, CYW43439 Wi-Fi + BLE 5.2, 320×320 16-Color RGB565 LUT Display)
 - **Runtime:** MicroPython on RP2350 + Immutable Flash Bootloader (`/sd/pinhos/` live payload)
 - **Versioning Schema:** SemVer 2.0.0 (`1.0.0-dev.<build>+<sha>`, `1.0.0-beta.<n>+<sha>`, `1.0.0-rc.<n>+<sha>`, `1.0.0`) tracked in `/sd/pinhos/version.json`
-- **Visual & Theme Targets:** Match `docs/mockups/` (`ui_native_*.jpg` for `NATIVE` + `LIST`, `ui_lvgl_*.jpg` for `LVGL` + `MOSAIC`, `webportal_studio.jpg` for WebPortal) and `themes/*.json` schema.
+- **Visual & Theme Targets:** Match `docs/mockups/` (`ui_native_*.jpg` for `NATIVE` + `LIST`, `ui_lvgl_*.jpg` for `LVGL` + `MOSAIC`, `ui_desktop_mode.jpg` & `ui_desktop_black_forest.jpg` for Desktop Mode, `webportal_studio.jpg` for WebPortal) and `themes/*.json` schema.
 
 ---
 
@@ -13,22 +13,27 @@
 /sd/pinhos/
 ├── main.py                  # Boot guard, 3-strike safe-mode check & HOT_RELOAD loop
 ├── version.json             # SemVer metadata, build number, channel & changelog
-├── config.json              # User preferences, Wi-Fi creds, active theme, F1-F10 map
+├── config.json              # User preferences, Wi-Fi creds, active theme, F1-F10 map, BLE bonds
+├── secrets.py               # Optional private tokens/credentials (gitignored)
 ├── crash.log                # Last BSOD stack trace & heap telemetry
+├── .swap/                   # Cold buffer & state swap directory (gitignored)
+├── .versions/               # Offline OTA snapshot backups for rollback (gitignored)
 ├── core/
-│   ├── kernel.py            # State machine, atomic file I/O, BSOD screen handler
+│   ├── kernel.py            # State machine, atomic file I/O, BSOD handler, sleep/wake reset
+│   ├── input.py             # Unified input router (PicoCalc matrix + WebPortal + BLE HID)
 │   ├── swap.py              # Cooperative SD state spill & SwapPager (wear-safe)
 │   ├── sandbox.py           # Isolated app namespace, sys.modules snapshot & gc cleanup
-│   └── bridge.py            # <<PINHOS:...>> framed UART protocol over COM4
+│   └── bridge.py            # <<PINHOS:...>> framed UART protocol over USB Serial
 ├── ui/
 │   ├── renderer.py          # Native 16-color RGB565 LUT & dirty-rectangle redraws
 │   ├── lvgl_backend.py      # Optional LVGL adapter with automatic fallback to NATIVE
 │   ├── themes.py            # Unified JSON theme loader (LUT + LVGL styles + Web CSS)
 │   └── desktop.py           # Optional desktop icon & taskbar workspace
-├── themes/                  # Starter JSON themes (cyber_amber, phosphor_green, etc.)
+├── themes/                  # Starter JSON themes (black_forest, cyber_amber, phosphor_green...)
 ├── net/
 │   ├── wifi.py              # Non-blocking Wi-Fi connect/retry & NTP clock sync
-│   └── ota.py               # GitHub Releases API updater & .versions/ rollback
+│   ├── ota.py               # GitHub Releases/Trees API updater & .versions/ rollback
+│   └── ble.py               # BLE 5.2 HID over GATT (HOGP) central for keyboards, mice & gamepads
 ├── web/
 │   └── server.py            # Non-blocking HTTP server, REST API & theme-synced WebPortal
 └── apps/
@@ -55,6 +60,7 @@
   5. `5. HARDWARE & LAB [LAB >]`
   6. `6. SYSTEM, NET & OTA [SYS >]`
 - [ ] **Phase 1 Bug Fixes:**
+  - **Sleep / Wake State Reset:** Entering Sleep or Shutdown must reset the active UI route/cursor back to the default home screen (Main Deck or Desktop Workspace if enabled) so waking up never drops the user back inside the Settings/Power submenu.
   - Idle 1-second dirty-rectangle header tick (clock + RAM/battery telemetry without full-screen flicker).
   - Active `LNK` status badge + `F4` toggle for serial/WebPortal link state.
   - NTP sync error handling -> graceful log/BSOD + `crash.log` without hard lockup.
@@ -62,14 +68,16 @@
   - BusyBox TCP `ping` (RTT ms) + ICMP/discovery toggle.
   - Clean `HOT_RELOAD` teardown loop in `main.py` (deinit sockets/timers before reload).
   - Forced `TEST_AUTH` modal verification for WebPortal PIN/token auth.
-- [ ] **Deployment Script (`picocalc.ps1`):** Update `upload_and_start` to recursively sync `/sd/pinhos/` (excluding `.git/`, `docs/`, `README.md`, `ROADMAP.md`, `LICENSE`) with active theme colors on the progress bar.
+- [ ] **Deployment Script (`picocalc.ps1`):**
+  - Replace hardcoded `COM4` with automatic Raspberry Pi USB VID (`2E8A`) port discovery, optional `-Port COMx` override, and pre-flight serial port lock/busy detection (reporting a clear error if Thonny, PuTTY, or another monitor holds the port).
+  - Update `upload_and_start` to recursively sync `/sd/pinhos/` (excluding `.git/`, `docs/`, `README.md`, `ROADMAP.md`, `LICENSE`) with active theme colors on the progress bar.
 
 ---
 
 ## Phase 2: GitHub OTA Updater, Instant Rollback & Immutable Bootloader
 **Goal:** Enable self-updating over Wi-Fi with zero-brick recovery.
 
-- [ ] **GitHub OTA (`net/ota.py`):** Query GitHub Releases/tags filtered by SemVer channel (`STABLE`, `BETA`, `DEV`), stream-download updated files to staging, and atomically swap into `/sd/pinhos/`.
+- [ ] **GitHub OTA (`net/ota.py`):** Query GitHub Releases/Trees APIs filtered by SemVer channel (`STABLE`, `BETA`, `DEV`), verify SHA hashes so only changed files are fetched, stream-download to staging, and atomically swap into `/sd/pinhos/`.
 - [ ] **Offline `.versions/` Snapshots:** Archive prior working `/sd/pinhos/` builds into `/sd/pinhos/.versions/<ver>/` (retaining last 2) for 1-click offline rollback.
 - [ ] **Immutable Flash Bootloader (`tools/build_boot_uf2.sh` & `tools/setup_persistent_boot.py`):** Flash-resident `boot.py`/`main.py` stub that mounts `/sd`, checks 3-strike boot failure counter, and boots `/sd/pinhos/main.py` (or enters Safe Mode recovery shell).
 
@@ -91,7 +99,7 @@
 - [ ] **Unified Theme Engine (`ui/themes.py`):** Parse `themes/*.json` (`id`, `name`, `layout`, `font_scale`, `lvgl.*`, 12 semantic `colors.*`) into Native 16-color RGB565 LUTs, LVGL `lv.style_t` styles, and WebPortal CSS tokens. Sync `/themes` from GitHub.
 - [ ] **Cooperative SD Swap (`core/swap.py`):** Spill cold logs, terminal scrollback, and store caches to `/sd/pinhos/.swap/` before initializing LVGL or launching heavy apps.
 - [ ] **Optional LVGL Backend (`ui/lvgl_backend.py`):** Render `MOSAIC` 6-card grid and anti-aliased widgets when `ui_backend == "LVGL"`, automatically falling back to `NATIVE` if `lvgl` module is absent or free SRAM is below threshold.
-- [ ] **Optional Desktop Mode (`ui/desktop.py`):** Icon workspace + taskbar toggle, configurable `F1`–`F10` multi-page hotkeys, and idle screensaver.
+- [ ] **Optional Desktop Mode (`ui/desktop.py`):** Icon workspace (`Term`, `Files`, `Studio`, `Lab`, `MP3`, `Notes`), floating telemetry/notes widgets, and bottom taskbar (`[PINHOS]` launcher, active app indicator, clock/telemetry) toggleable as the default home screen (also respected on Sleep/Wake reset), configurable `F1`–`F10` multi-page hotkeys, and idle screensaver.
 
 ---
 
@@ -102,3 +110,12 @@
 - [ ] **Serial UART Console (`minicom` mode):** Interactive UART terminal over exposed `UART0`/`UART1` pins (`9600`–`921600` baud) with `/sd` session logging.
 - [ ] **Hardware & Diagnostics Lab (`apps/lab.py`):** Live GPIO/Pinout inspector (`IN`/`OUT`/`ADC`), I2C bus scanner, PWM / square-wave signal generator (`1 Hz`–`100 kHz`), crash forensics viewer, and background RTC Pomodoro/Alarm timer.
 - [ ] **USB / SD Transfer Bridge:** Expose `/sd` over USB Mass Storage (when supported by firmware) or high-speed WebPortal transfer.
+
+---
+
+## Phase 6: Bluetooth BLE 5.2 Peripheral Support
+**Goal:** Pair wireless keyboards, mice, and gamepads directly to the Pico 2W's CYW43439 chip without starving SRAM or Wi-Fi.
+
+- [ ] **Unified Input Router (`core/input.py`):** Consolidate keystrokes and pointer deltas from the built-in PicoCalc QWERTY matrix, WebPortal virtual input, and BLE HID devices into a single event queue.
+- [ ] **BLE HID Central (`net/ble.py`):** Scan, pair, and bond with BLE HID over GATT (HOGP) keyboards, mice (driving the Desktop Mode cursor), and gamepads using `ubluetooth`/`aioble`, persisting bonded MAC addresses and LTK keys in `config.json`.
+- [ ] **Radio & SRAM Coexistence Mode:** Add `Bluetooth & Peripherals` under `System, Network & OTA`, a top-bar `BT` status badge alongside `Wi-Fi` and `LNK`, and an optional **Radio Exclusive / Swap** toggle that spills cold buffers via `core/swap.py` when BLE and Wi-Fi run concurrently.
