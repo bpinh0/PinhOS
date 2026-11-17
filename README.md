@@ -149,6 +149,59 @@ while True:
 
 ---
 
+## 🎨 Custom Theme Engine & Theme Building Guide
+
+PinhOS uses a **single-source JSON theme architecture** (`/sd/pinhos/themes/<theme_id>.json`) that drives the entire visual stack across both hardware renderers and the browser WebPortal—with zero duplicated color definitions or firmware rebuilds.
+
+### How a Theme Compiles Across Backends
+When `ui/themes.py` loads a `.json` preset, it compiles the 12 semantic color tokens into three targets simultaneously:
+1. **Native 16-Color RGB565 LUT (`ui/renderer.py`):** Converts `#RRGGBB` hex strings into big-endian `RGB565` palette indices (`0–11`), reserving slots `12–15` for system/BSOD states so dirty-rectangle redraws stay fast and flicker-free.
+2. **LVGL Style Objects (`ui/lvgl_backend.py`):** Maps `colors.*` and `lvgl.*` properties (`card_radius`, `border_width`, `glow_alpha`) into reusable `lv.style_t` containers for cards, headers, and focus states.
+3. **Browser WebPortal (`web/server.py`):** Injects `colors.bg`, `colors.surface`, `colors.fg`, `colors.fg_muted`, `colors.accent`, and `colors.border` directly into `:root` CSS custom properties (`--bg`, `--surface`, `--fg`, `--accent`, etc.) on page load.
+
+---
+
+### Schema Reference (`themes/<theme_id>.json`)
+
+| Key | Type | Required | Description |
+| :--- | :--- | :---: | :--- |
+| `id` | `string` | Yes | Unique snake_case identifier matching the filename (e.g., `cyber_amber`). |
+| `name` | `string` | Yes | Human-readable display name shown in **Display & Themes** settings. |
+| `author` | `string` | No | Theme creator handle. |
+| `version` | `string` | No | SemVer version of the theme preset (e.g., `1.0.0`). |
+| `layout` | `"LIST" \| "MOSAIC"` | Yes | Default Main Deck layout (`LIST` for 6-row menu, `MOSAIC` for 2×3 icon cards). |
+| `font_scale` | `float` | No | UI font multiplier (`1.0`, `1.25`, or `1.5`). Defaults to `1.0`. |
+| `lvgl.card_radius` | `int` | No | Corner radius in pixels for LVGL containers (`0`–`16`). |
+| `lvgl.border_width` | `int` | No | Outline thickness in pixels for LVGL cards (`1`–`3`). |
+| `lvgl.glow_alpha` | `int` | No | Focus shadow/glow opacity (`0`–`255`, `0` disables glow). |
+| `colors.bg` | `#RRGGBB` | Yes | Primary screen background. |
+| `colors.surface` | `#RRGGBB` | Yes | Card, modal, and telemetry box background. |
+| `colors.fg` | `#RRGGBB` | Yes | Primary text and icon stroke color. |
+| `colors.fg_muted` | `#RRGGBB` | Yes | Secondary labels, inactive tabs, and subtle dividers. |
+| `colors.accent` | `#RRGGBB` | Yes | Secondary highlight color (badges, active links, progress bars). |
+| `colors.accent_fg` | `#RRGGBB` | Yes | High-contrast text color rendered on top of `accent`. |
+| `colors.border` | `#RRGGBB` | Yes | 1px Native frames and LVGL card borders. |
+| `colors.sel_bg` | `#RRGGBB` | Yes | Active menu cursor / selected card fill. |
+| `colors.sel_fg` | `#RRGGBB` | Yes | Active menu cursor / selected card text. |
+| `colors.ok` / `warn` / `err` | `#RRGGBB` | Yes | Semantic status indicators (Wi-Fi/Battery OK, low-RAM warning, fatal error). |
+
+---
+
+### Creating & Installing Your Own Theme
+
+1. **Copy an existing preset** from `themes/` (e.g., `themes/cyber_amber.json`) and save it as `themes/<your_theme>.json` using valid JSON and 6-digit `#RRGGBB` hex colors.
+2. **Ensure legible contrast** between `bg` ↔ `fg` and `sel_bg` ↔ `sel_fg` (especially if targeting outdoor daylight use).
+3. **Test on your PicoCalc** in one of three ways:
+   - **Via USB (`COM4`):**
+     ```powershell
+     .\picocalc.ps1 hot_write .\themes\my_theme.json /sd/pinhos/themes/my_theme.json
+     ```
+   - **Via WebPortal:** Open **SD Files** in your browser and upload `<your_theme>.json` directly to `/sd/pinhos/themes/`.
+   - **Via GitHub Theme Sync:** Commit your theme to `themes/` in the repository and run **Sync `/themes` from Git** under **System, Network & OTA -> Display & Themes**.
+4. **Activate it** on the device under **System, Network & OTA -> Display & Themes -> Theme Selector** (or preview it live in both `NATIVE` and `LVGL` backends).
+
+---
+
 ## 📄 License
 
 Released under the [MIT License](LICENSE). Built for the ClockworkPi & RP2350 maker community.
