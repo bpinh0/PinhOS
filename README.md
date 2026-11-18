@@ -2,16 +2,16 @@
 
 ### **A Modular MicroPython Cyberdeck OS & Field Toolkit for the ClockworkPi PicoCalc**
 
-*Turn your PicoCalc into a pocket-sized network & hardware cyberdeck—complete with a live browser WebPortal, isolated App Sandbox, BusyBox diagnostics, SD state-swapping, Desktop Mode, dual Native/LVGL graphics, and planned BLE peripheral support.*
+*Turn your PicoCalc into a pocket-sized network & hardware cyberdeck—complete with a live browser WebPortal, isolated App Sandbox, BusyBox diagnostics, SD state-swapping, Desktop Mode, dual Native/LVGL graphics, BLE peripheral support, and a planned v1.1.0 Multi-UF2 Chainloader.*
 
 ## 🖼️ UI & WebPortal Previews
 
 | Desktop Mode (`Cyber Amber`) | WebPortal Studio | 
-| :---: | :---: | 
+| ----- | ----- | 
 | <img src="docs/mockups/ui_desktop_mode.jpg" width="380" alt="PinhOS Desktop Mode - Cyber Amber" /> | <img src="docs/mockups/webportal_studio.jpg" width="380" alt="PinhOS WebPortal Studio" /> | 
 
 | Native 16-Color LUT (`Cyber Amber`) | LVGL Mosaic Grid (`Synthwave Pulse`) | 
-| :---: | :---: | 
+| ----- | ----- | 
 | <img src="docs/mockups/ui_native_cyber_amber.jpg" width="380" alt="PinhOS Native 16-Color LUT - Cyber Amber" /> | <img src="docs/mockups/ui_lvgl_synthwave_pulse.jpg" width="380" alt="PinhOS LVGL Mosaic Grid - Synthwave Pulse" /> | 
 
 ## 🚀 Why PinhOS?
@@ -28,7 +28,9 @@ Most microcontroller firmwares force a trade-off between raw scripting freedom a
 
 * 🎨 **Dual-Backend Graphics Engine & Unified JSON Themes:** Runs blazing-fast on the native **16-color RGB565 LUT** engine by default, with an optional **LVGL** backend toggle and **Desktop Mode** workspace that automatically fall back to Native LUT if firmware support or RAM is unavailable.
 
-* ⌨️ **Future BLE 5.2 HID Host (Phase 6):** Pair external Bluetooth keyboards, mice, and gamepads directly to the Pico 2W's CYW43439 chip.
+* ⌨️ **BLE 5.2 HID Host (Phase 6):** Pair external Bluetooth keyboards, mice, and gamepads directly to the Pico 2W's CYW43439 chip.
+
+* 🚀 **Non-Destructive Multi-UF2 Chainloader (`v1.1.0`):** Boot standalone bare-metal PicoCalc `.uf2` payloads (Doom, retro emulators) from `/sd/firmwares/` into an ephemeral flash slot—rebooting returns straight to PinhOS untouched.
 
 ## ✨ Core Features & Cyberdeck Suite
 
@@ -60,7 +62,7 @@ Most microcontroller firmwares force a trade-off between raw scripting freedom a
 
 ## 🏗️ System Architecture
 
-```text
+```
 ┌────────────────────────────────────────────────────────────────────┐
 │  IMMUTABLE BOOTLOADER (.uf2 on RP2350 Flash)                       │
 │  └─ Mounts /sd ──▶ Checks 3-Strike Breadcrumb ──▶ Boots /sd/pinhos │
@@ -141,6 +143,9 @@ Connect your PicoCalc to Windows over USB—`picocalc.ps1` automatically detects
 # Optional: target a specific COM port manually
 .\picocalc.ps1 upload_and_start -Port COM6
 
+# Run the on-device self-test regression suite
+.\picocalc.ps1 test
+
 # Hot-push a single app file into the isolated sandbox
 .\picocalc.ps1 hot_write .\apps\my_app.py /sd/pinhos/apps/my_app.py
 ```
@@ -155,7 +160,7 @@ Connect your PicoCalc to Windows over USB—`picocalc.ps1` automatically detects
 
 ## 🗺️ Roadmap & Release Channels
 
-PinhOS follows strict **SemVer 2.0.0** pre-release channels targeting **`v1.0.0`**:
+PinhOS follows strict **SemVer 2.0.0** pre-release channels targeting **`v1.0.0`** and beyond:
 
 * `1.0.0-dev.<build>+<sha>` — Active development iterations
 
@@ -165,14 +170,17 @@ PinhOS follows strict **SemVer 2.0.0** pre-release channels targeting **`v1.0.0`
 
 * `1.0.0` — Official stable release
 
-| Phase | Milestone | Status | 
-| ----- | ----- | ----- | 
-| **Phase 1** | Modular `/sd/pinhos/` architecture, 6-domain menu, `version.json`, sleep-wake home reset, smart COM discovery & core fixes | 🚧 In Progress | 
-| **Phase 2** | GitHub OTA updater, local `.versions/` instant rollback & bootloader `.uf2` scripts | 📋 Planned | 
-| **Phase 3** | Theme-synced WebPortal, App Developer Studio & `F5` file associations | 📋 Planned | 
-| **Phase 4** | Dual-backend UI (`NATIVE LUT` + optional `LVGL` with auto-fallback) & Desktop Mode | 📋 Planned | 
-| **Phase 5** | Cyberdeck Field Toolkit (UART `minicom`, Port Scanner, WoL, PWM gen, USB/SD bridge) | 📋 Planned | 
-| **Phase 6** | Bluetooth BLE 5.2 HID peripheral support (keyboards, mice & gamepads via `net/ble.py`) | 📋 Planned | 
+* `1.1.0` — Multi-UF2 Chainloader & Native `.mpy` expansion
+
+| Phase | Target | Milestone | Status | 
+| ----- | ----- | ----- | ----- | 
+| **Phase 1** | `v1.0.0` | Modular `/sd/pinhos/` architecture, 6-domain menu, `version.json`, sleep-wake home reset, smart COM discovery & `selftest.py` | 🚧 In Progress | 
+| **Phase 2** | `v1.0.0` | GitHub OTA updater, local `.versions/` instant rollback & bootloader `.uf2` scripts | 📋 Planned | 
+| **Phase 3** | `v1.0.0` | Theme-synced WebPortal, App Developer Studio & `F5` file associations | 📋 Planned | 
+| **Phase 4** | `v1.0.0` | Dual-backend UI (`NATIVE LUT` + optional `LVGL` with auto-fallback) & Desktop Mode | 📋 Planned | 
+| **Phase 5** | `v1.0.0` | Cyberdeck Field Toolkit (UART `minicom`, Port Scanner, WoL, PWM gen, USB/SD bridge) | 📋 Planned | 
+| **Phase 6** | `v1.0.0` | Bluetooth BLE 5.2 HID peripheral support (keyboards, mice & gamepads via `net/ble.py`) | 📋 Planned | 
+| **Phase 7** | `v1.1.0` | Non-destructive Multi-UF2 chainloader (`/sd/firmwares/`) & native C `.mpy` engine | 🔭 Future | 
 
 Full engineering specifications live in [`ROADMAP.md`](ROADMAP.md).
 
