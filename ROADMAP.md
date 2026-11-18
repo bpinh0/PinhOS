@@ -1,164 +1,182 @@
-# PinhOS — Master Engineering Roadmap & Architecture Spec
+# 🌲 PinhOS — Architectural Specification & Engineering Roadmap
 
-* **Target Hardware:** ClockworkPi PicoCalc (Primary) & Portable Pico 2W / RP2350 Decks (Dual-Core Cortex-M33 @ 150 MHz, 520 KB SRAM, CYW43439 Wi-Fi + BLE 5.2, 16-Color RGB565 LUT Display)
+> **Target Platform:** ClockworkPi PicoCalc (Raspberry Pi Pico 2W / RP2350 — Dual ARM Cortex-M33 @ 150 MHz, 520 KB SRAM, 4 MB Flash, CYW43439 Wi-Fi 4 + BLE 5.2, 320×320 SPI LCD, I2C STM32 Southbridge, SPI microSD).  
+> **Current Status:** Active Development — `v1.0.0` (Phase 1 next).
 
-* **Runtime:** MicroPython on RP2350 + Immutable Flash Bootloader (`/sd/pinhos/` live payload)
+---
 
-* **Versioning Schema:** SemVer 2.0.0 (`1.0.0-dev.<build>+<sha>`, `1.0.0-beta.<n>+<sha>`, `1.0.0-rc.<n>+<sha>`, `1.0.0`, `1.1.0`, `1.2.0`) tracked in `/sd/pinhos/version.json`
+## 1. Core Architectural Pillars & Constraints
 
-* **Visual & Theme Targets:** Match `docs/mockups/` (`ui_native_*.jpg` for `NATIVE` + `LIST`, `ui_lvgl_*.jpg` for `LVGL` + `MOSAIC`, `ui_desktop_mode.jpg` for Desktop Mode, `webportal_studio.jpg` for WebPortal) and `themes/*.json` schema.
+1. **95% Python / 5% C & Viper Hybrid Execution:**
+   * All OS orchestration, `boards/` HAL drivers, networking, WebPortal routes, and application UI wrappers remain pure MicroPython for rapid iteration, live on-device editing via WebPortal, and over-the-air updates.
+   * `@micropython.viper` (`ptr8`/`ptr16`) is reserved for tight pixel-buffer blits and LUT expansions; compiled C `.mpy` dynamic modules (`py/dynruntime.h`) are reserved for real-time DSP, MP3 decoding, and heavy packet parsing (`v1.1.0`).
+2. **Deterministic 520 KB SRAM Budget:**
+   * Pre-allocate display framebuffers and RGB565 LUT tables during early boot before heap fragmentation occurs.
+   * Enforce strict module unloading and descriptor cleanup in `core/sandbox.py` (`< 2 KB` residual heap delta per app lifecycle).
+   * Offload dormant task state to `/sd/pinhos/.swap/` via `core/swap.py` whenever switching contexts or crossing low-memory watermarks (`< 64 KB` free).
+3. **Strict Hardware Decoupling (`boards/`):**
+   * Zero hardcoded GPIO pins, SPI buses, I2C addresses, or display dimensions outside `boards/`.
+   * Supporting new hardware (custom RP2350 cyberdecks, external GPIO backpacks, or future ESP32-S3 ports) requires only adding a board profile implementing `boards/base.py`.
+4. **Zero-Brick Field Resilience:**
+   * Every boot increments a persistent strike counter before loading user configs, themes, or network services. Three consecutive failures automatically drop into **Safe Recovery Mode** (minimal serial + emergency Wi-Fi WebPortal) to repair or roll back broken files.
 
-## Target Directory Layout (`/sd/pinhos/`)
+---
 
-```
-/sd/pinhos/
-├── main.py                  # Boot guard, 3-strike safe-mode check & HOT_RELOAD loop
-├── version.json             # SemVer metadata, build number, channel & changelog
-├── config.json              # User preferences, Wi-Fi creds, active theme, F1-F10 map, BLE bonds
-├── board_config.json        # Active hardware HAL profile ("picocalc" | "cardkb_ili9341" | "headless")
-├── secrets.py               # Optional private tokens/credentials (gitignored)
-├── crash.log                # Last BSOD stack trace & heap telemetry
-├── .swap/                   # Cold buffer & state swap directory (gitignored)
-├── .versions/               # Offline OTA snapshot backups for rollback (gitignored)
-├── .boot_once               # Ephemeral chainloader handoff flag for v1.1.0 multi-UF2 boot (gitignored)
-├── boards/
-│   ├── __init__.py          # Lazy factory get_board() — loads only the active HAL profile into SRAM
-│   ├── base.py              # BaseBoard contract (display, read_key, get_battery, backlight, sleep)
-│   ├── picocalc.py          # ClockworkPi PicoCalc HAL (320×320 LCD, STM32 I2C keyboard & PMU)
-│   └── cardkb_ili9341.py    # DIY Pico 2W + 320×240 SPI ILI9341 + M5Stack CardKB (I2C 0x5F) HAL
-├── core/
-│   ├── kernel.py            # State machine, atomic file I/O, BSOD handler, sleep/wake reset
-│   ├── input.py             # Unified input router (Board HAL + WebPortal + BLE HID)
-│   ├── swap.py              # Cooperative SD state spill & SwapPager (wear-safe)
-│   ├── sandbox.py           # Isolated app namespace, sys.modules snapshot & gc cleanup
-│   └── bridge.py            # <<PINHOS:...>> framed UART protocol over USB Serial
-├── ui/
-│   ├── renderer.py          # Dynamic W×H Native 16-color RGB565 LUT & dirty-rectangle redraws
-│   ├── lvgl_backend.py  # Optional LVGL adapter with automatic fallback to NATIVE
-│   ├── themes.py            # Unified JSON theme loader (LUT + LVGL styles + Web CSS)
-│   └── desktop.py           # Optional desktop icon & taskbar workspace (dynamic W×H layout)
-├── themes/                  # Starter JSON themes (black_forest, cyber_amber, phosphor_green...)
-├── net/
-│   ├── wifi.py              # Non-blocking Wi-Fi connect/retry & NTP clock sync
-│   ├── ota.py               # GitHub Releases/Trees API updater & .versions/ rollback
-│   └── ble.py               # BLE 5.2 HID over GATT (HOGP) central for keyboards, mice & gamepads
-├── web/
-│   └── server.py            # Non-blocking HTTP server, REST API & theme-synced WebPortal
-├── apps/
-│   ├── shell.py             # BusyBox shell (ping, scan, wol, nslookup, ifconfig, py)
-│   ├── files.py             # File Commander (/sd), F5 info, Open With, .bmp screenshots
-│   ├── store.py             # Git App Store & APP_META manifest inspector
-│   ├── studio.py            # On-device & WebPortal App Studio sandbox runner
-│   └── lab.py               # GPIO inspector, I2C scanner, PWM signal gen & RTC timer
-└── tests/
-    └── selftest.py          # Incremental on-device regression suite (grown across Phases 1–8)
+## 2. Standard Contracts & Schemas
 
-/sd/firmwares/               # Standalone bare-metal .uf2/.bin payloads for v1.1.0 chainloader (Doom, emulators...)
+### App Entry Contract (`APP_META`)
+Every applet in `/sd/pinhos/apps/<app_name>/` exposes a single `main(ctx)` entry point and module-level metadata dictionary so the launcher, Store, and sandbox can validate memory requirements before execution:
+```python
+APP_META = {
+    "id": "uart_term",
+    "name": "UART Console",
+    "version": "1.0.0",
+    "category": "Field Tools",       # Field Tools | Network | System | Media | Games
+    "description": "Hardware serial terminal with baud presets and macros",
+    "entry": "main",
+    "min_sram": 32768,               # Minimum free bytes required before launch
+    "ui_modes": ["native", "lvgl"],  # Supported rendering backends
+    "native_libs": []                # Optional .mpy C dependencies (v1.1.0+)
+}
+
+def main(ctx):
+    # ctx provides: board, ui, theme, swap, net, config, logger
+    ...
 ```
 
-## v1.0.0 Release Milestones (Phases 1–6)
+### Unified Theme Schema (`themes/*.json`)
+```json
+{
+  "name": "Amber Phosphor",
+  "id": "amber_phosphor",
+  "colors": {
+    "bg": "#0A0A0C",
+    "surface": "#141619",
+    "fg": "#FFB000",
+    "fg_muted": "#996A00",
+    "accent": "#FFB000",
+    "accent_alt": "#00E5FF",
+    "border": "#4D3500",
+    "ok": "#39FF14",
+    "warn": "#FF9500",
+    "err": "#FF2A55"
+  },
+  "font": "font_8x8",
+  "border_radius": 2
+}
+```
 
-### Phase 1: Modular Refactor, Hardware HAL, 6-Domain Main Deck, Core Fixes & Test Harness
+---
 
-**Goal:** Break monolithic `pinhos_os.py` into `/sd/pinhos/`, introduce `boards/` HAL + `version.json`, clean up legacy branding, fix all core runtime bugs, and establish the automated regression gate.
+## 3. Release `v1.0.0` — Foundation & Daily Driver *(Active)*
 
-* [ ] **Modularize Codebase:** Refactor `pinhos_os.py` into `main.py`, `boards/`, `core/`, `ui/`, `net/`, and `apps/`. Replace legacy `Plugins` terminology with `Apps` (`APP_META`).
-* [ ] **Lightweight Hardware Abstraction Layer (`boards/` & `board_config.json`):**
-  * Implement `boards/base.py` (`BaseBoard`) and lazy factory `boards/__init__.py` (`get_board()`) so only the active hardware profile is imported into SRAM.
-  * Implement `boards/picocalc.py` (default `320×320` PicoCalc display, STM32 I2C keyboard & PMU telemetry) alongside `boards/cardkb_ili9341.py` (`320×240` SPI TFT + I2C `0x5F` CardKB + `VSYS` ADC) and `headless` profile support.
-  * Enforce dynamic screen geometry (`W = board.WIDTH`, `H = board.HEIGHT`, dynamic `visible_rows` calculation) across `ui/renderer.py` and `ui/desktop.py` instead of hardcoding `320×320`.
-* [ ] **Scrub Personal Strings & Set Defaults:** Remove personal/author names from default UI banners/boot screens; default `git_repo` to `"PinhOS/PinhOS"`.
-* [ ] **Version Metadata (`version.json`):** Initialize `/sd/pinhos/version.json` at `1.0.0-dev.19` and add **About & Version Info** under `System, Network & OTA`.
-* [ ] **6-Domain Main Deck:**
-  1. `1. DASHBOARD & TELEMETRY [F1]`
-  2. `2. APPS & STUDIO [APPS >]`
-  3. `3. TERMINAL & TOOLKIT [SH >]`
-  4. `4. FILE COMMANDER [/sd >]`
-  5. `5. HARDWARE & LAB [LAB >]`
-  6. `6. SYSTEM, NET & OTA [SYS >]`
-* [ ] **Phase 1 Bug Fixes:**
-  * **Sleep / Wake State Reset:** Entering Sleep or Shutdown must reset the active UI route/cursor back to the default home screen (Main Deck or Desktop Workspace if enabled) so waking up never drops the user back inside the Settings/Power submenu.
-  * Idle 1-second dirty-rectangle header tick (clock + RAM/battery telemetry without full-screen flicker).
-  * Active `LNK` status badge + `F4` toggle for serial/WebPortal link state.
-  * NTP sync error handling -> graceful log/BSOD + `crash.log` without hard lockup.
-  * Display real LAN IP (`wlan.ifconfig()[0]`) on Dashboard instead of placeholder/loopback.
-  * BusyBox TCP `ping` (RTT ms) + ICMP/discovery toggle.
-  * Clean `HOT_RELOAD` teardown loop in `main.py` (deinit sockets/timers before reload).
-  * Forced `TEST_AUTH` modal verification for WebPortal PIN/token auth.
-* [ ] **Deployment & Test CLI (`picocalc.ps1`):**
-  * Replace hardcoded `COM4` with automatic Raspberry Pi USB VID (`2E8A`) port discovery, optional `-Port COMx` override, and pre-flight serial port lock/busy detection (reporting a clear error if Thonny, PuTTY, or another monitor holds the port).
-  * Update `upload_and_start` to recursively sync `/sd/pinhos/` (excluding `.git/`, `docs/`, `tests/`, `README.md`, `ROADMAP.md`, `LICENSE`) with active theme colors on the progress bar.
-  * Add `.\picocalc.ps1 test` to push and execute `/sd/pinhos/tests/selftest.py` over serial and report pass/fail telemetry.
-* [ ] **Phase 1 Self-Test Foundation (`tests/selftest.py`):**
-  * Build the lightweight on-device test runner and initial Phase 1 checks: `boards/` HAL contract & dynamic `W×H` geometry validation, `gc.mem_free()` sandbox leak verification (`core/sandbox.py`), `.swap/` round-trip spill/cleanup (`core/swap.py`), synthetic input & Sleep/Wake home reset verification (`core/input.py`), non-blocking NTP failure logging, and non-destructive I2C PMU/keyboard ACK + ADC battery bounds check.
+### Phase 1: Hardware Abstraction, Boot Guard & Resilient Runtime
+- [ ] **1.1 Canonical Filesystem & Manifest (`version.json`):**
+  - Initialize `/sd/pinhos/` directory hierarchy (`boards/`, `core/`, `ui/`, `net/`, `web/`, `tools/`, `apps/`, `themes/`, `.swap/`, `logs/`).
+  - Create `version.json` containing semantic version, build timestamp, target architecture (`armv7emsp`), and OTA channel metadata.
+- [ ] **1.2 Board Hardware Abstraction Layer (`boards/`):**
+  - `boards/base.py`: Define abstract base class and capability flags for display (`320x320` RGB565 blit/fill), keyboard/pointer input queue, microSD mount/unmount, battery voltage/percentage/charging state, PWM backlight (`0–100%`), PWM/I2S audio, and RTC.
+  - `boards/picocalc.py`: Full hardware driver for ClockworkPi PicoCalc (SPI LCD controller, I2C STM32 southbridge keyboard scan + modifier decoding + battery registers, SPI SD card mount with retry logic, keyboard & screen backlight PWM).
+  - `boards/generic_spi.py`: Configurable fallback driver for bare Pico 2W setups using standard ST7789/ILI9341 SPI displays and I2C CardKB keyboards.
+  - Board auto-detection / `config.json` profile selector at boot.
+- [ ] **1.3 Crash-Proof 3-Strike Boot Guard (`main.py`):**
+  - Read and increment `boot_strikes` in persistent flash state prior to mounting SD or importing UI/network modules.
+  - Reset `boot_strikes = 0` only after the main event loop runs cleanly for `5 seconds` (or upon explicit self-test pass).
+  - Trigger **Safe Recovery Mode** when `boot_strikes >= 3`: boots with minimal framebuffer text output, USB serial REPL access, and a stripped-down emergency WebPortal to restore configs or roll back OTA updates.
+- [ ] **1.4 Sandboxed App Runner (`core/sandbox.py`):**
+  - Parse `APP_META` safely without executing top-level app logic; verify `gc.mem_free() >= min_sram`.
+  - Snapshot `set(sys.modules.keys())` and track opened file/socket wrappers before invoking `main(ctx)`.
+  - In a guaranteed `finally:` block on normal exit or unhandled exception: close leaked descriptors, delete all newly imported modules from `sys.modules`, restore display/input state, and run `gc.collect()`.
+- [ ] **1.5 Cooperative Swap Manager (`core/swap.py`):**
+  - Provide `swap.save(app_id, state_dict)` and `swap.load(app_id)` backed by `/sd/pinhos/.swap/` with automatic stale-swap pruning and corruption checks.
+- [ ] **1.6 Deployment & Automated Self-Test Gate (`picocalc.ps1` & `tests/selftest.py`):**
+  - Ensure `.\picocalc.ps1 upload_and_start` cleanly deploys files over `mpremote` (`VID_2E8A`) and triggers a soft reset.
+  - Implement `tests/selftest.py` (`.\picocalc.ps1 test`) verifying: HAL display/I2C/SD init, swap R/W roundtrip, sandbox module cleanup (`< 2048 bytes` SRAM leak tolerance), and simulated 3-strike safe-mode trigger.
 
-### Phase 2: GitHub OTA Updater, Instant Rollback & Immutable Bootloader
+---
 
-**Goal:** Enable self-updating over Wi-Fi with zero-brick recovery.
+### Phase 2: Dual-UI Engine & Unified Theme System
+- [ ] **2.1 Unified Theme Loader (`ui/theme.py` & `themes/`):**
+  - Load and validate JSON themes with automatic fallback to built-in `amber_phosphor` if a theme file is malformed.
+  - Precompute 16-entry RGB565 LUT arrays for Native Mode and style structs for LVGL Mode.
+  - Ship default themes: `amber_phosphor.json`, `cyber_cyan.json`, `matrix_green.json`, and `high_contrast.json`.
+- [ ] **2.2 Native Pixel Renderer (`ui/native/`):**
+  - Implement 4-bit indexed framebuffer (`320×320 / 2 = 51,200 bytes`) with `@micropython.viper` LUT-to-RGB565 scanline blitter for smooth 60 FPS UI updates.
+  - Render signature pixel-art PinhOS pine tree boot splash + system status summary (`SRAM`, `SWAP`, `BOOT`, `WIFI`).
+  - Build lightweight keyboard-first widget toolkit (status header, scrollable list/grid launcher, modal dialogs, text input prompt, hotkey footer bar).
+- [ ] **2.3 LVGL Desktop Shell (`ui/lvgl/`):**
+  - Build windowed desktop environment utilizing compiled C LVGL bindings: top status bar, left/grid app icon dock, floating `SYS TELEMETRY` (CPU/RAM/BAT bars) and `QUICK NOTES` cards, and bottom taskbar.
+  - Bind theme engine dynamically so switching themes updates LVGL styles live without rebooting.
+- [ ] **2.4 Seamless UI Mode Switcher:**
+  - Allow switching between Native Mode and LVGL Desktop Mode on the fly with deterministic buffer deallocation (`del fb` / `lv.deinit()` + `gc.collect()`) to prevent heap collisions.
 
-* [ ] **GitHub OTA (`net/ota.py`):** Query GitHub Releases/Trees APIs filtered by SemVer channel (`STABLE`, `BETA`, `DEV`), verify SHA hashes so only changed files are fetched, stream-download to staging, and atomically swap into `/sd/pinhos/`.
-* [ ] **Offline `.versions/` Snapshots:** Archive prior working `/sd/pinhos/` builds into `/sd/pinhos/.versions/<ver>/` (retaining last 2) for 1-click offline rollback.
-* [ ] **Immutable Flash Bootloader (`tools/build_boot_uf2.sh` & `tools/setup_persistent_boot.py`):** Flash-resident `boot.py`/`main.py` stub that mounts `/sd`, checks 3-strike boot failure counter, and boots `/sd/pinhos/main.py` (or enters Safe Mode recovery shell).
-* [ ] **Phase 2 Regression Hook (`tests/selftest.py`):** Append `test_ota_and_rollback()` to validate `version.json` SemVer parsing and `.versions/` snapshot/rollback dry-runs.
+---
 
-### Phase 3: Theme-Synced WebPortal, App Studio & File Associations
+### Phase 3: Built-In BusyBox CLI & Field Utilities (`tools/`)
+- [ ] **3.1 Interactive Shell (`tools/shell.py`):**
+  - Command-line REPL with command history, path tab-completion, environment variables, and core UNIX-style commands (`ls`, `cd`, `cat`, `cp`, `mv`, `rm`, `mkdir`, `df`, `free`, `ps`, `uname`, `reboot`).
+- [ ] **3.2 File Manager (`tools/files.py`):**
+  - Keyboard-driven file browser across `/sd/` and internal flash with file size/timestamp metadata, copy/move/rename/delete operations, built-in text/JSON viewer, and hex dump inspector.
+- [ ] **3.3 Network & Hardware Field Utilities (`tools/net_tools.py` & `tools/uart_term.py`):**
+  - **Net Probes:** Raw ICMP `ping` with RTT stats, fast async TCP port scanner, local subnet host sweep, Wake-on-LAN (`WoL`) magic packet sender, and DNS resolver.
+  - **UART Serial Console:** Hardware UART terminal (`boards/` UART pins) with configurable baud rates (`9600` to `921600`), `8N1` framing options, ASCII/Hex display toggle, SD session logging, and programmable F-key macro strings.
+- [ ] **3.4 System Monitor & Settings (`tools/sysmon.py`):**
+  - Live SRAM free/allocated sparkline, GC cycle counter, RP2350 internal temperature & CPU frequency readout, SD read/write speed benchmark, backlight brightness slider, and UI/theme switcher.
 
-**Goal:** Full browser-based control, live code execution, and file associations.
+---
 
-* [ ] **Theme-Synced WebPortal (`web/server.py` & `portal.html`):** Inject active `themes/*.json` colors into `:root` CSS variables; provide real-time `<canvas>` screen mirror (matching `board.WIDTH × board.HEIGHT`), virtual D-Pad/`F1`–`F10` input, and SD file manager (matching `docs/mockups/webportal_studio.jpg`).
-* [ ] **App Developer Studio (`apps/studio.py`):** Browser + on-device Python editor, drag-and-drop upload, `dev_watch.ps1` USB hot-push, and isolated sandbox runner (`core/sandbox.py`) with live console streaming.
-* [ ] **Scratchpad Notes:** Lightweight Markdown/text notes synced between PicoCalc and WebPortal.
-* [ ] **File Commander Enhancements (`apps/files.py`):** `F5` file/metadata inspector, custom extension-to-app associations (`APP_META["ext"]` + `Open With...`), `F10`/`Ctrl+P` `.bmp` framebuffer screenshots, and storage analyzer.
-* [ ] **Phase 3 Regression Hook (`tests/selftest.py`):** Append `test_webportal_auth_and_studio()` to verify `TEST_AUTH` PIN/token rejection vs. acceptance and sandboxed Studio execution.
+### Phase 4: WebPortal Browser IDE (`web/`)
+- [ ] **4.1 Embedded Async Web Server (`web/server.py`):**
+  - Non-blocking `uasyncio` HTTP server running alongside the UI loop with configurable port and 6-digit PIN / session token authentication.
+- [ ] **4.2 Browser IDE & Telemetry Workspace (`web/static/`):**
+  - Zero-dependency lightweight web frontend served directly from the PicoCalc.
+  - **File Explorer:** Browse, upload, download, rename, and delete files on `/sd/` and flash.
+  - **Live Code & Theme Editor:** Edit `.py` apps or `.json` themes in the browser, save directly to SD, and trigger remote execution inside `core/sandbox.py` with live stdout/traceback streaming.
+  - **Device Dashboard:** Live SRAM/battery/Wi-Fi telemetry and on-demand framebuffer screenshot capture (`PNG`/`BMP`).
 
-### Phase 4: Dual-Backend Graphics (`NATIVE` + `LVGL`), Theme Engine & Desktop Mode
+---
 
-**Goal:** Support both ultra-fast 16-color LUT and smooth LVGL rendering from a single JSON theme system.
+### Phase 5: Wi-Fi Manager, GitHub OTA & App/Theme Store (`net/`)
+- [ ] **5.1 Wi-Fi Manager (`net/wifi.py`):**
+  - Multi-network credential store (`wifi.json`), signal strength scanner, non-blocking auto-reconnect, and automatic SoftAP hotspot fallback (`PinhOS-Setup`) for headless field configuration via WebPortal.
+- [ ] **5.2 GitHub OTA Updater (`net/ota.py`):**
+  - Fetch remote `version.json` and file manifest from configured GitHub release/branch.
+  - Download changed files into `/sd/pinhos/.ota_staging/`, verify SHA-256 digests, atomically swap into place, and leverage Phase 1's 3-strike Boot Guard for automatic recovery if an update fails to boot.
+- [ ] **5.3 GitHub App & Theme Store (`net/store.py`):**
+  - Fetch curated catalog index (`store_index.json`) of community applets and JSON themes.
+  - Display category filters, version tags, `min_sram` compatibility badges, and one-click install/update/remove into `/sd/pinhos/apps/` and `/sd/pinhos/themes/`.
 
-* [ ] **Unified Theme Engine (`ui/themes.py`):** Parse `themes/*.json` (`id`, `name`, `layout`, `font_scale`, `lvgl.*`, 12 semantic `colors.*`) into Native 16-color RGB565 LUTs, LVGL `lv.style_t` styles, and WebPortal CSS tokens. Sync `/themes` from GitHub.
-* [ ] **Cooperative SD Swap (`core/swap.py`):** Spill cold logs, terminal scrollback, and store caches to `/sd/pinhos/.swap/` before initializing LVGL or launching heavy apps.
-* [ ] **Optional LVGL Backend (`ui/lvgl_backend.py`):** Render `MOSAIC` 6-card grid and anti-aliased widgets when `ui_backend == "LVGL"`, automatically falling back to `NATIVE` if `lvgl` module is absent or free SRAM is below threshold.
-* [ ] **Optional Desktop Mode (`ui/desktop.py`):** Icon workspace (`Term`, `Files`, `Studio`, `Lab`, `MP3`, `Notes`), floating telemetry/notes widgets, and bottom taskbar (`[PINHOS]` launcher, active app indicator, clock/telemetry) toggleable as the default home screen (also respected on Sleep/Wake reset), configurable `F1`–`F10` multi-page hotkeys, and idle screensaver.
-* [ ] **Phase 4 Regression Hook (`tests/selftest.py`):** Append `test_themes_and_ui_fallback()` to compile all `themes/*.json` presets into RGB565 LUTs/CSS tokens and verify graceful `LVGL -> NATIVE` fallback under low SRAM.
+---
 
-### Phase 5: Cyberdeck Field Toolkit & Hardware Lab
+### Phase 6: Bluetooth 5.2 HID Host & Peripherals (`net/ble.py`)
+- [ ] **6.1 BLE Central & Device Pairing:**
+  - Utilize CYW43439 `ubluetooth` (NimBLE) to scan, pair, bond, and auto-reconnect with standard BLE HID peripherals (full-size keyboards, mini trackballs/mice, wireless barcode/RFID scanners).
+- [ ] **6.2 Unified Input Multiplexer:**
+  - Merge incoming BLE HID keycodes and relative pointer events into the `boards/` input queue so external wireless peripherals work transparently across Native Mode, LVGL Desktop Mode, and all sandboxed apps.
 
-**Goal:** Turn PicoCalc into a standalone network and hardware diagnostic tool.
+---
 
-* [ ] **BusyBox Network Suite (`apps/shell.py`):** Non-blocking TCP port scanner (`scan`), Wake-on-LAN magic packet sender (`wol`), `nslookup`, `ifconfig`, `dmesg`, and `py` REPL evaluator.
-* [ ] **Serial UART Console (`minicom` mode):** Interactive UART terminal over exposed `UART0`/`UART1` pins (`9600`–`921600` baud) with `/sd` session logging.
-* [ ] **Hardware & Diagnostics Lab (`apps/lab.py`):** Live GPIO/Pinout inspector (`IN`/`OUT`/`ADC`), I2C bus scanner, PWM / square-wave signal generator (`1 Hz`–`100 kHz`), crash forensics viewer, and background RTC Pomodoro/Alarm timer.
-* [ ] **USB / SD Transfer Bridge:** Expose `/sd` over USB Mass Storage (when supported by firmware) or high-speed WebPortal transfer.
-* [ ] **Phase 5 Regression Hook (`tests/selftest.py`):** Append `test_toolkit_and_lab()` to verify BusyBox TCP `ping`/port scan non-blocking timeouts and PWM/GPIO state cleanup.
+## 4. Release `v1.1.0` — Power & Native Performance
 
-### Phase 6: Bluetooth BLE 5.2 Peripheral Support
+### Phase 7: Multi-UF2 Chainloader & Dynamic C `.mpy` Engine
+- [ ] **7.1 Multi-UF2 SD Card Chainloader:**
+  - Scan `/sd/firmwares/*.uf2`, parse UF2 block headers, target flash offsets, and RP2350 architecture family IDs (`0xe48bff59` ARM Cortex-M33 vs `0xe48bff5a` RISC-V Hazard3).
+  - Implement safe flash loader stub to boot bare-metal C firmwares (emulators, Doom, standalone RF/logic tools) directly from SD, returning cleanly to PinhOS on power-cycle.
+- [ ] **7.2 Dynamic Native C Modules (`.mpy` / `py/dynruntime.h`):**
+  - Establish cross-compilation toolchain and manifest schema (`"arch": "armv7emsp"`) for drop-in `.mpy` native binaries stored alongside Python app wrappers in `/sd/pinhos/apps/<app>/`.
+  - Deliver reference C-accelerated MP3 audio decoder (`mp3dec.mpy` + `apps/mp3_player.py` driving `machine.I2S` DMA), fast FFT spectrum visualizer, and checksum/crypto primitives.
 
-**Goal:** Pair wireless keyboards, mice, and gamepads directly to the Pico 2W's CYW43439 chip without starving SRAM or Wi-Fi.
+---
 
-* [ ] **Unified Input Router (`core/input.py`):** Consolidate keystrokes and pointer deltas from the active `boards/` HAL, WebPortal virtual input, and BLE HID devices into a single event queue.
-* [ ] **BLE HID Central (`net/ble.py`):** Scan, pair, and bond with BLE HID over GATT (HOGP) keyboards, mice (driving the Desktop Mode cursor), and gamepads using `ubluetooth`/`aioble`, persisting bonded MAC addresses and LTK keys in `config.json`.
-* [ ] **Radio & SRAM Coexistence Mode:** Add `Bluetooth & Peripherals` under `System, Network & OTA`, a top-bar `BT` status badge alongside `Wi-Fi` and `LNK`, and an optional **Radio Exclusive / Swap** toggle that spills cold buffers via `core/swap.py` when BLE and Wi-Fi run concurrently.
-* [ ] **Phase 6 Regression Hook (`tests/selftest.py`):** Append `test_ble_hid_coexistence()` to verify BLE HID report injection into `core/input.py` and SRAM swap stability alongside Wi-Fi.
+## 5. Release `v1.2.0` — Commercial Packaging & IP Protection
 
-## Post-Release Expansion (`v1.1.0` & `v1.2.0`)
-
-### Phase 7: Multi-UF2 Chainloader & Native `.mpy` Engine (`v1.1.0`)
-
-**Goal:** Launch standalone bare-metal PicoCalc `.uf2`/`.bin` firmwares (such as Doom, retro emulators, or Forth) and compiled C `.mpy` modules directly from PinhOS without overwriting the OS or losing user data.
-
-* [ ] **Protected 3-Slot Flash Layout & Boot Chainloader:**
-  * **Slot 0 (`0x10000000`):** Protected C chainloader bootloader.
-  * **Slot 1 (`0x10020000`):** PinhOS MicroPython runtime.
-  * **Slot 2 (`0x10200000+`):** Ephemeral payload slot for external `.uf2`/`.bin` images.
-* [ ] **`/sd/firmwares/` Launcher & `.boot_once` Handoff:** Browse standalone PicoCalc payloads inside PinhOS, validate `.uf2` target address safety & CRC32 (avoiding redundant flash writes when re-launching the same payload), write `/sd/pinhos/.boot_once`, and reboot into Slot 2. Power-cycling or pressing Reset automatically clears `.boot_once` and returns cleanly to PinhOS.
-* [ ] **Native C Dynamic Modules (`.mpy`):** Support loading `armv7emsp` compiled `.mpy` game/DSP engines (e.g., real-time MP3 audio decoding, DSP, fast blitters) inside `/sd/pinhos/apps/` that render directly into `board.display` and exit cleanly back to PinhOS on `ESC`.
-* [ ] **Phase 7 Regression Hook (`tests/selftest.py`):** Append `test_chainloader_manifest_and_mpy()` to verify `.uf2` header/offset safety checks and `.boot_once` atomic cleanup.
-
-### Phase 8: Commercial Packaging, Frozen Firmware & Hardware Licensing (`v1.2.0`)
-
-**Goal:** Enable commercial distribution of turnkey field-tool editions and paid "Pro Field Packs" with hardware-backed IP protection while keeping the community App Store open.
-
-* [ ] **Frozen Bytecode Firmware Build (`tools/build_commercial_uf2.sh`):** Freeze core PinhOS modules (`boards/`, `core/`, `ui/`, `net/`, `web/`) and proprietary Pro apps into XIP flash via `mpy-cross` + `manifest.py`, leaving zero core source code on the SD card while reclaiming SRAM.
-* [ ] **RP2350 Secure Boot & OTP Hardware Licensing (`core/license.py`):** Provision unique device secrets in RP2350 One-Time Programmable (OTP) memory with Secure Boot enabled, validating signed `/sd/pinhos/license.key` files bound to `machine.unique_id()` on boot.
-* [ ] **Encrypted Pro Field Packs (`.mpy.enc`):** Support AES-encrypted compiled `.mpy` plugin packages downloaded over Wi-Fi and decrypted strictly in SRAM using keys derived from the device's OTP secret and `unique_id()`, preventing SD card cloning and plaintext extraction.
-* [ ] **Phase 8 Regression Hook (`tests/selftest.py`):** Append `test_licensing_and_encrypted_mpy()` to verify signature rejection on mismatched chip IDs and in-memory `.mpy.enc` decryption/sandbox cleanup.
+### Phase 8: Frozen Core Firmware, Hardware Licensing & Encrypted Pro Packs
+- [ ] **8.1 Frozen `.mpy` Core Bytecode (`manifest.py`):**
+  - Pre-compile proprietary `core/`, `ui/`, `boards/`, and commercial Pro applets via `mpy-cross` directly into a custom RP2350 `.uf2` firmware image.
+  - Execute frozen bytecode directly from QSPI flash (XIP)—eliminating plain-text core source code from the FAT32 SD card while freeing significant SRAM heap.
+- [ ] **8.2 RP2350 Hardware-Locked Licensing:**
+  - Provision a read-locked cryptographic salt into RP2350 One-Time Programmable (OTP) fuses paired with RP2350 Secure Boot signature enforcement.
+  - Validate signed `/sd/pinhos/license.key` files bound to the target chip's 64-bit `machine.unique_id()` (Ed25519 / HMAC-SHA256) to prevent SD card cloning and unauthorized `.uf2` redistribution.
+- [ ] **8.3 Encrypted OTA Pro Field Packs:**
+  - Package specialized commercial vertical suites (e.g., NetOps/NOC switch-port & VLAN audit pack, industrial Modbus/CAN diagnostics) as AES-encrypted `.mpy` bundles.
+  - Decrypt licensed Pro modules strictly into volatile SRAM at runtime via `cryptolib` using keys derived from the RP2350 OTP secret + `unique_id()`, ensuring unencrypted bytecode never touches the SD card.
