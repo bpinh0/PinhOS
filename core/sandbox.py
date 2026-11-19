@@ -395,13 +395,15 @@ class ResourceTracker:
 class AppContext:
     """Runtime context passed to sandboxed `main(ctx)` entry points."""
 
-    def __init__(self, meta, board=None, config=None, swap=None, logger=None, tracker=None, args=None):
+    def __init__(self, meta, board=None, config=None, swap=None, logger=None, tracker=None, args=None, theme=None, ui=None):
         self.meta = meta
         self.app_id = meta.get("id", "unknown")
         self.board = board
         self.config = config
         self.swap = swap
         self.logger = logger
+        self.theme = theme
+        self.ui = ui
         self._tracker = tracker
         self.args = args or {}
 
@@ -441,11 +443,13 @@ class SandboxRunner:
     4. Guaranteed finally: cleanup (handle closure, module purge, HAL restore, GC).
     """
 
-    def __init__(self, board=None, config=None, swap=None, logger=None):
+    def __init__(self, board=None, config=None, swap=None, logger=None, theme=None, ui=None):
         self.board = board
         self.config = config
         self.swap = swap
         self.logger = logger
+        self.theme = theme
+        self.ui = ui
 
     def inspect(self, app_path):
         return inspect_app(app_path)
@@ -527,6 +531,8 @@ class SandboxRunner:
             logger=self.logger,
             tracker=tracker,
             args=args,
+            theme=self.theme,
+            ui=self.ui,
         )
 
         app_globals = {
@@ -605,6 +611,8 @@ class SandboxRunner:
             ctx.config = None
             ctx.swap = None
             ctx.logger = None
+            ctx.theme = None
+            ctx.ui = None
             ctx = None
             tracker = None
 
