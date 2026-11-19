@@ -1,7 +1,7 @@
 # 🌲 PinhOS — Architectural Specification & Engineering Roadmap
 
 > **Target Platform:** ClockworkPi PicoCalc (Raspberry Pi Pico 2W / RP2350 — Dual ARM Cortex-M33 @ 150 MHz, 520 KB SRAM, 4 MB Flash, CYW43439 Wi-Fi 4 + BLE 5.2, 320×320 SPI LCD, I2C STM32 Southbridge, SPI microSD).  
-> **Current Status:** Active Development — `v1.0.0` (Phase 1 next).
+> **Current Status:** Active Development — `v1.0.0-alpha.1` (**Phase 1 Complete & Verified 5/5 on Hardware** + Custom RP2350 Cold-Boot UF2; **Phase 2 next**).
 
 ---
 
@@ -71,27 +71,31 @@ def main(ctx):
 ## 3. Release `v1.0.0` — Foundation & Daily Driver *(Active)*
 
 ### Phase 1: Hardware Abstraction, Boot Guard & Resilient Runtime
-- [ ] **1.1 Canonical Filesystem & Manifest (`version.json`):**
+- [x] **1.1 Canonical Filesystem & Manifest (`version.json`):**
   - Initialize `/sd/pinhos/` directory hierarchy (`boards/`, `core/`, `ui/`, `net/`, `web/`, `tools/`, `apps/`, `themes/`, `.swap/`, `logs/`).
   - Create `version.json` containing semantic version, build timestamp, target architecture (`armv7emsp`), and OTA channel metadata.
-- [ ] **1.2 Board Hardware Abstraction Layer (`boards/`):**
+- [x] **1.2 Board Hardware Abstraction Layer (`boards/`):**
   - `boards/base.py`: Define abstract base class and capability flags for display (`320x320` RGB565 blit/fill), keyboard/pointer input queue, microSD mount/unmount, battery voltage/percentage/charging state, PWM backlight (`0–100%`), PWM/I2S audio, and RTC.
   - `boards/picocalc.py`: Full hardware driver for ClockworkPi PicoCalc (SPI LCD controller, I2C STM32 southbridge keyboard scan + modifier decoding + battery registers, SPI SD card mount with retry logic, keyboard & screen backlight PWM).
   - `boards/generic_spi.py`: Configurable fallback driver for bare Pico 2W setups using standard ST7789/ILI9341 SPI displays and I2C CardKB keyboards.
   - Board auto-detection / `config.json` profile selector at boot.
-- [ ] **1.3 Crash-Proof 3-Strike Boot Guard (`main.py`):**
+- [x] **1.3 Crash-Proof 3-Strike Boot Guard (`main.py`):**
   - Read and increment `boot_strikes` in persistent flash state prior to mounting SD or importing UI/network modules.
   - Reset `boot_strikes = 0` only after the main event loop runs cleanly for `5 seconds` (or upon explicit self-test pass).
   - Trigger **Safe Recovery Mode** when `boot_strikes >= 3`: boots with minimal framebuffer text output, USB serial REPL access, and a stripped-down emergency WebPortal to restore configs or roll back OTA updates.
-- [ ] **1.4 Sandboxed App Runner (`core/sandbox.py`):**
+- [x] **1.4 Sandboxed App Runner (`core/sandbox.py`):**
   - Parse `APP_META` safely without executing top-level app logic; verify `gc.mem_free() >= min_sram`.
   - Snapshot `set(sys.modules.keys())` and track opened file/socket wrappers before invoking `main(ctx)`.
   - In a guaranteed `finally:` block on normal exit or unhandled exception: close leaked descriptors, delete all newly imported modules from `sys.modules`, restore display/input state, and run `gc.collect()`.
-- [ ] **1.5 Cooperative Swap Manager (`core/swap.py`):**
+- [x] **1.5 Cooperative Swap Manager (`core/swap.py`):**
   - Provide `swap.save(app_id, state_dict)` and `swap.load(app_id)` backed by `/sd/pinhos/.swap/` with automatic stale-swap pruning and corruption checks.
-- [ ] **1.6 Deployment & Automated Self-Test Gate (`picocalc.ps1` & `tests/selftest.py`):**
-  - Ensure `.\picocalc.ps1 upload_and_start` cleanly deploys files over `mpremote` (`VID_2E8A`) and triggers a soft reset.
-  - Implement `tests/selftest.py` (`.\picocalc.ps1 test`) verifying: HAL display/I2C/SD init, swap R/W roundtrip, sandbox module cleanup (`< 2048 bytes` SRAM leak tolerance), and simulated 3-strike safe-mode trigger.
+- [x] **1.6 Deployment & Automated Self-Test Gate (`picocalc.ps1` & `tests/selftest.py`):**
+  - Ensure `.\picocalc.ps1 upload_and_start` cleanly deploys files over `COM4` Raw REPL (with per-chunk write & signature verification) or `mpremote` and streams the 5s Boot Guard stabilization window.
+  - Implement `tests/selftest.py` (`.\picocalc.ps1 test`) verifying: HAL display/I2C/SD init, swap R/W roundtrip, sandbox module cleanup (`< 2048 bytes` SRAM leak tolerance), and simulated 3-strike safe-mode trigger (**5/5 PASS verified on PicoCalc hardware**).
+- [x] **1.7 Custom RP2350 Auto-Boot Base Firmware (`firmware/`):**
+  - Reproducible WSL2/Linux build pipeline (`firmware/build_uf2.sh`) compiling MicroPython `v1.25.0` (`RPI_PICO2_W`) + `picocalcdisplay` & `vtterminal` C modules into `firmware/dist/pinhos-picocalc-pico2w.uf2`.
+  - Frozen early-boot router (`firmware/frozen/_boot.py` & `pinhos_boot.py`) that initializes `PicoDisplay(320, 320)`, `PicoKeyboard()`, and `PicoSD()`, auto-attaches `UART(0)` (`COM4`), and cold-boots straight into `/sd/pinhos/main.py`.
+  - Built-in boot hotkeys: hold `ESC`/`F1` during splash to drop into MicroPython REPL, or `F2` to open the Phase 7-ready **Dual-Boot Manager** (`PinhOS`, `REPL`, `Reset Strikes`, `/sd/firmwares/*.uf2` scanner).
 
 ---
 

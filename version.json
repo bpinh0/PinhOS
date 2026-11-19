@@ -1,0 +1,32 @@
+{
+  "name": "PinhOS",
+  "version": "1.0.0-alpha.1",
+  "phase": 1,
+  "codename": "Foundation",
+  "build_timestamp": "2026-11-18T17:30:00Z",
+  "build_id": "20261118.1",
+  "arch": "armv7emsp",
+  "mcu": "RP2350",
+  "sram_kb": 520,
+  "board_default": "picocalc",
+  "ota": {
+    "channel": "alpha",
+    "repo": "PinhOS/PinhOS",
+    "branch": "main",
+    "manifest_url": "https://raw.githubusercontent.com/PinhOS/PinhOS/main/version.json"
+  },
+  "directories": [
+    "/sd/pinhos",
+    "/sd/pinhos/boards",
+    "/sd/pinhos/core",
+    "/sd/pinhos/ui",
+    "/sd/pinhos/net",
+    "/sd/pinhos/web",
+    "/sd/pinhos/tools",
+    "/sd/pinhos/apps",
+    "/sd/pinhos/themes",
+    "/sd/pinhos/.swap",
+    "/sd/pinhos/logs",
+    "/sd/pinhos/tests"
+  ]
+}
