@@ -395,6 +395,100 @@ def test_boot_guard(root="/sd/pinhos"):
     return "3-strike Safe Mode & >5s reset verified"
 
 
+def test_input_and_boot_router(root="/sd/pinhos"):
+    """
+    Gate 6: Verify non-blocking keyboard polling, PicoKeyboard.temp buffer integrity,
+    and frozen pinhos_boot version.json + Boot Menu Up/Down + Ctrl+C stress stability.
+    """
+    import time
+    from boards import get_board
+    from core.config import load_version_manifest
+
+    board = get_board()
+
+    # 1. Verify PicoKeyboard scratch buffer integrity before/after clear_input + poll_key
+    kb = getattr(board, "_kb", None)
+    if kb is not None and hasattr(kb, "temp"):
+        _assert(len(kb.temp) == 2, "PicoKeyboard.temp corrupted before poll: len={}".format(len(kb.temp)))
+
+    board.clear_input()
+    t0 = time.ticks_ms() if hasattr(time, "ticks_ms") else int(time.time() * 1000)
+    for _ in range(5):
+        board.poll_key()
+    t1 = time.ticks_ms() if hasattr(time, "ticks_ms") else int(time.time() * 1000)
+    elapsed_ms = time.ticks_diff(t1, t0) if hasattr(time, "ticks_diff") else (t1 - t0)
+    _assert(elapsed_ms < 400, "board.poll_key() blocked ({}ms for 5 polls)".format(elapsed_ms))
+
+    if kb is not None and hasattr(kb, "temp"):
+        _assert(len(kb.temp) == 2, "PicoKeyboard.temp corrupted after poll: len={}".format(len(kb.temp)))
+
+    # 2. Verify frozen pinhos_boot module (when running on RP2350 UF2 firmware)
+    boot_note = "no frozen boot"
+    try:
+        import pinhos_boot
+    except Exception:
+        pinhos_boot = None
+
+    if pinhos_boot is not None:
+        manifest = load_version_manifest(root=root)
+        pinhos_boot._cached_ver = None
+        os_ver, fw_ver = pinhos_boot._load_version_info()
+        _assert(
+            os_ver == manifest.get("version"),
+            "pinhos_boot version mismatch: {} != {}".format(os_ver, manifest.get("version")),
+        )
+        if manifest.get("firmware_version"):
+            _assert(
+                fw_ver == manifest.get("firmware_version"),
+                "pinhos_boot fw mismatch: {} != {}".format(fw_ver, manifest.get("firmware_version")),
+            )
+
+        # Verify set_progress renders cleanly
+        pinhos_boot._splash_drawn = False
+        pinhos_boot.set_progress(50, "Gate 6 Self-Test...")
+        pinhos_boot._splash_drawn = False
+
+        # Stress-test Boot Menu: 20 rapid Up/Down events + Ctrl+C (0xA5 + 0x63)
+        gc.collect()
+        m0 = gc.mem_free() if hasattr(gc, "mem_free") else 262144
+
+        class _MockKB:
+            def __init__(self):
+                self.n = 0
+
+            def keyEvent(self):
+                self.n += 1
+                if self.n <= 10:
+                    return (1, 0xB6)  # DOWN
+                if self.n <= 20:
+                    return (1, 0xB5)  # UP
+                if self.n == 21:
+                    return (1, 0xA5)  # CTRL press
+                if self.n == 22:
+                    return (1, 0x63)  # 'c' press -> CTRL_C
+                if self.n == 23:
+                    return (3, 0xA5)  # CTRL release
+                return None
+
+        ctrl_c_caught = False
+        try:
+            pinhos_boot._show_boot_menu(_MockKB())
+        except KeyboardInterrupt:
+            ctrl_c_caught = True
+        finally:
+            pinhos_boot._ctrl_held = False
+            pinhos_boot._splash_drawn = False
+
+        _assert(ctrl_c_caught, "Boot Menu did not interrupt on Ctrl+C (0xA5 + 0x63)")
+        gc.collect()
+        m1 = gc.mem_free() if hasattr(gc, "mem_free") else 262144
+        delta = m0 - m1
+        _assert(delta < 2048, "Boot Menu SRAM leak too high: {}B".format(delta))
+        boot_note = "UF2 {} + Menu/Ctrl+C OK ({}B)".format(fw_ver, delta)
+
+    return "poll={}ms, {}".format(elapsed_ms, boot_note)
+
+
 def run_all(root="/sd/pinhos", interactive_wait=False):
     from boards import get_board
 
@@ -407,6 +501,7 @@ def run_all(root="/sd/pinhos", interactive_wait=False):
         ("3. Swap Manager & Core Helpers", test_swap_and_core),
         ("4. Sandbox Isolation & SRAM Gate", test_sandbox_isolation),
         ("5. 3-Strike Boot Guard & Recovery", test_boot_guard),
+        ("6. Input & Boot Router Integrity", test_input_and_boot_router),
     ]
 
     _bp("=== PinhOS v1.0.0-alpha.1 Phase 1 Self-Test Suite ===")
@@ -443,13 +538,13 @@ def run_all(root="/sd/pinhos", interactive_wait=False):
                 7,
                 0,
             )
-            y = 30
+            y = 28
             for label, ok, detail in results:
                 tag = "[PASS]" if ok else "[FAIL]"
                 col = 10 if ok else 9
                 board.text("{} {}".format(tag, label[:30]), 8, y, col)
-                board.text("  " + str(detail)[:36], 8, y + 13, 15)
-                y += 45
+                board.text("  " + str(detail)[:36], 8, y + 12, 15)
+                y += 38
             free_kb = (gc.mem_free() // 1024) if hasattr(gc, "mem_free") else 256
             board.fill_rect(0, 272, 320, 22, 8)
             if interactive_wait:

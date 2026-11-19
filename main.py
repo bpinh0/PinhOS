@@ -324,11 +324,24 @@ def enter_safe_recovery_mode(board=None, state=None, reason=None, state_path=Non
     bp("<<PINHOS:SAFE_RECOVERY_MODE:strikes={}>>".format(state.get("boot_strikes", 3)))
 
     if interactive and board is not None:
+        # Debounce & drain stale ESC/F1/ENTER key-hold events from boot splash or Boot Menu
+        _sleep_ms(220)
         board.clear_input()
+        poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
+        if poll_fn:
+            for _ in range(16):
+                if poll_fn() is None:
+                    break
+                _sleep_ms(10)
+        board.clear_input()
+        ticks = 0
         try:
             while True:
-                poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
-                k = poll_fn() if poll_fn else None
+                try:
+                    k = poll_fn() if poll_fn else None
+                except Exception as e:
+                    bp("[RECOVERY_KB_ERR]", repr(e))
+                    k = None
                 if k:
                     ku = str(k).upper()
                     if ku in ("ENTER", "SPACE", " ", "R"):
@@ -343,10 +356,23 @@ def enter_safe_recovery_mode(board=None, state=None, reason=None, state_path=Non
                     if ku in ("ESC", "Q", "BACKSPACE", "BACK"):
                         board.beep(800, 15)
                         bp("[RECOVERY] Exiting Safe Recovery screen to REPL.")
+                        board.fill_rect(10, 276, 300, 30, 10)
+                        board.text("REPL ACTIVE (>>>) | COM4 READY", 32, 287, 0)
+                        board.show()
                         break
+                ticks += 1
+                if ticks >= 40:
+                    ticks = 0
+                    gc.collect()
                 _sleep_ms(30)
         except KeyboardInterrupt:
-            pass
+            bp("[RECOVERY] Interrupted via COM4 Ctrl+C; returning to REPL.")
+            try:
+                board.fill_rect(10, 276, 300, 30, 10)
+                board.text("REPL ACTIVE (>>>) | COM4 READY", 32, 287, 0)
+                board.show()
+            except Exception:
+                pass
 
     return {
         "mode": "SAFE_RECOVERY",
@@ -357,7 +383,7 @@ def enter_safe_recovery_mode(board=None, state=None, reason=None, state_path=Non
 
 
 _PHASE1_ACTIONS = (
-    "Run 5/5 On-Device Self-Test",
+    "Run 6/6 On-Device Self-Test",
     "Run Sandbox App: Hello PinhOS",
     "Run Sandbox App: Matrix Rain",
     "Refresh Telemetry & Beep",
@@ -524,7 +550,7 @@ def ui_loop(sel_action=0):
                     res = _st.run_all(interactive_wait=True)
                     _drain_keys(150)
                     status_msg = "Self-Test {}/{} {}".format(
-                        res.get("passed", 0), res.get("total", 5), "PASS" if res.get("ok") else "FAIL"
+                        res.get("passed", 0), res.get("total", 6), "PASS" if res.get("ok") else "FAIL"
                     )
                     _draw_phase1_boot_screen(board, manifest, boot_state, BOOT_STABLE_MS, True, sel_action, status_msg)
 
@@ -566,6 +592,20 @@ def ui_loop(sel_action=0):
         bp("[UI] Interrupted via serial Ctrl+C; returning to REPL.")
 
 
+def _boot_progress(pct, msg, pause_ms=0, clear_splash=False):
+    """Advance the frozen pinhos_boot splash progress bar if active during cold boot."""
+    pb = sys.modules.get("pinhos_boot")
+    if pb is not None and getattr(pb, "_splash_drawn", False) and hasattr(pb, "set_progress"):
+        try:
+            pb.set_progress(pct, msg)
+            if pause_ms > 0:
+                _sleep_ms(pause_ms)
+            if clear_splash:
+                pb._splash_drawn = False
+        except Exception:
+            pass
+
+
 def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_strike_increment=False, interactive=False):
     """
     Main Phase 1 boot sequence:
@@ -602,6 +642,7 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
             board.init_uart_bridge()
         board.mount_sd("/sd", retries=3)
         runtime_state["board"] = board
+        _boot_progress(95, "Board HAL & SD Ready...")
 
         # Step 4: Initialize canonical /sd/pinhos/ filesystem hierarchy & core services
         from core.config import ensure_canonical_dirs, load_version_manifest, ConfigManager
@@ -644,6 +685,7 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
         )
         logger.info(boot_msg)
         bp("[BOOT]", boot_msg)
+        _boot_progress(100, "PinhOS Ready!", pause_ms=180, clear_splash=True)
 
         # Step 5: Render initial boot screen and monitor 5-second stability window
         elapsed = _ticks_diff(_ticks_ms(), t0)
