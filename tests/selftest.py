@@ -1,0 +1,502 @@
+# PinhOS Phase 1 — Automated On-Device Self-Test Gate (tests/selftest.py)
+# Invoked via `.\picocalc.ps1 test` to verify:
+# 1. Canonical Layout & version.json Manifest
+# 2. HAL Init (Display, I2C Keyboard/Modifiers/Battery, SPI SD, Backlight, GenericSPI fallback)
+# 3. Cooperative .swap/ R/W Roundtrip, Corruption Recovery & Core Helpers
+# 4. Sandbox APP_META Static Inspection, Handle Leak Closure, Module Purge & SRAM Reclamation (< 2048 B)
+# 5. 3-Strike Boot Guard & Safe Recovery Mode Trigger Logic
+
+import os
+import sys
+import gc
+import json
+
+for _p in (".", "/", "/sd/pinhos"):
+    if _p in sys.path:
+        sys.path.remove(_p)
+    sys.path.insert(0, _p)
+
+def _bp(*args):
+    """Write test output via board.serial_print() (zero hardcoded pins in selftest.py)."""
+    try:
+        from boards import get_board
+        b = get_board()
+        if hasattr(b, "serial_print"):
+            b.serial_print(*args)
+            return
+    except Exception:
+        pass
+    print(" ".join(str(a) for a in args))
+
+
+def _assert(cond, msg):
+    if not cond:
+        raise AssertionError(msg)
+
+
+def test_manifest_and_dirs(root="/sd/pinhos"):
+    from core.config import ensure_canonical_dirs, load_version_manifest, CANONICAL_SUBDIRS
+
+    dir_res = ensure_canonical_dirs(root=root)
+    _assert(dir_res["ok"], "Failed to initialize canonical directories under " + root)
+
+    for sub in CANONICAL_SUBDIRS:
+        full = root.rstrip("/") + "/" + sub
+        st = os.stat(full)
+        _assert(bool(st[0] & 0x4000), "Missing canonical directory: " + full)
+
+    manifest = load_version_manifest(root=root)
+    _assert(manifest.get("version") == "1.0.0-alpha.1", "Expected version 1.0.0-alpha.1")
+    _assert(manifest.get("arch") == "armv7emsp", "Expected target arch armv7emsp")
+    _assert(isinstance(manifest.get("ota"), dict) and "channel" in manifest["ota"], "Missing OTA channel field")
+    return "v{} ({}) + {} dirs in /sd/pinhos".format(
+        manifest["version"], manifest["arch"], len(CANONICAL_SUBDIRS)
+    )
+
+
+def test_hal_init(root="/sd/pinhos"):
+    from boards import (
+        get_board,
+        create_board,
+        CAP_DISPLAY,
+        CAP_KEYBOARD,
+        CAP_SDCARD,
+        CAP_BATTERY,
+        CAP_BACKLIGHT,
+        MOD_CTRL,
+        MOD_SHIFT,
+    )
+
+    board = get_board()
+    _assert(board.initialized, "Primary board failed to initialize")
+    _assert(board.display_width == 320 and board.display_height == 320, "Display dimensions must be 320x320")
+    for cap in (CAP_DISPLAY, CAP_KEYBOARD, CAP_SDCARD, CAP_BATTERY, CAP_BACKLIGHT):
+        _assert(board.has_capability(cap), "Missing required board capability flag: " + str(cap))
+
+    # Display primitives & blit test
+    board.fill(0)
+    board.fill_rect(8, 8, 64, 32, 3)
+    board.rect(4, 4, 312, 312, 15)
+    board.hline(10, 50, 100, 10)
+    board.vline(10, 50, 50, 10)
+    board.line(10, 50, 60, 100, 14)
+    board.pixel(160, 160, 15)
+    board.text("PinhOS Phase 1 HAL Test", 20, 20, 15)
+    blit_buf = bytearray(16 * 16)
+    board.blit(blit_buf, 200, 200, 16, 16, fmt="GS4_HMSB")
+
+    # Input queue & modifier decoding test
+    board.clear_input()
+    board.push_event({"type": "key", "key": "F1", "modifiers": 0})
+    _assert(board.poll_key() == "F1", "Input queue failed to roundtrip key event")
+    _assert(len(board._input_queue) == 0, "Input queue should be empty after pop")
+
+    if hasattr(board, "_decode_raw_key"):
+        k_up, _ = board._decode_raw_key(b"\x1b[A")
+        _assert(k_up == "UP", "Failed VT100 UP arrow decode")
+        k_ctrl, m_ctrl = board._decode_raw_key(b"\x03")
+        _assert(k_ctrl == "C" and (m_ctrl & MOD_CTRL), "Failed Ctrl+C modifier decode")
+        k_sh, m_sh = board._decode_raw_key(b"A")
+        _assert(k_sh == "A" and (m_sh & MOD_SHIFT), "Failed Shift modifier decode")
+
+    # Battery telemetry check
+    bat = board.get_battery()
+    _assert(isinstance(bat, dict), "get_battery() must return a dict")
+    _assert(0 <= int(bat.get("percent", -1)) <= 100, "Battery percent out of range 0..100")
+    _assert(int(bat.get("voltage_mv", 0)) >= 2500, "Battery voltage_mv invalid")
+    _assert(isinstance(bat.get("charging"), bool), "Battery charging flag must be bool")
+
+    # Backlight PWM check
+    orig_bl = board.get_backlight()
+    board.set_backlight(75)
+    _assert(board.get_backlight() == 75, "Backlight PWM getter/setter mismatch")
+    board.set_backlight(orig_bl)
+
+    # RTC check
+    ts = board.get_timestamp_str()
+    _assert(isinstance(ts, str) and len(ts) >= 8, "RTC timestamp invalid")
+
+    # GenericSPIBoard fallback profile verification (virtual_only=True avoids touching
+    # physical PicoCalc PSRAM/LCD GPIO pins during on-device self-test)
+    gen_board = create_board("generic_spi", config={"virtual_only": True})
+    _assert(gen_board.init(), "GenericSPIBoard failed to initialize")
+    gen_board.fill(0)
+    gen_board.rect(0, 0, 100, 100, 3)
+    gen_board.text("Generic SPI OK", 10, 10, 15)
+    gen_board.deinit()
+    del gen_board
+    gc.collect()
+    board.ensure_serial_repl()
+
+    # Verify zero hardcoded machine.Pin calls outside boards/
+    for mod_rel in ("main.py", "core/config.py", "core/logger.py", "core/swap.py", "core/sandbox.py", "boards/base.py"):
+        p = root.rstrip("/") + "/" + mod_rel
+        try:
+            with open(p, "r") as f:
+                code_txt = f.read()
+            _assert("machine.Pin(" not in code_txt, "Hardcoded machine.Pin found in " + mod_rel)
+        except OSError:
+            pass
+
+    return "{} (BAT {}% {}mV)".format(board.id, bat["percent"], bat["voltage_mv"])
+
+
+def test_swap_and_core(root="/sd/pinhos"):
+    from core.swap import SwapManager
+    from core.config import ConfigManager
+    from core.logger import Logger
+
+    swap_dir = root.rstrip("/") + "/.swap"
+    sm = SwapManager(swap_dir=swap_dir)
+    sm.clear_all()
+
+    # 1. Valid save & load roundtrip
+    sample_state = {
+        "cursor": [12, 34],
+        "buffer": "PinhOS Phase 1 Swap Test",
+        "baud": 115200,
+        "flags": {"echo": True, "hex": False},
+    }
+    _assert(sm.save("selftest_app", sample_state), "swap.save() returned False")
+    _assert(sm.exists("selftest_app"), "swap.exists() returned False after save")
+
+    loaded = sm.load("selftest_app")
+    _assert(loaded == sample_state, "swap.load() mismatch: " + repr(loaded))
+
+    # 2. Corruption handling check (tampered payload / broken JSON)
+    corrupt_path = sm._file_path("corrupt_app")
+    with open(corrupt_path, "w") as f:
+        f.write('{"magic":"PINHOS_SWAP_V1","app_id":"corrupt_app","checksum":123,"payload":"{bad_json"}')
+    _assert(sm.load("corrupt_app") is None, "Corrupted swap file must return None")
+    _assert(not sm.exists("corrupt_app"), "Corrupted swap file must be automatically deleted")
+
+    # 3. Orphaned .tmp & stale pruning check
+    tmp_orphan = swap_dir + "/orphan.swap.json.tmp"
+    with open(tmp_orphan, "w") as f:
+        f.write("partial_write")
+    pruned = sm.prune_stale(max_age_s=86400, max_files=16)
+    _assert(pruned >= 1, "prune_stale() failed to remove orphaned .tmp file")
+    sm.delete("selftest_app")
+
+    # 4. Config & Logger check
+    cfg_path = root.rstrip("/") + "/logs/_selftest_cfg.json"
+    cfg = ConfigManager(config_path=cfg_path)
+    cfg.set("lcd_brightness", 77)
+    cfg2 = ConfigManager(config_path=cfg_path)
+    _assert(cfg2.get("lcd_brightness") == 77, "ConfigManager failed to persist setting")
+    try:
+        os.remove(cfg_path)
+    except Exception:
+        pass
+
+    log = Logger(log_dir=root.rstrip("/") + "/logs")
+    log.info("SELFTEST: swap and core helpers verified")
+    _assert(len(log.get_recent(5)) >= 1, "Logger ring buffer empty")
+
+    return "R/W + CRC + corrupt recovery OK"
+
+
+def test_sandbox_isolation(root="/sd/pinhos"):
+    if root and root not in sys.path:
+        sys.path.insert(0, root)
+    from core.sandbox import (
+        SandboxRunner,
+        SandboxMetaError,
+        SandboxMemoryError,
+        parse_app_meta,
+        get_free_sram,
+    )
+    from core.swap import SwapManager
+    from boards import get_board
+
+    board = get_board()
+    swap = SwapManager(swap_dir=root.rstrip("/") + "/.swap")
+    runner = SandboxRunner(board=board, swap=swap)
+
+    # 1. Verify parse_app_meta does NOT execute top-level app code
+    trap_source = '''
+APP_META = {
+    "id": "trap_app",
+    "name": "Trap App",
+    "version": "1.0.0",
+    "category": "Field Tools",
+    "entry": "main",
+    "min_sram": 16384,
+    "ui_modes": ["native"],
+}
+
+raise RuntimeError("TOP_LEVEL_CODE_WAS_EXECUTED_DURING_INSPECTION")
+
+def main(ctx):
+    return "unreachable"
+'''
+    meta = parse_app_meta(trap_source)
+    _assert(meta["id"] == "trap_app" and meta["min_sram"] == 16384, "Static APP_META parse failed")
+
+    # 2. Verify min_sram gate blocks oversized apps before execution
+    oom_source = '''
+APP_META = {
+    "id": "oom_app",
+    "name": "Oversized App",
+    "version": "1.0.0",
+    "category": "System",
+    "entry": "main",
+    "min_sram": 99999999,
+    "ui_modes": ["native"],
+}
+def main(ctx):
+    return True
+'''
+    oom_caught = False
+    try:
+        runner.run_source(oom_source)
+    except SandboxMemoryError:
+        oom_caught = True
+    _assert(oom_caught, "Sandbox failed to raise SandboxMemoryError when min_sram exceeds free SRAM")
+
+    # 3. Create a temporary helper module on disk to verify sys.modules purging
+    helper_mod_name = "_pinhos_sbx_helper_temp"
+    helper_mod_path = root.rstrip("/") + "/" + helper_mod_name + ".py"
+    leak_file_path = root.rstrip("/") + "/logs/_sbx_leak_test.txt"
+
+    with open(helper_mod_path, "w") as f:
+        f.write("HELPER_DATA = [x for x in range(64)]\ndef compute(v):\n    return v * 2\n")
+
+    app_source = '''
+APP_META = {{
+    "id": "sbx_leak_test",
+    "name": "Sandbox Leak Test",
+    "version": "1.0.0",
+    "category": "System",
+    "entry": "main",
+    "min_sram": 8192,
+    "ui_modes": ["native"],
+}}
+
+def main(ctx):
+    import {mod_name}
+    # Intentionally leak an open file handle without closing it
+    leaked_f = open("{leak_path}", "w")
+    leaked_f.write("sandbox handle tracking test\\n")
+    buf = bytearray(4096)
+    buf[0] = {mod_name}.compute(21)
+    ctx.save_state({{"ans": int(buf[0])}})
+    if ctx.args.get("crash"):
+        raise ValueError("Intentional sandbox crash test")
+    return int(buf[0])
+'''.format(mod_name=helper_mod_name, leak_path=leak_file_path)
+
+    try:
+        # Warm-up run so one-time interpreter/filesystem buffers stabilize
+        res_warm = runner.run_source(app_source, args={"crash": False})
+        _assert(res_warm["ok"] and res_warm["return_value"] == 42, "Sandbox normal run failed")
+        _assert(res_warm["leaked_handles_closed"] >= 1, "Sandbox did not close leaked file handle")
+        _assert(helper_mod_name not in sys.modules, "Imported module was not purged after normal exit")
+
+        # Measure SRAM baseline before repeated normal + crashing runs
+        gc.collect()
+        gc.collect()
+        sram_baseline = get_free_sram()
+
+        # Run normal execution
+        res_ok = runner.run_source(app_source, args={"crash": False})
+        _assert(res_ok["ok"] and res_ok["return_value"] == 42, "Measured sandbox run failed")
+        _assert(res_ok["leaked_handles_closed"] >= 1, "Leaked handle not closed on measured run")
+        _assert(helper_mod_name not in sys.modules, "Module leaked into sys.modules")
+
+        # Run crashing execution (uncaught exception inside main(ctx))
+        res_crash = runner.run_source(app_source, args={"crash": True})
+        _assert(not res_crash["ok"] and "Intentional sandbox crash" in str(res_crash["error"]), "Crash not caught")
+        _assert(res_crash["leaked_handles_closed"] >= 1, "Leaked handle not closed on exception path")
+        _assert(helper_mod_name not in sys.modules, "Module leaked into sys.modules on exception path")
+
+        swap.delete("sbx_leak_test")
+        gc.collect()
+        gc.collect()
+        sram_final = get_free_sram()
+        residual_delta = max(0, sram_baseline - sram_final)
+
+        _assert(
+            residual_delta < 2048,
+            "Sandbox SRAM leak delta {} bytes exceeds 2048-byte limit".format(residual_delta),
+        )
+    finally:
+        for p in (helper_mod_path, leak_file_path):
+            try:
+                os.remove(p)
+            except Exception:
+                pass
+
+    return "delta={}B (<2048B), handles & sys.modules purged".format(residual_delta)
+
+
+def test_boot_guard(root="/sd/pinhos"):
+    import main as pinhos_main
+
+    test_state_path = root.rstrip("/") + "/logs/_selftest_boot_state.json"
+    try:
+        try:
+            os.remove(test_state_path)
+        except Exception:
+            pass
+
+        # Strike 1
+        s1 = pinhos_main.record_boot_strike("fault_1", state_path=test_state_path)
+        _assert(s1["boot_strikes"] == 1 and not s1["safe_mode"], "Strike 1 state invalid")
+
+        # Strike 2
+        s2 = pinhos_main.record_boot_strike("fault_2", state_path=test_state_path)
+        _assert(s2["boot_strikes"] == 2 and not s2["safe_mode"], "Strike 2 state invalid")
+
+        # Premature uptime (< 5000ms) must NOT clear strikes
+        _assert(
+            not pinhos_main.check_boot_stability(2500, state_path=test_state_path),
+            "Boot strikes cleared prematurely before 5000ms",
+        )
+        _assert(
+            pinhos_main.load_boot_state(state_path=test_state_path)["boot_strikes"] == 2,
+            "Strike count mutated before 5s threshold",
+        )
+
+        # Strike 3 -> Safe Recovery Mode triggered on start()
+        # (Note: start() increments strike 2 -> 3 at entry and immediately enters Safe Recovery Mode)
+        boot_res = pinhos_main.start(state_path=test_state_path, wait_for_stability=False)
+        _assert(
+            isinstance(boot_res, dict) and boot_res.get("mode") == "SAFE_RECOVERY",
+            "3rd strike failed to trigger SAFE_RECOVERY mode: " + repr(boot_res),
+        )
+        _assert(boot_res.get("strikes") == 3, "Expected strike count 3 in Safe Recovery Mode")
+
+        # Verify recovery helper resets strikes cleanly
+        reset_st = pinhos_main.recovery_reset_strikes(state_path=test_state_path)
+        _assert(reset_st["boot_strikes"] == 0 and not reset_st["safe_mode"], "recovery_reset_strikes failed")
+
+        # Verify >5s stability window clears strikes
+        pinhos_main.record_boot_strike("normal_boot", state_path=test_state_path)
+        _assert(
+            pinhos_main.check_boot_stability(5050, state_path=test_state_path),
+            "check_boot_stability(5050) failed to clear strikes",
+        )
+        final_st = pinhos_main.load_boot_state(state_path=test_state_path)
+        _assert(final_st["boot_strikes"] == 0, "Strikes not 0 after >5s stability")
+    finally:
+        try:
+            os.remove(test_state_path)
+        except Exception:
+            pass
+        # Ensure real device boot_state is clean (0 strikes) and serial REPL stays bound
+        pinhos_main.clear_boot_strikes()
+        try:
+            from boards import get_board
+            get_board().ensure_serial_repl()
+        except Exception:
+            pass
+
+    return "3-strike Safe Mode & >5s reset verified"
+
+
+def run_all(root="/sd/pinhos", interactive_wait=False):
+    from boards import get_board
+
+    board = get_board()
+    board.ensure_serial_repl()
+
+    suites = [
+        ("1. Manifest & Canonical Layout", test_manifest_and_dirs),
+        ("2. Board HAL & Peripherals", test_hal_init),
+        ("3. Swap Manager & Core Helpers", test_swap_and_core),
+        ("4. Sandbox Isolation & SRAM Gate", test_sandbox_isolation),
+        ("5. 3-Strike Boot Guard & Recovery", test_boot_guard),
+    ]
+
+    _bp("=== PinhOS v1.0.0-alpha.1 Phase 1 Self-Test Suite ===")
+    passed = 0
+    results = []
+
+    try:
+        for label, fn in suites:
+            gc.collect()
+            try:
+                detail = fn(root=root)
+                passed += 1
+                results.append((label, True, detail))
+                board.ensure_serial_repl()
+                _bp("[PASS] {} -> {}".format(label, detail))
+            except Exception as exc:
+                results.append((label, False, repr(exc)))
+                board.ensure_serial_repl()
+                _bp("[FAIL] {} -> {}".format(label, repr(exc)))
+
+        total = len(suites)
+        all_ok = (passed == total)
+
+        # Render final summary onto the PicoCalc display
+        try:
+            board.ensure_serial_repl()
+            board.recover_refresh()
+            board.fill(0)
+            hdr_col = 10 if all_ok else 9
+            board.fill_rect(0, 0, 320, 22, hdr_col)
+            board.text(
+                "SELFTEST: {} ({}/{})".format("ALL PASSED" if all_ok else "FAILED", passed, total),
+                12,
+                7,
+                0,
+            )
+            y = 30
+            for label, ok, detail in results:
+                tag = "[PASS]" if ok else "[FAIL]"
+                col = 10 if ok else 9
+                board.text("{} {}".format(tag, label[:30]), 8, y, col)
+                board.text("  " + str(detail)[:36], 8, y + 13, 15)
+                y += 45
+            free_kb = (gc.mem_free() // 1024) if hasattr(gc, "mem_free") else 256
+            board.fill_rect(0, 272, 320, 22, 8)
+            if interactive_wait:
+                board.text("ENT/SPC:Dashboard  R:Re-Test  ESC:Back", 8, 279, 15)
+            else:
+                board.text("COM4 Test Done | Run upload_and_start", 12, 279, 15)
+            board.fill_rect(0, 294, 320, 26, 3)
+            board.text("SRAM FREE: {} KB | STRIKES: 0/3".format(free_kb), 16, 303, 0)
+            board.show()
+        except Exception:
+            pass
+
+        status_tag = "PASS" if all_ok else "FAIL"
+        _bp("<<PINHOS:SELFTEST:{}:{}/{}>>".format(status_tag, passed, total))
+
+        if interactive_wait and board is not None:
+            import time
+            board.clear_input()
+            try:
+                poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
+                while True:
+                    k = poll_fn() if poll_fn else None
+                    if k:
+                        ku = str(k).upper()
+                        if ku in ("R", "F2"):
+                            board.beep(1400, 15)
+                            return run_all(root=root, interactive_wait=True)
+                        if ku in ("ENTER", "SPACE", " ", "ESC", "BACK", "BACKSPACE", "Q"):
+                            board.beep(1100, 12)
+                            break
+                    if hasattr(time, "sleep_ms"):
+                        time.sleep_ms(30)
+                    else:
+                        time.sleep(0.03)
+            except KeyboardInterrupt:
+                pass
+
+        return {"ok": all_ok, "passed": passed, "total": total, "results": results}
+    finally:
+        # Guarantee COM4 (UART0 GP0/GP1) remains attached to os.dupterm(..., 0) on exit
+        try:
+            board.ensure_serial_repl()
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    res = run_all()
+    if not res["ok"]:
+        sys.exit(1)

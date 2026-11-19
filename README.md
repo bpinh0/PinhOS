@@ -2,7 +2,7 @@
 
 **A modular, dual-UI MicroPython operating system and portable field cyberdeck platform for the ClockworkPi PicoCalc & Raspberry Pi Pico 2W (RP2350).**
 
-> 🚧 **Status: Currently in active development.** Core architecture (`v1.0.0`) is currently being implemented phase-by-phase. Module interfaces, directory layouts, and configuration schemas are subject to refinement until the `v1.0.0` stable release.
+> 🚀 **Status: `v1.0.0-alpha.1` — Phase 1 Complete & Verified on Hardware.** Hardware Abstraction (`boards/`), 3-Strike Boot Guard (`main.py`), Sandboxed App Runner (`core/sandbox.py`), Cooperative Swap (`core/swap.py`), 5/5 On-Device Self-Test Gate (`tests/selftest.py`), and Custom RP2350 Auto-Boot UF2 (`firmware/`) are all complete and verified on the ClockworkPi PicoCalc (Pico 2W). **Phase 2 (Dual-UI Engine & Unified Theme System) is next.**
 
 ---
 
@@ -73,7 +73,12 @@ pinhos/
 │   └── sysmon.py           # Real-time SRAM/GC telemetry, RP2350 temp/clock, SD benchmark
 ├── apps/                   # Community & user applets (single-entry APP_META contract)
 ├── themes/                 # Built-in & user JSON themes (amber_phosphor.json default)
-├── tests/                  # On-device hardware, SRAM leak, and boot-guard self-test suite
+├── tests/                  # On-device hardware, SRAM leak, and boot-guard self-test suite (5/5 PASS)
+├── firmware/               # Custom RP2350 PicoCalc MicroPython UF2 builder & frozen Dual-Boot router
+│   ├── frozen/_boot.py     # Early hardware init (PicoDisplay, PicoKeyboard, PicoSD, UART0 COM4)
+│   ├── frozen/pinhos_boot.py # Cold-boot splash, [ESC/F1] REPL escape & [F2] Dual-Boot Manager
+│   ├── build_uf2.sh        # Reproducible WSL2/Linux UF2 build script (RPI_PICO2_W)
+│   └── dist/               # Compiled pinhos-picocalc-pico2w.uf2 image
 ├── picocalc.ps1            # Windows PowerShell deployment, sync, and test automation script
 ├── README.md
 └── ROADMAP.md
@@ -91,13 +96,17 @@ pinhos/
 * **Storage:** Full-size SPI microSD slot (FAT32)
 
 ### Quick Start (Windows / PowerShell Workflow)
-1. Flash a compatible **RP2350 MicroPython** (with LVGL bindings compiled in) `.uf2` onto the Pico 2W.
-2. Insert a FAT32-formatted microSD card into the PicoCalc.
-3. Sync the codebase and run the on-device verification suite via `picocalc.ps1`:
+1. **Flash the PinhOS Base UF2 (One-Time):** Hold **BOOTSEL** on the Pico 2W, connect USB, and drag `firmware/dist/pinhos-picocalc-pico2w.uf2` onto the `RP2350` drive (or rebuild it anytime in WSL2 via `bash firmware/build_uf2.sh`).
+2. **Insert a FAT32 microSD card** into the PicoCalc and connect the USB-C port (`COM4` auto-attaches on boot).
+3. **Deploy & Verify:**
    ```powershell
    .\picocalc.ps1 upload_and_start
    .\picocalc.ps1 test
    ```
+4. **Cold-Boot Hotkeys (during the 600ms PinhOS splash):**
+   * **Default:** Boots straight into `/sd/pinhos/main.py` → 5s Boot Guard → PinhOS Dashboard.
+   * **Hold `ESC` or `F1`:** Drops cleanly into the MicroPython `>>>` REPL (`COM4` + LCD).
+   * **Hold `F2`:** Opens the **PinhOS Dual-Boot Manager** (`PinhOS`, `REPL`, `Reset Strikes`, `/sd/firmwares/*.uf2`).
 
 ---
 
