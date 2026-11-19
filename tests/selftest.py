@@ -46,10 +46,10 @@ def test_manifest_and_dirs(root="/sd/pinhos"):
         _assert(bool(st[0] & 0x4000), "Missing canonical directory: " + full)
 
     manifest = load_version_manifest(root=root)
-    _assert(manifest.get("version") == "1.0.0-alpha.1", "Expected version 1.0.0-alpha.1")
+    _assert(manifest.get("version") == "1.0.0-alpha.2", "Expected version 1.0.0-alpha.2")
     _assert(manifest.get("arch") == "armv7emsp", "Expected target arch armv7emsp")
     _assert(isinstance(manifest.get("ota"), dict) and "channel" in manifest["ota"], "Missing OTA channel field")
-    return "v{} ({}) + {} dirs in /sd/pinhos".format(
+    return "v{} ({}) +{} dirs".format(
         manifest["version"], manifest["arch"], len(CANONICAL_SUBDIRS)
     )
 
@@ -129,12 +129,24 @@ def test_hal_init(root="/sd/pinhos"):
     board.ensure_serial_repl()
 
     # Verify zero hardcoded machine.Pin calls outside boards/
-    for mod_rel in ("main.py", "core/config.py", "core/logger.py", "core/swap.py", "core/sandbox.py", "boards/base.py"):
+    for mod_rel in (
+        "main.py",
+        "core/config.py",
+        "core/logger.py",
+        "core/swap.py",
+        "core/sandbox.py",
+        "core/theme.py",
+        "ui/widgets.py",
+        "ui/gui.py",
+        "ui/tui.py",
+        "ui/engine.py",
+        "boards/base.py",
+    ):
         p = root.rstrip("/") + "/" + mod_rel
         try:
             with open(p, "r") as f:
-                code_txt = f.read()
-            _assert("machine.Pin(" not in code_txt, "Hardcoded machine.Pin found in " + mod_rel)
+                for line in f:
+                    _assert("machine.Pin(" not in line, "Hardcoded machine.Pin found in " + mod_rel)
         except OSError:
             pass
 
@@ -193,7 +205,26 @@ def test_swap_and_core(root="/sd/pinhos"):
     log.info("SELFTEST: swap and core helpers verified")
     _assert(len(log.get_recent(5)) >= 1, "Logger ring buffer empty")
 
-    return "R/W + CRC + corrupt recovery OK"
+    # 5. Breadcrumb & crash forensics roundtrip check (isolated temp log dir)
+    bc_dir = root.rstrip("/") + "/logs/_selftest_bc"
+    bc_log = Logger(log_dir=bc_dir)
+    bc_log.set_breadcrumb("SIMULATED_FREEZE", "gate3")
+    rep = bc_log.check_previous_crash()
+    _assert(isinstance(rep, dict) and rep.get("op") == "SIMULATED_FREEZE", "Crash breadcrumb not detected")
+    _assert(bc_log.check_previous_crash() is None, "Breadcrumb not cleared after crash report")
+    crash_tail = bc_log.read_tail("crash", max_lines=10)
+    _assert(any("SIMULATED_FREEZE" in ln for ln in crash_tail), "Crash report missing from crash.log tail")
+    for fn in ("system.log", "crash.log", "breadcrumb.json"):
+        try:
+            os.remove(bc_dir + "/" + fn)
+        except Exception:
+            pass
+    try:
+        os.rmdir(bc_dir)
+    except Exception:
+        pass
+
+    return "R/W + CRC + crash forensics OK"
 
 
 def test_sandbox_isolation(root="/sd/pinhos"):
@@ -327,7 +358,7 @@ def main(ctx):
             except Exception:
                 pass
 
-    return "delta={}B (<2048B), handles & sys.modules purged".format(residual_delta)
+    return "delta={}B (<2KB), handles+mods OK".format(residual_delta)
 
 
 def test_boot_guard(root="/sd/pinhos"):
@@ -392,7 +423,7 @@ def test_boot_guard(root="/sd/pinhos"):
         except Exception:
             pass
 
-    return "3-strike Safe Mode & >5s reset verified"
+    return "3-strike Safe Mode & >5s reset OK"
 
 
 def test_input_and_boot_router(root="/sd/pinhos"):
@@ -484,9 +515,191 @@ def test_input_and_boot_router(root="/sd/pinhos"):
         m1 = gc.mem_free() if hasattr(gc, "mem_free") else 262144
         delta = m0 - m1
         _assert(delta < 2048, "Boot Menu SRAM leak too high: {}B".format(delta))
-        boot_note = "UF2 {} + Menu/Ctrl+C OK ({}B)".format(fw_ver, delta)
+        boot_note = "UF2 {} Ctrl+C OK ({}B)".format(fw_ver, delta)
 
-    return "poll={}ms, {}".format(elapsed_ms, boot_note)
+    return "poll={}ms {}".format(elapsed_ms, boot_note)
+
+
+def test_theme_engine(root="/sd/pinhos"):
+    """
+    Gate 7: Load and strictly validate all 4 JSON themes in /sd/pinhos/themes/,
+    verify semantic color token resolution, safe fallback on missing SD/file,
+    and runtime hot-swap persistence via ConfigManager.
+    """
+    from boards import get_board
+    from core.config import ConfigManager
+    from core.theme import (
+        ThemeManager,
+        CANONICAL_THEME_IDS,
+        REQUIRED_TOKENS,
+        load_theme_file,
+    )
+
+    board = get_board()
+    themes_dir = root.rstrip("/") + "/themes"
+    cfg_path = root.rstrip("/") + "/logs/_selftest_theme_cfg.json"
+
+    try:
+        try:
+            os.remove(cfg_path)
+        except Exception:
+            pass
+
+        cfg = ConfigManager(config_path=cfg_path)
+        tm = ThemeManager(themes_dir=themes_dir, config=cfg, board=board)
+
+        # 1. Strictly validate all 4 canonical JSON themes
+        validated = tm.validate_all()
+        for tid in CANONICAL_THEME_IDS:
+            _assert(tid in validated, "Missing canonical theme file: " + tid)
+            ok, info = validated[tid]
+            _assert(ok, "Theme '{}' failed validation: {}".format(tid, info))
+
+            # Verify every required semantic token resolves to a valid palette index & hex
+            t = tm.load(tid, strict=True)
+            _assert(len(t.lut) == 16, "Theme '{}' LUT must have 16 entries".format(tid))
+            for tok in REQUIRED_TOKENS:
+                idx = t.color(tok)
+                hx = t.hex(tok)
+                _assert(isinstance(idx, int) and 0 <= idx <= 15, "Invalid palette idx for {}.{}".format(tid, tok))
+                _assert(isinstance(hx, str) and hx.startswith("#") and len(hx) == 7, "Invalid hex for {}.{}".format(tid, tok))
+
+        # 2. Verify safe built-in fallback when file is missing
+        fb = load_theme_file(themes_dir + "/_nonexistent_theme.json", strict=False)
+        _assert(fb.id == "cyber_amber" and len(fb.lut) == 16, "Fallback theme failed")
+
+        # 3. Verify runtime hot-swap + config.json persistence + listener callback
+        events = []
+        tm.register_listener(lambda th: events.append(th.id))
+        tm.apply("synthwave_pulse", persist=True)
+        _assert(tm.active.id == "synthwave_pulse", "apply('synthwave_pulse') did not activate")
+        _assert("synthwave_pulse" in events, "Theme listener not notified on apply")
+
+        cfg_reload = ConfigManager(config_path=cfg_path)
+        _assert(cfg_reload.get("theme") == "synthwave_pulse", "Theme not persisted to config.json")
+
+        # Restore default theme LUT cleanly
+        tm.apply("cyber_amber", persist=False)
+    finally:
+        try:
+            os.remove(cfg_path)
+        except Exception:
+            pass
+
+    return "4/4 JSON themes valid + hot-swap OK"
+
+
+def test_dual_ui_engine(root="/sd/pinhos"):
+    """
+    Gate 8: Exercise Dual-UI Engine (GUI <-> TUI switching, theme cycling,
+    dirty-row ListMenu navigation, all core widgets) and verify < 2048 B SRAM delta.
+    """
+    from boards import get_board
+    from core.config import ConfigManager
+    from core.theme import ThemeManager, CANONICAL_THEME_IDS
+    from ui import UIEngine, StatusBar, FooterBar, Panel, ListMenu, ProgressBar, Dialog, TextView
+
+    board = get_board()
+    themes_dir = root.rstrip("/") + "/themes"
+    cfg_path = root.rstrip("/") + "/logs/_selftest_ui_cfg.json"
+
+    try:
+        try:
+            os.remove(cfg_path)
+        except Exception:
+            pass
+
+        cfg = ConfigManager(config_path=cfg_path)
+        tm = ThemeManager(themes_dir=themes_dir, config=cfg, board=board)
+        ui = UIEngine(board=board, theme_manager=tm, config=cfg, mode="gui")
+
+        sb = StatusBar(0, 0, 320, 20, title="PinhOS UI Gate", mode_label=ui.mode_badge, right_text="100%")
+        pnl = Panel(4, 23, 312, 110, title="TELEMETRY", rows=[
+            ("MODE :", "GUI", "accent"),
+            ("THEME:", tm.active.name, "ok"),
+            ("HEAP :", "OK", "info"),
+        ])
+        pbar = ProgressBar(8, 138, 304, 16, value=65, label="LOAD", color_token="ok")
+        menu = ListMenu(4, 160, 312, 112, title="MENU", items=[
+            {"label": "Item Alpha", "badge": "[1]"},
+            {"label": "Item Beta", "badge": "[2]"},
+            {"label": "Item Gamma", "badge": "[3]"},
+            {"label": "Item Delta", "badge": "[4]"},
+        ])
+        fb = FooterBar(0, 276, 320, 44, status="Dual-UI Gate", status_kind="info", hints="TAB:Mode T:Theme")
+
+        ui.add_widget(sb)
+        ui.add_widget(pnl)
+        ui.add_widget(pbar)
+        ui.add_widget(menu)
+        ui.add_widget(fb)
+        ui.set_focus(menu)
+
+        # Warm-up full render + one mode/theme switch so caches stabilize
+        ui.render(force=True)
+        ui.toggle_mode(persist=True)
+        ui.render(force=False)
+        ui.toggle_mode(persist=True)
+        ui.render(force=False)
+
+        # Also exercise Dialog and TextView widgets cleanly
+        tv = TextView(8, 24, 304, 120, title="LOG", lines=["Line 1", "Line 2", "Line 3"])
+        tv.draw(ui.backend, ui.theme, force=True)
+        dlg = Dialog(30, 80, 260, 120, title="DIALOG", lines=["Dual-UI OK"], footer="[ENT]")
+        dlg.draw(ui.backend, ui.theme, force=True)
+        del tv, dlg
+
+        # Baseline SRAM measurement BEFORE stress cycle
+        gc.collect()
+        gc.collect()
+        m0 = gc.mem_free() if hasattr(gc, "mem_free") else 262144
+
+        # 1. Verify dirty-row partial redraw on ListMenu Up/Down navigation (20 steps)
+        ui.render(force=True)
+        for step in range(20):
+            key = "DOWN" if step < 10 else "UP"
+            res = ui.handle_key(key, allow_hotkeys=False)
+            _assert(res == "handled", "ListMenu did not handle key " + key)
+            drawn = ui.render(force=False)
+            _assert(not ui.last_render_full, "ListMenu navigation triggered unexpected full-screen clear")
+            _assert(drawn == 1, "Expected exactly 1 dirty widget on menu move, got {}".format(drawn))
+            _assert(not menu.last_full_redraw, "ListMenu did full redraw instead of dirty-row redraw")
+            _assert(menu.last_redraw_rows == 2, "Expected 2 dirty rows on move, got {}".format(menu.last_redraw_rows))
+
+        # 2. Switch GUI <-> TUI modes & cycle all 4 themes
+        for _ in range(2):
+            new_mode = ui.toggle_mode(persist=True)
+            sb.update(mode_label=ui.mode_badge)
+            ui.render(force=False)
+            _assert(ui.last_render_full, "Mode switch must trigger full clear redraw")
+            _assert(cfg.get("ui_mode") == new_mode, "UI mode not persisted to config.json")
+
+            for _t in range(len(CANONICAL_THEME_IDS)):
+                ui.cycle_theme(step=1, persist=True)
+                pnl.set_rows([
+                    ("MODE :", ui.mode_badge, "accent"),
+                    ("THEME:", ui.theme.name, "ok"),
+                    ("HEAP :", "OK", "info"),
+                ])
+                ui.render(force=False)
+
+        # Clean up & measure SRAM delta
+        ui.set_mode("gui", persist=False)
+        tm.apply("cyber_amber", persist=False)
+        ui.deinit()
+        del ui, tm, cfg, sb, pnl, pbar, menu, fb
+        gc.collect()
+        gc.collect()
+        m1 = gc.mem_free() if hasattr(gc, "mem_free") else 262144
+        delta = max(0, m0 - m1)
+        _assert(delta < 2048, "Dual-UI mode/theme switch SRAM delta {}B >= 2048B".format(delta))
+    finally:
+        try:
+            os.remove(cfg_path)
+        except Exception:
+            pass
+
+    return "GUI<->TUI + 2-row dirty (d={}B)".format(delta)
 
 
 def run_all(root="/sd/pinhos", interactive_wait=False):
@@ -502,9 +715,11 @@ def run_all(root="/sd/pinhos", interactive_wait=False):
         ("4. Sandbox Isolation & SRAM Gate", test_sandbox_isolation),
         ("5. 3-Strike Boot Guard & Recovery", test_boot_guard),
         ("6. Input & Boot Router Integrity", test_input_and_boot_router),
+        ("7. Unified Theme Engine (4 JSON)", test_theme_engine),
+        ("8. Dual-UI Dirty-Redraw & SRAM", test_dual_ui_engine),
     ]
 
-    _bp("=== PinhOS v1.0.0-alpha.1 Phase 1 Self-Test Suite ===")
+    _bp("=== PinhOS v1.0.0-alpha.2 Phase 1+2 Self-Test Suite ===")
     passed = 0
     results = []
 
@@ -538,13 +753,13 @@ def run_all(root="/sd/pinhos", interactive_wait=False):
                 7,
                 0,
             )
-            y = 28
+            y = 26
             for label, ok, detail in results:
                 tag = "[PASS]" if ok else "[FAIL]"
                 col = 10 if ok else 9
-                board.text("{} {}".format(tag, label[:30]), 8, y, col)
-                board.text("  " + str(detail)[:36], 8, y + 12, 15)
-                y += 38
+                board.text("{} {}".format(tag, label[:44]), 4, y, col)
+                board.text(" " + str(detail)[:50], 4, y + 11, 15)
+                y += 30
             free_kb = (gc.mem_free() // 1024) if hasattr(gc, "mem_free") else 256
             board.fill_rect(0, 272, 320, 22, 8)
             if interactive_wait:

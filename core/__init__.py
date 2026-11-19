@@ -17,3 +17,11 @@ from core.sandbox import (
     parse_app_meta,
     inspect_app,
 )
+from core.theme import (
+    Theme,
+    ThemeManager,
+    ThemeError,
+    get_theme_manager,
+    load_theme_file,
+    validate_theme_dict,
+)
