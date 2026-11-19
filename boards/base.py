@@ -158,6 +158,10 @@ class BoardBase:
         """Apply 16-entry RGB565 Look-Up Table for 4-bit native mode."""
         pass
 
+    def reset_default_lut(self):
+        """Restore built-in factory 16-entry RGB565 LUT (e.g. for BSOD/Recovery)."""
+        pass
+
     def show(self):
         """Flush framebuffer to physical display if manual refresh is active."""
         pass

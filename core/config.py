@@ -22,11 +22,11 @@ CANONICAL_SUBDIRS = (
 
 DEFAULT_VERSION_MANIFEST = {
     "name": "PinhOS",
-    "version": "1.0.0-alpha.1",
-    "phase": 1,
-    "codename": "Foundation",
-    "build_timestamp": "2026-11-18T17:30:00Z",
-    "build_id": "20261118.1",
+    "version": "1.0.0-alpha.2",
+    "phase": 2,
+    "codename": "Dual-UI",
+    "build_timestamp": "2026-11-19T11:38:00Z",
+    "build_id": "20261119.1",
     "arch": "armv7emsp",
     "mcu": "RP2350",
     "sram_kb": 520,
@@ -41,8 +41,8 @@ DEFAULT_VERSION_MANIFEST = {
 
 DEFAULT_CONFIG = {
     "board": "picocalc",
-    "ui_mode": "native",
-    "theme": "amber_phosphor",
+    "ui_mode": "gui",
+    "theme": "cyber_amber",
     "lcd_brightness": 80,
     "kb_brightness": 60,
     "sound": True,

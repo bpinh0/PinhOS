@@ -151,6 +151,7 @@ class PicoCalcBoard(BoardBase):
         self._stdin_poll = None
         self._kbuf = bytearray(8)
         self._lut = _build_default_lut()
+        self._refresh_active = False
         self._fb_buf = None
         self._fb = None
         self._bat_cache = {
@@ -220,27 +221,40 @@ class PicoCalcBoard(BoardBase):
     # --- Display Primitives & Blitting ---
 
     def set_lut(self, lut):
-        if lut is not None:
-            self._lut = lut
+        """
+        Update the 16-entry RGB565 LUT in-place without stopping/restarting Core 1
+        auto-refresh (repeated stopRefresh/recoverRefresh calls wedge Core 1 on RP2350).
+        """
+        if lut is not None and len(lut) >= 16:
+            for i in range(16):
+                self._lut[i] = lut[i]
         if self._hw is not None and hasattr(self._hw, "picocalcdisplay"):
             try:
                 self._hw.picocalcdisplay.setLUT(self._lut)
             except Exception:
                 pass
 
+    def reset_default_lut(self):
+        """Restore factory 16-entry RGB565 LUT (used by BSOD and Safe Recovery Mode)."""
+        self.set_lut(_build_default_lut())
+
     def stop_refresh(self):
         if self._disp is not None and hasattr(self._disp, "stopRefresh"):
-            try:
-                self._disp.stopRefresh()
-            except Exception:
-                pass
+            if self._refresh_active:
+                try:
+                    self._disp.stopRefresh()
+                except Exception:
+                    pass
+                self._refresh_active = False
 
-    def recover_refresh(self):
+    def recover_refresh(self, force=False):
         if self._disp is not None and hasattr(self._disp, "recoverRefresh"):
-            try:
-                self._disp.recoverRefresh()
-            except Exception:
-                pass
+            if force or not self._refresh_active:
+                try:
+                    self._disp.recoverRefresh()
+                except Exception:
+                    pass
+                self._refresh_active = True
 
     def fill(self, color=0):
         if self._disp is not None:

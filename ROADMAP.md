@@ -1,7 +1,7 @@
 # 🌲 PinhOS — Architectural Specification & Engineering Roadmap
 
 > **Target Platform:** ClockworkPi PicoCalc (Raspberry Pi Pico 2W / RP2350 — Dual ARM Cortex-M33 @ 150 MHz, 520 KB SRAM, 4 MB Flash, CYW43439 Wi-Fi 4 + BLE 5.2, 320×320 SPI LCD, I2C STM32 Southbridge, SPI microSD).  
-> **Current Status:** Active Development — `v1.0.0-alpha.1` (**Phase 1 Complete & Verified 6/6 on Hardware** + Custom RP2350 Cold-Boot UF2; **Phase 2 next**).
+> **Current Status:** Active Development — `v1.0.0-alpha.2` (**Phase 1 + Phase 2 Complete & Verified 8/8 on Hardware** — Dual-UI Engine, Unified Theme System, Crash/Breadcrumb Logger & BSOD; **Phase 3 next**).
 
 ---
 
@@ -100,32 +100,32 @@ def main(ctx):
 ---
 
 ### Phase 2: Dual-UI Engine & Unified Theme System
-- [ ] **2.1 Unified Theme Loader (`ui/theme.py` & `themes/`):**
-  - Load and validate JSON themes with automatic fallback to built-in `amber_phosphor` if a theme file is malformed.
-  - Precompute 16-entry RGB565 LUT arrays for Native Mode and style structs for LVGL Mode.
-  - Ship default themes: `amber_phosphor.json`, `cyber_cyan.json`, `matrix_green.json`, and `high_contrast.json`.
-- [ ] **2.2 Native Pixel Renderer (`ui/native/`):**
-  - Implement 4-bit indexed framebuffer (`320×320 / 2 = 51,200 bytes`) with `@micropython.viper` LUT-to-RGB565 scanline blitter for smooth 60 FPS UI updates.
-  - Render signature pixel-art PinhOS pine tree boot splash + system status summary (`SRAM`, `SWAP`, `BOOT`, `WIFI`).
-  - Build lightweight keyboard-first widget toolkit (status header, scrollable list/grid launcher, modal dialogs, text input prompt, hotkey footer bar).
-- [ ] **2.3 LVGL Desktop Shell (`ui/lvgl/`):**
-  - Build windowed desktop environment utilizing compiled C LVGL bindings: top status bar, left/grid app icon dock, floating `SYS TELEMETRY` (CPU/RAM/BAT bars) and `QUICK NOTES` cards, and bottom taskbar.
-  - Bind theme engine dynamically so switching themes updates LVGL styles live without rebooting.
-- [ ] **2.4 Seamless UI Mode Switcher:**
-  - Allow switching between Native Mode and LVGL Desktop Mode on the fly with deterministic buffer deallocation (`del fb` / `lv.deinit()` + `gc.collect()`) to prevent heap collisions.
+- [x] **2.1 Unified Theme Engine (`core/theme.py` & `themes/`):**
+  - Load and validate all 4 BOM-free JSON themes (`cyber_amber.json`, `phosphor_green.json`, `arctic_daylight.json`, `synthwave_pulse.json`) with automatic fallback to built-in `cyber_amber` if SD is missing or a file is malformed.
+  - Precompute 16-entry RGB565 LUT arrays applied in-place to `boards/picocalc.py` (Core 1-safe, zero full-screen framebuffer allocation) with runtime `[T]` hot-swapping and `config.json` persistence.
+- [x] **2.2 Shared Widget Toolkit & Dual Rendering Backends (`ui/widgets.py`, `ui/gui.py`, `ui/tui.py`):**
+  - Reusable dirty-tracked widgets (`StatusBar`, `FooterBar`, `Panel`, `ListMenu`, `ProgressBar`, `Dialog`, `TextView`) with 2-row partial redraws on `ListMenu` navigation (`delta=0B` SRAM verified on hardware).
+  - **GUI Mode (320×320 Graphical):** Framed panels, accent header/footer bars, bordered cards, and graphical progress indicators.
+  - **TUI Mode (High-Density Terminal):** Crisp monochrome/accent grid layout, dense list rows, ASCII dividers, and minimal draw overhead.
+- [x] **2.3 Seamless Live UI Mode Switcher (`ui/engine.py`):**
+  - Switch live between GUI and TUI modes (`[TAB]` / `[M]`) and cycle themes (`[T]`) with deterministic backend cleanup, `config.json` persistence, and `< 2 KB` SRAM delta (`0 B` verified on hardware).
+- [x] **2.4 Crash Forensics, BSOD Guard & On-Device Log Viewer (`core/logger.py` & `main.py`):**
+  - Persistent `system.log` / `crash.log` with rotation, `breadcrumb.json` + `machine.reset_cause()` unclean-shutdown detection, `[L]` scrollable Dual-UI log viewer, `[ALT+F5]` Hard Reload (`x2` emergency reset), and `show_bsod()` fault fallback (**8/8 PASS verified on PicoCalc hardware**).
 
 ---
 
 ### Phase 3: Built-In BusyBox CLI & Field Utilities (`tools/`)
 - [ ] **3.1 Interactive Shell (`tools/shell.py`):**
-  - Command-line REPL with command history, path tab-completion, environment variables, and core UNIX-style commands (`ls`, `cd`, `cat`, `cp`, `mv`, `rm`, `mkdir`, `df`, `free`, `ps`, `uname`, `reboot`).
+  - Command-line REPL with command history, path tab-completion, environment variables, 53-column 6×8 scrolling output (`TextView`), and core UNIX-style commands (`ls`, `cd`, `cat`, `cp`, `mv`, `rm`, `mkdir`, `df`, `free`, `ps`, `uname`, `logs`, `reboot`).
+  - Add `[ALT+Q]` or confirmation guard for serial `COM4` REPL exit so standalone users cannot accidentally strand the UI.
 - [ ] **3.2 File Manager (`tools/files.py`):**
-  - Keyboard-driven file browser across `/sd/` and internal flash with file size/timestamp metadata, copy/move/rename/delete operations, built-in text/JSON viewer, and hex dump inspector.
+  - Keyboard-driven file browser across `/sd/` and internal flash with file size/timestamp metadata, copy/move/rename/delete operations, streaming text/JSON viewer (1 KB chunked reads to protect RP2350 SRAM), and hex dump inspector.
 - [ ] **3.3 Network & Hardware Field Utilities (`tools/net_tools.py` & `tools/uart_term.py`):**
   - **Net Probes:** Raw ICMP `ping` with RTT stats, fast async TCP port scanner, local subnet host sweep, Wake-on-LAN (`WoL`) magic packet sender, and DNS resolver.
   - **UART Serial Console:** Hardware UART terminal (`boards/` UART pins) with configurable baud rates (`9600` to `921600`), `8N1` framing options, ASCII/Hex display toggle, SD session logging, and programmable F-key macro strings.
-- [ ] **3.4 System Monitor & Settings (`tools/sysmon.py`):**
+- [ ] **3.4 System Monitor, Settings & Launcher Polish (`tools/sysmon.py`):**
   - Live SRAM free/allocated sparkline, GC cycle counter, RP2350 internal temperature & CPU frequency readout, SD read/write speed benchmark, backlight brightness slider, and UI/theme switcher.
+  - Evolve the GUI launcher toward the `docs/mockups/` 3×2 icon-tile **Mosaic** & **Desktop** layouts (primitive-drawn icons + `SYS TELEMETRY` / `QUICK NOTES` cards) as Phase 3 tools populate the 6 top-level categories (`Dashboard`, `Apps & Studio`, `Terminal & Toolkit`, `Files /sd`, `HW Lab`, `Sys & OTA`).
 
 ---
 
