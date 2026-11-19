@@ -4,9 +4,11 @@
 import os
 import sys
 import io
+import gc
+import json
 import time
 
-from core.config import PINHOS_ROOT, _mkdir_p
+from core.config import PINHOS_ROOT, _mkdir_p, atomic_write_json
 
 LEVEL_DEBUG = 10
 LEVEL_INFO  = 20
@@ -34,6 +36,7 @@ class Logger:
         self.log_dir = log_dir or (PINHOS_ROOT + "/logs")
         self.sys_log_path = self.log_dir.rstrip("/") + "/system.log"
         self.crash_log_path = self.log_dir.rstrip("/") + "/crash.log"
+        self.breadcrumb_path = self.log_dir.rstrip("/") + "/breadcrumb.json"
         self.max_ring = max(8, int(max_ring))
         self.max_file_bytes = max(4096, int(max_file_bytes))
         self._ring = []
@@ -115,6 +118,115 @@ class Logger:
 
     def clear_ring(self):
         self._ring.clear()
+
+    # --- Operation Breadcrumbs & Unclean-Shutdown Crash Forensics ---
+
+    def set_breadcrumb(self, op_name, detail=""):
+        """Persist current operation breadcrumb so freezes/resets can be diagnosed on next boot."""
+        free_kb = (gc.mem_free() // 1024) if hasattr(gc, "mem_free") else 256
+        data = {
+            "op": str(op_name)[:40],
+            "detail": str(detail)[:60],
+            "time": _now_str(),
+            "free_kb": free_kb,
+        }
+        return atomic_write_json(self.breadcrumb_path, data)
+
+    def clear_breadcrumb(self, op_name="IDLE"):
+        return self.set_breadcrumb(op_name, "")
+
+    def check_previous_crash(self):
+        """
+        Inspect breadcrumb.json + machine.reset_cause() at boot.
+        If the previous run did not reach IDLE/CLEAN_EXIT, record a crash report
+        in crash.log and return the forensic dict; otherwise return None.
+        """
+        rc_str = "BOOT"
+        try:
+            import machine
+            rc = machine.reset_cause()
+            rc_names = {1: "PWRON", 2: "HARD_RST", 3: "WDT_TIMEOUT", 4: "WAKE", 5: "SOFT_RST"}
+            rc_str = rc_names.get(rc, "RST_" + str(rc))
+        except Exception:
+            pass
+
+        prev = None
+        try:
+            with open(self.breadcrumb_path, "r") as f:
+                prev = json.load(f)
+        except Exception:
+            prev = None
+
+        if not isinstance(prev, dict):
+            self.clear_breadcrumb("IDLE")
+            return None
+
+        prev_op = str(prev.get("op", "IDLE"))
+        if prev_op in ("IDLE", "CLEAN_EXIT", ""):
+            return None
+
+        prev_detail = str(prev.get("detail", ""))
+        prev_time = str(prev.get("time", "unknown"))
+        prev_kb = int(prev.get("free_kb", 0))
+        report = {
+            "op": prev_op,
+            "detail": prev_detail,
+            "time": prev_time,
+            "free_kb": prev_kb,
+            "reset_cause": rc_str,
+        }
+        msg = "UNCLEAN SHUTDOWN in {} ({}) @ {} [{} | {}KB]".format(
+            prev_op, prev_detail or "n/a", prev_time, rc_str, prev_kb
+        )
+        self.log("CRASH", msg, persist=True)
+        block = (
+            "=== PINHOS UNCLEAN SHUTDOWN / FREEZE [{}] ===\n"
+            "Last Op : {} ({})\n"
+            "Op Time : {}\n"
+            "Cause   : {} | Free SRAM: {} KB\n\n"
+        ).format(_now_str(), prev_op, prev_detail or "n/a", prev_time, rc_str, prev_kb)
+        self._append_file(self.crash_log_path, block)
+        self.clear_breadcrumb("IDLE")
+        return report
+
+    def read_tail(self, kind="system", max_lines=60, max_bytes=4096):
+        """
+        Memory-safe tail reader for system.log or crash.log.
+        Reads at most max_bytes from the end of the file to protect RP2350 SRAM.
+        """
+        path = self.crash_log_path if kind == "crash" else self.sys_log_path
+        try:
+            st = os.stat(path)
+            size = int(st[6])
+            if size <= 0:
+                return []
+            with open(path, "r") as f:
+                if size > max_bytes:
+                    f.seek(size - max_bytes)
+                    # Discard partial first line after seek
+                    f.readline()
+                raw = f.read()
+            lines = [ln.rstrip("\r") for ln in raw.split("\n") if ln.strip()]
+            return lines[-int(max_lines):]
+        except Exception:
+            if kind == "system" and self._ring:
+                return list(self._ring[-int(max_lines):])
+            return []
+
+    def clear_logs(self, kind="all"):
+        targets = []
+        if kind in ("all", "system"):
+            targets.append(self.sys_log_path)
+            self._ring.clear()
+        if kind in ("all", "crash"):
+            targets.append(self.crash_log_path)
+        for p in targets:
+            try:
+                with open(p, "w") as f:
+                    f.write("")
+            except Exception:
+                pass
+        return True
 
 
 _default_logger = None

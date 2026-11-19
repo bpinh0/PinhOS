@@ -50,7 +50,7 @@ function Resolve-PicoPort([string]$PreferredPort) {
 
 $ResolvedPort = Resolve-PicoPort $PortName
 
-# Canonical Phase 1 OS tree deployed EXCLUSIVELY to /sd/pinhos/
+# Canonical Phase 1+2 OS tree deployed EXCLUSIVELY to /sd/pinhos/
 $DeployManifest = @(
     @{ Local = "version.json";          Remote = "/sd/pinhos/version.json" },
     @{ Local = "main.py";               Remote = "/sd/pinhos/main.py" },
@@ -63,6 +63,12 @@ $DeployManifest = @(
     @{ Local = "core\logger.py";        Remote = "/sd/pinhos/core/logger.py" },
     @{ Local = "core\swap.py";          Remote = "/sd/pinhos/core/swap.py" },
     @{ Local = "core\sandbox.py";       Remote = "/sd/pinhos/core/sandbox.py" },
+    @{ Local = "core\theme.py";         Remote = "/sd/pinhos/core/theme.py" },
+    @{ Local = "ui\__init__.py";        Remote = "/sd/pinhos/ui/__init__.py" },
+    @{ Local = "ui\widgets.py";         Remote = "/sd/pinhos/ui/widgets.py" },
+    @{ Local = "ui\gui.py";             Remote = "/sd/pinhos/ui/gui.py" },
+    @{ Local = "ui\tui.py";             Remote = "/sd/pinhos/ui/tui.py" },
+    @{ Local = "ui\engine.py";          Remote = "/sd/pinhos/ui/engine.py" },
     @{ Local = "apps\hello_world.py";   Remote = "/sd/pinhos/apps/hello_world.py" },
     @{ Local = "apps\matrix_deck.py";   Remote = "/sd/pinhos/apps/matrix_deck.py" },
     @{ Local = "tests\selftest.py";     Remote = "/sd/pinhos/tests/selftest.py" }
@@ -563,9 +569,14 @@ for _d in ('/sd/pinhos','/sd/pinhos/boards','/sd/pinhos/core','/sd/pinhos/ui','/
         pass
 def _sig(p):
     try:
+        n=0;s=0;a=-1;z=0
         with open(p, 'rb') as f:
-            b = f.read()
-        return '{}:{}:{}:{}'.format(len(b), sum(b), b[0], b[-1]) if b else '0:0:0:0'
+            while True:
+                c = f.read(1024)
+                if not c: break
+                if a < 0: a = c[0]
+                n += len(c); s += sum(c); z = c[-1]
+        return '{}:{}:{}:{}'.format(n, s, a, z) if n else '0:0:0:0'
     except Exception:
         return 'MISSING'
 def _bar(p):
@@ -633,7 +644,7 @@ if picocalc and hasattr(picocalc, 'display'):
         _d.recoverRefresh()
         _d.fill(0)
         _d.rect(18, 118, 284, 64, 3)
-        _d.text('DEPLOYING PinhOS v1.0.0-alpha.1', 36, 134, 3)
+        _d.text('DEPLOYING PinhOS v1.0.0-alpha.2', 36, 134, 3)
         _d.rect(40, 154, 240, 12, 3)
     except Exception:
         pass
@@ -683,7 +694,7 @@ _bp('INIT_OK')
         Write-Host "[PinhOS] Launching /sd/pinhos/main.py and streaming Boot Guard stabilization..."
         $launchCode = @"
 import os, sys, io, gc, machine
-for _m in ('main','boards','boards.base','boards.picocalc','boards.generic_spi','core','core.config','core.logger','core.swap','core.sandbox','tests.selftest'):
+for _m in ('main','boards','boards.base','boards.picocalc','boards.generic_spi','core','core.config','core.logger','core.swap','core.sandbox','core.theme','ui','ui.widgets','ui.gui','ui.tui','ui.engine','tests.selftest'):
  if _m in sys.modules:del sys.modules[_m]
 gc.collect()
 if '/sd/pinhos' not in sys.path:sys.path.insert(0,'/sd/pinhos')
@@ -704,7 +715,7 @@ except Exception as _e:
         Start-Sleep -Milliseconds 100
     }
     elseif ($Action -eq "test") {
-        Write-Host "[PinhOS] Running Phase 1 Self-Test Gate on $ResolvedPort..."
+        Write-Host "[PinhOS] Running Phase 1+2 Self-Test Gate on $ResolvedPort..."
         Initialize-PicoRawSession $sp
 
         $prepTestCode = @"
@@ -715,8 +726,14 @@ except Exception:pass
 if '/sd/pinhos' not in sys.path:sys.path.insert(0,'/sd/pinhos')
 def _sig(p):
  try:
-  with open(p,'rb') as f:b=f.read()
-  return '{}:{}:{}:{}'.format(len(b),sum(b),b[0],b[-1]) if b else '0:0:0:0'
+  n=0;s=0;a=-1;z=0
+  with open(p,'rb') as f:
+   while True:
+    c=f.read(1024)
+    if not c:break
+    if a<0:a=c[0]
+    n+=len(c);s+=sum(c);z=c[-1]
+  return '{}:{}:{}:{}'.format(n,s,a,z) if n else '0:0:0:0'
  except Exception:return 'MISSING'
 def _bar(p):pass
 _bp('PREP_OK')
@@ -744,16 +761,16 @@ _bp('PREP_OK')
 
         $runTestCmd = @"
 import os, sys, io, gc
-for _m in ('tests.selftest','tests','main','boards','boards.base','boards.picocalc','boards.generic_spi','core','core.config','core.logger','core.swap','core.sandbox'):
+for _m in ('tests.selftest','tests','main','boards','boards.base','boards.picocalc','boards.generic_spi','core','core.config','core.logger','core.swap','core.sandbox','core.theme','ui','ui.widgets','ui.gui','ui.tui','ui.engine'):
  if _m in sys.modules:del sys.modules[_m]
 gc.collect()
 try:
  import tests.selftest as _st
  _st.run_all(interactive_wait=False)
 except Exception as _e:
- _buf=io.StringIO();sys.print_exception(_e,_buf);_bp('<<PINHOS:SELFTEST:FAIL:0/5>>\r\n'+_buf.getvalue())
+ _buf=io.StringIO();sys.print_exception(_e,_buf);_bp('<<PINHOS:SELFTEST:FAIL:0/8>>\r\n'+_buf.getvalue())
 "@
-        $testOut = Stream-RawReplCommand $sp $runTestCmd "<<PINHOS:SELFTEST:" 20000
+        $testOut = Stream-RawReplCommand $sp $runTestCmd "<<PINHOS:SELFTEST:" 45000
         # Exit Raw REPL cleanly (Ctrl-B) back to friendly >>> prompt with dupterm preserved
         $sp.Write([string][char]2)
         [void](Read-UntilIdle $sp 150 500)

@@ -2,7 +2,7 @@
 
 **A modular, dual-UI MicroPython operating system and portable field cyberdeck platform for the ClockworkPi PicoCalc & Raspberry Pi Pico 2W (RP2350).**
 
-> 🚀 **Status: `v1.0.0-alpha.1` — Phase 1 Complete & Verified on Hardware.** Hardware Abstraction (`boards/`), 3-Strike Boot Guard (`main.py`), Sandboxed App Runner (`core/sandbox.py`), Cooperative Swap (`core/swap.py`), 6/6 On-Device Self-Test Gate (`tests/selftest.py`), and Custom RP2350 Auto-Boot UF2 (`firmware/`) are all complete and verified on the ClockworkPi PicoCalc (Pico 2W). **Phase 2 (Dual-UI Engine & Unified Theme System) is next.**
+> 🚀 **Status: `v1.0.0-alpha.2` — Phase 1 & Phase 2 Complete & Verified 8/8 on Hardware.** Hardware Abstraction (`boards/`), 3-Strike Boot Guard & BSOD (`main.py`), Sandboxed App Runner (`core/sandbox.py`), Cooperative Swap (`core/swap.py`), Unified Theme Engine (`core/theme.py` + 4 JSON themes), Dual-UI Engine (`ui/` GUI ↔ TUI with 2-row dirty partial redraws & `0 B` SRAM delta), Crash/Breadcrumb Logger & On-Device Log Viewer (`core/logger.py`), 8/8 On-Device Self-Test Gate (`tests/selftest.py`), and Custom RP2350 Auto-Boot UF2 (`firmware/`) are all complete and verified on the ClockworkPi PicoCalc (Pico 2W). **Phase 3 (Built-In BusyBox CLI & Field Utilities) is next.**
 
 ---
 
@@ -13,13 +13,14 @@ PinhOS turns the ClockworkPi PicoCalc (and custom RP2350 hardware builds) into a
 ### Core Capabilities
 * **Hardware Abstraction Layer (`boards/`):** Decouples core OS services from hardware pinouts and bus topologies—supporting the ClockworkPi PicoCalc (SPI LCD + I2C STM32 southbridge keyboard/battery + SPI SD) alongside custom Pico 2W + SPI/CardKB cyberdecks, with future portability to ESP32-S3.
 * **Resilient Kernel Runtime (`core/`):**
-  * **3-Strike Boot Guard (`main.py`):** Persistent boot-strike counter with automatic fallback to a minimal serial/Wi-Fi recovery shell if a startup script, theme, or config faults.
+  * **3-Strike Boot Guard & BSOD (`main.py`):** Persistent boot-strike counter with automatic Safe Recovery Mode fallback, unhandled-exception **Blue Screen of Death (`show_bsod()`)** with 1-key recovery, and `[ALT+F5]` Hard Reload (`x2` emergency hardware reset).
+  * **Crash Forensics & On-Device Log Viewer (`core/logger.py`):** Rotating `/sd/pinhos/logs/system.log` & `crash.log`, `breadcrumb.json` + `machine.reset_cause()` freeze detection, and a scrollable `[L]` log viewer right on the PicoCalc.
   * **Sandboxed App Execution (`core/sandbox.py`):** Enforces a single `APP_META` / `main(ctx)` contract, snapshots `sys.modules` and `gc.mem_free()` prior to launch, closes leaked file/socket descriptors on exit, purges app modules, and forces garbage collection.
   * **Cooperative Swap Manager (`core/swap.py`):** Serializes inactive task state to `/sd/pinhos/.swap/` to preserve heap headroom inside the RP2350's 520 KB SRAM ceiling.
 * **Dual-UI Engine (`ui/`):**
-  * **Native Mode:** Ultra-fast 4-bit indexed framebuffer with `@micropython.viper` RGB565 LUT palette expansion, signature pixel-art pine tree branding, and instant keyboard navigation.
-  * **LVGL Desktop Mode:** Full C-accelerated windowed desktop interface with app drawer, floating telemetry/notes cards, and taskbar.
-* **Unified JSON Theme Engine (`themes/`):** Single JSON palette & typography specification (`amber_phosphor`, `cyber_cyan`, `matrix_green`, `high_contrast`) dynamically applied across Native Mode, LVGL Desktop Mode, and the browser WebPortal.
+  * **Shared Widget & Focus Model (`ui/widgets.py`):** Dirty-tracked `StatusBar`, `FooterBar`, `Panel`, `ListMenu` (2-row partial redraws), `ProgressBar`, `Dialog`, and `TextView` sized for the PicoCalc's 6×8 display font (`53` chars × 320px) with zero full-screen Python framebuffers.
+  * **GUI Mode (`ui/gui.py`) & TUI Mode (`ui/tui.py`):** Live `[TAB]`/`[M]` switching between 320×320 framed graphical cards and high-density terminal layouts with `config.json` persistence and `0 B` SRAM delta—building toward the 3×2 Mosaic & Desktop layouts in `docs/mockups/`.
+* **Unified JSON Theme Engine (`core/theme.py` & `themes/`):** Single JSON palette specification (`cyber_amber`, `phosphor_green`, `arctic_daylight`, `synthwave_pulse`) compiled to Core 1-safe in-place 16-entry RGB565 LUTs with live `[T]` hot-swapping and safe built-in fallback.
 * **WebPortal Browser IDE (`web/`):** Non-blocking `uasyncio` web server over Wi-Fi providing live SD/flash file management, a browser code editor for `.py` apps and `.json` themes, remote app launching, real-time SRAM/CPU telemetry, and screen capture.
 * **GitHub OTA & Community Store (`net/`):** SHA-256-verified over-the-air OS updates and one-click installation of community `.py` / `.mpy` applets and themes directly from GitHub.
 * **Wireless & Field Tooling (`tools/` & `net/`):** Built-in BusyBox-style shell, dual-pane file manager, ICMP/TCP/WoL/DNS network probes, hardware UART serial terminal, and BLE 5.2 HID host support for external wireless keyboards, mice, and scanners.
@@ -52,11 +53,13 @@ pinhos/
 │   ├── sandbox.py          # App isolation, sys.modules diffing, descriptor cleanup, GC enforcement
 │   ├── swap.py             # Cooperative JSON/binary state offloading to /sd/pinhos/.swap/
 │   ├── config.py           # Persistent system & network configuration manager
-│   └── logger.py           # Ring-buffer & SD diagnostic logger
-├── ui/                     # Dual rendering engines & shared theming
-│   ├── theme.py            # Unified JSON theme loader & RGB565 LUT generator
-│   ├── native/             # 4-bit indexed framebuffer, Viper blitter, pixel pine tree splash & widgets
-│   └── lvgl/               # LVGL windowed desktop shell, app dock, telemetry widgets & taskbar
+│   ├── theme.py            # Unified JSON theme loader, validator & 16-entry RGB565 LUT engine
+│   └── logger.py           # Rotating SD logger, breadcrumb crash forensics & tail reader
+├── ui/                     # Dual-UI rendering engine (zero full-screen framebuffers)
+│   ├── engine.py           # UIEngine: GUI <-> TUI switching, focus routing & dirty-region renders
+│   ├── widgets.py          # Shared dirty-tracked widgets (StatusBar, Panel, ListMenu, TextView, etc.)
+│   ├── gui.py              # 320x320 graphical card/panel backend
+│   └── tui.py              # High-density terminal grid backend
 ├── net/                    # Connectivity, wireless HID & GitHub distribution
 │   ├── wifi.py             # Multi-SSID STA manager + AP captive fallback mode
 │   ├── ble.py              # BLE 5.2 HID central host (keyboards, mice, barcode/RFID scanners)
@@ -72,8 +75,8 @@ pinhos/
 │   ├── uart_term.py        # Hardware UART serial console with baud presets & macro keys
 │   └── sysmon.py           # Real-time SRAM/GC telemetry, RP2350 temp/clock, SD benchmark
 ├── apps/                   # Community & user applets (single-entry APP_META contract)
-├── themes/                 # Built-in & user JSON themes (amber_phosphor.json default)
-├── tests/                  # On-device hardware, SRAM leak, input & boot-router self-test suite (6/6 PASS)
+├── themes/                 # Built-in & user JSON themes (cyber_amber, phosphor_green, arctic_daylight, synthwave_pulse)
+├── tests/                  # On-device hardware, SRAM leak, theme & Dual-UI self-test suite (8/8 PASS)
 ├── firmware/               # Custom RP2350 PicoCalc MicroPython UF2 builder & frozen Dual-Boot router
 │   ├── frozen/_boot.py     # Early hardware init (PicoDisplay, PicoKeyboard, PicoSD, UART0 COM4)
 │   ├── frozen/pinhos_boot.py # Cold-boot splash (5s countdown, 0-100% progress bar, version.json), [F1] Recovery, [F2] Boot Menu & [CTRL+C] REPL
@@ -108,6 +111,13 @@ pinhos/
    * **`F1` or `ESC`:** Launches **PinhOS Custom Safe Recovery Mode** (diagnostics, strike reset, config/swap cleanup, `COM4` REPL).
    * **`F2`:** Opens the **PinhOS Dual-Boot Manager** (`PinhOS`, `Safe Recovery`, `Reset Strikes`, `/sd/firmwares/*.uf2` scanner).
    * **`CTRL+C`:** Interrupts boot immediately and drops straight into the MicroPython `>>>` REPL (`COM4` + LCD).
+5. **Live Dashboard Hotkeys:**
+   * **`TAB` / `M`:** Toggle **GUI ↔ TUI** mode live (persisted in `config.json`).
+   * **`T`:** Cycle all 4 JSON themes live (`cyber_amber` → `phosphor_green` → `arctic_daylight` → `synthwave_pulse`).
+   * **`L`:** Open the scrollable on-device **System & Crash Logs** viewer (`S`/`TAB` toggles `system.log`/`crash.log`, `C` clears).
+   * **`F2`:** Run the 8/8 on-device self-test suite.
+   * **`ALT+F5`:** Hard Reload UI & Display Rescue (press twice within 3s for emergency hardware `machine.reset()`).
+   * **`Q`:** Exit cleanly to the `COM4` serial `>>>` REPL.
 
 ---
 
