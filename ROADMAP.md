@@ -1,7 +1,7 @@
 # 🌲 PinhOS — Architectural Specification & Engineering Roadmap
 
 > **Target Platform:** ClockworkPi PicoCalc (Raspberry Pi Pico 2W / RP2350 — Dual ARM Cortex-M33 @ 150 MHz, 520 KB SRAM, 4 MB Flash, CYW43439 Wi-Fi 4 + BLE 5.2, 320×320 SPI LCD, I2C STM32 Southbridge, SPI microSD).  
-> **Current Status:** Active Development — `v1.0.0-alpha.1` (**Phase 1 Complete & Verified 5/5 on Hardware** + Custom RP2350 Cold-Boot UF2; **Phase 2 next**).
+> **Current Status:** Active Development — `v1.0.0-alpha.1` (**Phase 1 Complete & Verified 6/6 on Hardware** + Custom RP2350 Cold-Boot UF2; **Phase 2 next**).
 
 ---
 
@@ -91,11 +91,11 @@ def main(ctx):
   - Provide `swap.save(app_id, state_dict)` and `swap.load(app_id)` backed by `/sd/pinhos/.swap/` with automatic stale-swap pruning and corruption checks.
 - [x] **1.6 Deployment & Automated Self-Test Gate (`picocalc.ps1` & `tests/selftest.py`):**
   - Ensure `.\picocalc.ps1 upload_and_start` cleanly deploys files over `COM4` Raw REPL (with per-chunk write & signature verification) or `mpremote` and streams the 5s Boot Guard stabilization window.
-  - Implement `tests/selftest.py` (`.\picocalc.ps1 test`) verifying: HAL display/I2C/SD init, swap R/W roundtrip, sandbox module cleanup (`< 2048 bytes` SRAM leak tolerance), and simulated 3-strike safe-mode trigger (**5/5 PASS verified on PicoCalc hardware**).
+  - Implement `tests/selftest.py` (`.\picocalc.ps1 test`) verifying: HAL display/I2C/SD init, swap R/W roundtrip, sandbox module cleanup (`< 2048 bytes` SRAM leak tolerance), simulated 3-strike safe-mode trigger, and non-blocking input + frozen `pinhos_boot` & Boot Menu/`Ctrl+C` stability (**6/6 PASS verified on PicoCalc hardware**).
 - [x] **1.7 Custom RP2350 Auto-Boot Base Firmware (`firmware/`):**
   - Reproducible WSL2/Linux build pipeline (`firmware/build_uf2.sh`) compiling MicroPython `v1.25.0` (`RPI_PICO2_W`) + `picocalcdisplay` & `vtterminal` C modules into `firmware/dist/pinhos-picocalc-pico2w.uf2`.
-  - Frozen early-boot router (`firmware/frozen/_boot.py` & `pinhos_boot.py`) that initializes `PicoDisplay(320, 320)`, `PicoKeyboard()`, and `PicoSD()`, auto-attaches `UART(0)` (`COM4`), and cold-boots straight into `/sd/pinhos/main.py`.
-  - Built-in boot hotkeys: hold `ESC`/`F1` during splash to drop into MicroPython REPL, or `F2` to open the Phase 7-ready **Dual-Boot Manager** (`PinhOS`, `REPL`, `Reset Strikes`, `/sd/firmwares/*.uf2` scanner).
+  - Frozen early-boot router (`firmware/frozen/_boot.py` & `pinhos_boot.py`) that initializes `PicoDisplay(320, 320)`, `PicoKeyboard()`, and `PicoSD()`, auto-attaches `UART(0)` (`COM4`), dynamically loads `version` & `firmware_version` from `/sd/pinhos/version.json`, renders a staged `0% → 100%` cold-boot progress bar and live `5.0s` countdown, and boots straight into `/sd/pinhos/main.py`.
+  - Built-in boot hotkeys: `[ENTER]` instant boot, `[F1]`/`[ESC]` Custom Safe Recovery Mode, `[F2]` crash-proof **Dual-Boot Manager** (dirty-flag rendering + `gc.collect()`), and `[CTRL+C]` (`0xA5` + `c`) immediate REPL interrupt.
 
 ---
 

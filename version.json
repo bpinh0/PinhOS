@@ -1,6 +1,7 @@
 {
   "name": "PinhOS",
   "version": "1.0.0-alpha.1",
+  "firmware_version": "1.0.0-uf2.4",
   "phase": 1,
   "codename": "Foundation",
   "build_timestamp": "2026-11-18T17:30:00Z",

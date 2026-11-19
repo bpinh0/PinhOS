@@ -2,7 +2,7 @@
 
 **A modular, dual-UI MicroPython operating system and portable field cyberdeck platform for the ClockworkPi PicoCalc & Raspberry Pi Pico 2W (RP2350).**
 
-> 🚀 **Status: `v1.0.0-alpha.1` — Phase 1 Complete & Verified on Hardware.** Hardware Abstraction (`boards/`), 3-Strike Boot Guard (`main.py`), Sandboxed App Runner (`core/sandbox.py`), Cooperative Swap (`core/swap.py`), 5/5 On-Device Self-Test Gate (`tests/selftest.py`), and Custom RP2350 Auto-Boot UF2 (`firmware/`) are all complete and verified on the ClockworkPi PicoCalc (Pico 2W). **Phase 2 (Dual-UI Engine & Unified Theme System) is next.**
+> 🚀 **Status: `v1.0.0-alpha.1` — Phase 1 Complete & Verified on Hardware.** Hardware Abstraction (`boards/`), 3-Strike Boot Guard (`main.py`), Sandboxed App Runner (`core/sandbox.py`), Cooperative Swap (`core/swap.py`), 6/6 On-Device Self-Test Gate (`tests/selftest.py`), and Custom RP2350 Auto-Boot UF2 (`firmware/`) are all complete and verified on the ClockworkPi PicoCalc (Pico 2W). **Phase 2 (Dual-UI Engine & Unified Theme System) is next.**
 
 ---
 
@@ -73,10 +73,10 @@ pinhos/
 │   └── sysmon.py           # Real-time SRAM/GC telemetry, RP2350 temp/clock, SD benchmark
 ├── apps/                   # Community & user applets (single-entry APP_META contract)
 ├── themes/                 # Built-in & user JSON themes (amber_phosphor.json default)
-├── tests/                  # On-device hardware, SRAM leak, and boot-guard self-test suite (5/5 PASS)
+├── tests/                  # On-device hardware, SRAM leak, input & boot-router self-test suite (6/6 PASS)
 ├── firmware/               # Custom RP2350 PicoCalc MicroPython UF2 builder & frozen Dual-Boot router
 │   ├── frozen/_boot.py     # Early hardware init (PicoDisplay, PicoKeyboard, PicoSD, UART0 COM4)
-│   ├── frozen/pinhos_boot.py # Cold-boot splash, [ESC/F1] REPL escape & [F2] Dual-Boot Manager
+│   ├── frozen/pinhos_boot.py # Cold-boot splash (5s countdown, 0-100% progress bar, version.json), [F1] Recovery, [F2] Boot Menu & [CTRL+C] REPL
 │   ├── build_uf2.sh        # Reproducible WSL2/Linux UF2 build script (RPI_PICO2_W)
 │   └── dist/               # Compiled pinhos-picocalc-pico2w.uf2 image
 ├── picocalc.ps1            # Windows PowerShell deployment, sync, and test automation script
@@ -103,10 +103,11 @@ pinhos/
    .\picocalc.ps1 upload_and_start
    .\picocalc.ps1 test
    ```
-4. **Cold-Boot Hotkeys (during the 600ms PinhOS splash):**
-   * **Default:** Boots straight into `/sd/pinhos/main.py` → 5s Boot Guard → PinhOS Dashboard.
-   * **Hold `ESC` or `F1`:** Drops cleanly into the MicroPython `>>>` REPL (`COM4` + LCD).
-   * **Hold `F2`:** Opens the **PinhOS Dual-Boot Manager** (`PinhOS`, `REPL`, `Reset Strikes`, `/sd/firmwares/*.uf2`).
+4. **Cold-Boot Hotkeys (during the 5.0s PinhOS splash with live countdown & progress bar):**
+   * **Default / `ENTER`:** Boots straight into `/sd/pinhos/main.py` → 5s Boot Guard → PinhOS Dashboard (`ENTER` skips the countdown immediately).
+   * **`F1` or `ESC`:** Launches **PinhOS Custom Safe Recovery Mode** (diagnostics, strike reset, config/swap cleanup, `COM4` REPL).
+   * **`F2`:** Opens the **PinhOS Dual-Boot Manager** (`PinhOS`, `Safe Recovery`, `Reset Strikes`, `/sd/firmwares/*.uf2` scanner).
+   * **`CTRL+C`:** Interrupts boot immediately and drops straight into the MicroPython `>>>` REPL (`COM4` + LCD).
 
 ---
 
