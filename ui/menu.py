@@ -20,7 +20,7 @@ DASHBOARD_ACTIONS = (
     {"id": "cat:apps", "short": "APPS & STUDIO", "label": "APPS & STUDIO", "icon": "apps", "badge": "[3]", "tui_badge": "[APPS >]"},
     {"id": "cat:system", "short": "SYS & DIAG", "label": "SYSTEM & DIAGNOSTICS", "icon": "dash", "badge": "[4]", "tui_badge": "[DIAG >]"},
     {"id": "cat:settings", "short": "SETTINGS", "label": "SETTINGS", "icon": "sys", "badge": "[5]", "tui_badge": "[CFG >]"},
-    {"id": "cat:set_wifi", "short": "WI-FI & NET", "label": "WI-FI & NETWORK", "icon": "net", "badge": "[6]", "tui_badge": "[NET >]"},
+    {"id": "cat:set_conn", "short": "WI-FI & NET", "label": "WI-FI & NETWORK", "icon": "net", "badge": "[6]", "tui_badge": "[NET >]"},
 )
 
 MENU_TREE = {
@@ -39,45 +39,45 @@ MENU_TREE = {
         {"id": "act:selftest", "label": "Run Self-Test", "badge": "[F2]"},
     )),
     "settings": ("Settings", (
-        {"id": "cat:set_wifi", "label": "Network & Wi-Fi", "dyn": "wifi_st"},
-        {"id": "cat:set_display", "label": "Display & UI", "dyn": "ui_summary"},
-        {"id": "cat:set_theme", "label": "Themes", "dyn": "theme_name"},
-        {"id": "cat:set_sync", "label": "GitHub Sync (Apps/Thm)", "badge": "[OTA >]"},
-        {"id": "cat:set_power", "label": "Device & Power", "dyn": "bat_pct"},
+        {"id": "cat:set_conn", "label": "Connectivity & Time", "dyn": "conn_badge"},
+        {"id": "cat:set_display", "label": "Display & Appearance", "dyn": "ui_summary"},
+        {"id": "cat:set_bar_snd", "label": "Status Bar & Sound", "dyn": "bar_snd_badge"},
+        {"id": "cat:set_power", "label": "System, Power & Backup", "dyn": "power_badge"},
         {"id": "cat:set_about", "label": "About PinhOS", "dyn": "os_ver"},
     )),
-    "set_sync": ("GitHub Sync", (
-        {"id": "sync:themes", "label": "Sync Themes from GitHub", "badge": "[JSON]"},
-        {"id": "sync:apps", "label": "Sync Apps from GitHub", "badge": "[PY]"},
-        {"id": "sync:check", "label": "Check Remote OS Version", "badge": "[VER]"},
-    )),
-    "set_wifi": ("Network & Wi-Fi", (
+    "set_conn": ("Connectivity & Time", (
         {"id": "wifi:status", "label": "Wi-Fi Status", "dyn": "wifi_st"},
         {"id": "wifi:scan", "label": "Scan & Connect", "badge": "[SCAN]"},
         {"id": "wifi:saved", "label": "Saved Networks", "badge": "[LIST]"},
         {"id": "wifi:auto", "label": "Auto-Connect Boot", "dyn": "wifi_auto"},
+        {"id": "wifi:off", "label": "Disconnect Wi-Fi", "badge": "[OFF]"},
         {"id": "ntp:sync", "label": "Sync NTP Clock Now", "badge": "[NTP]"},
         {"id": "ntp:auto", "label": "Auto-NTP on Wi-Fi", "dyn": "ntp_auto"},
         {"id": "ntp:tz", "label": "Timezone Offset", "dyn": "tz_off"},
-        {"id": "wifi:off", "label": "Disconnect Wi-Fi", "badge": "[OFF]"},
+        {"id": "sync:check", "label": "GitHub: Check OS Version", "badge": "[VER]"},
+        {"id": "sync:themes", "label": "GitHub: Sync Themes", "badge": "[JSON]"},
+        {"id": "sync:apps", "label": "GitHub: Sync Apps", "badge": "[PY]"},
     )),
-    "set_display": ("Display & UI", (
+    "set_display": ("Display & Appearance", (
         {"id": "cat:set_theme", "label": "Theme", "dyn": "theme_name"},
         {"id": "set:mode", "label": "UI Mode", "dyn": "ui_mode"},
-        {"id": "set:layout", "label": "Launcher Layout", "dyn": "layout"},
+        {"id": "set:layout", "label": "App Drawer Style", "dyn": "layout"},
+        {"id": "set:boot_scr", "label": "Boot Screen", "dyn": "boot_scr"},
+        {"id": "set:lcd_bl", "label": "LCD Backlight", "dyn": "lcd_bl"},
+        {"id": "set:kb_bl", "label": "KB Backlight", "dyn": "kb_bl"},
+    )),
+    "set_bar_snd": ("Status Bar & Sound", (
         {"id": "set:wifi_ind", "label": "Wi-Fi Indicator", "dyn": "wifi_ind"},
         {"id": "set:bat_ind", "label": "Battery Indicator", "dyn": "bat_ind"},
         {"id": "set:sound", "label": "Key Sound / Beep", "dyn": "sound"},
-        {"id": "set:lcd_bl", "label": "Backlight (LCD)", "dyn": "lcd_bl"},
-        {"id": "set:kb_bl", "label": "Backlight (KB)", "dyn": "kb_bl"},
     )),
-    "set_power": ("Device & Power", (
-        {"id": "info:bat_rtc", "label": "Battery & RTC Status", "dyn": "bat_pct"},
-        {"id": "set:cpu_mhz", "label": "CPU Clock (Overclock)", "dyn": "cpu_mhz"},
+    "set_power": ("System, Power & Backup", (
+        {"id": "set:cpu_mhz", "label": "CPU Clock Profile", "dyn": "cpu_mhz"},
         {"id": "set:sleep_to", "label": "Auto-Sleep Timer", "dyn": "sleep_to"},
         {"id": "act:sleep", "label": "Sleep Now (5s)", "badge": "[^Z]"},
         {"id": "cfg:save_snap", "label": "Save Config Snapshot", "badge": "[SD]"},
-        {"id": "cfg:load_snap", "label": "Load Config Snapshot", "dyn": "snap_st"},
+        {"id": "cfg:load_snap", "label": "Restore Config Snapshot", "dyn": "snap_st"},
+        {"id": "info:bat_rtc", "label": "Battery & RTC Info", "dyn": "bat_pct"},
         {"id": "act:reboot", "label": "Reboot PinhOS", "badge": "[RST]"},
         {"id": "act:repl", "label": "COM4 Serial Link", "dyn": "serial_link"},
     )),
@@ -286,6 +286,20 @@ def _scan_apps(sandbox, apps_dir="/sd/pinhos/apps"):
 
 
 def _dyn_badge(tag, board, ui, manifest, cfg=None):
+    if tag == "conn_badge":
+        try:
+            from net.wifi import get_wifi_manager
+            st = get_wifi_manager().status()
+            return st["ip"][:13] + " >" if st.get("connected") else "[LAN >]"
+        except Exception:
+            return "[LAN >]"
+    if tag == "bar_snd_badge":
+        snd = bool(cfg.get("sound", True) if cfg else True)
+        return ("SND:ON >" if snd else "SND:OFF >")
+    if tag == "power_badge":
+        return "{}% >".format(board.get_battery().get("percent", 0))
+    if tag == "boot_scr":
+        return "HOME" if str(cfg.get("boot_screen", "desktop") if cfg else "desktop").lower() == "desktop" else "DRAWER"
     if tag == "wifi_st":
         try:
             from net.wifi import get_wifi_manager
@@ -298,7 +312,7 @@ def _dyn_badge(tag, board, ui, manifest, cfg=None):
     if tag == "bat_pct":
         return "{}%".format(board.get_battery().get("percent", 0))
     if tag == "os_ver":
-        return "v" + str(manifest.get("version", "1.0.0-alpha.3"))[:11]
+        return "v" + str(manifest.get("version", "1.0.0-alpha.3.1"))[:11]
     if tag == "theme_name":
         return ui.theme.name.split()[0][:10] + " >"
     if tag == "ui_mode":
@@ -710,6 +724,12 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                     if cfg:
                         cfg.set("launcher_layout", nxt, save_now=True)
                     status_msg, status_kind = "Layout: " + nxt.upper(), "ok"; _sync(force=True)
+                elif aid == "set:boot_scr":
+                    cur = str(cfg.get("boot_screen", "desktop") if cfg else "desktop").lower()
+                    nxt = "drawer" if cur == "desktop" else "desktop"
+                    if cfg:
+                        cfg.set("boot_screen", nxt, save_now=True)
+                    status_msg, status_kind = "Boot Screen: " + ("HOME" if nxt == "desktop" else "DRAWER"), "ok"; _sync(force=True)
                 elif aid == "set:wifi_ind":
                     from net.wifi import WIFI_INDICATOR_MODES
                     cur = str(cfg.get("wifi_indicator", "bars") if cfg else "bars").lower()
