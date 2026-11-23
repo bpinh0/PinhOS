@@ -1,4 +1,4 @@
-# PinhOS v1.0.0-alpha.3 — Phase 1+2+3 Boot Entry, 3-Strike Crash Guard & Dual-UI Engine (main.py)
+# PinhOS v1.0.0-alpha.3.1 — Phase 1+2+3.1 Boot Entry, 3-Strike Crash Guard, Desktop Home & Dual-UI Engine (main.py)
 # Zero hardcoded pin numbers outside boards/.
 
 import os
@@ -486,7 +486,8 @@ def open_log_viewer(board, ui, logger, kind="system"):
     return _olv(board, ui, logger, kind=kind)
 
 
-_DASHBOARD_HINTS = "^B:Sh ^F:Fil ^V:View ^M:UI ^T:Thm ^Z:Slp ^Q:LNK"
+_DESKTOP_HINTS = "ENT:Apps 1-6:Go N:Note E:Edit ^M:UI ^T:Thm ^Q:LNK"
+_DASHBOARD_HINTS = "ENT:Open ESC:Home ^V:View ^M:UI ^T:Thm ^Q:LNK"
 
 
 def confirm_dialog(board, ui, title, lines, footer="[Y/ENTER] Yes  [N/ESC] No", kind="warn"):
@@ -544,15 +545,83 @@ def _ensure_ui_services(board, cfg=None):
     return theme_mgr, ui
 
 
+def _sync_status_bar(status_bar, ui, board, manifest, chg_phase=0):
+    bat = board.get_battery()
+    ver = (manifest or {}).get("version", "1.0.0-alpha.3.1")
+    cfg = runtime_state.get("config")
+    wf_mode = str(cfg.get("wifi_indicator", "bars") if cfg else "bars").lower()
+    wf_lvl, wf_txt = None, ""
+    if wf_mode != "off":
+        try:
+            from net.wifi import get_wifi_bar_info
+            wf_lvl, wf_txt = get_wifi_bar_info(wf_mode)
+        except Exception:
+            wf_lvl, wf_txt = None, ""
+    bm = str(cfg.get("battery_indicator", "both") if cfg else "both").lower()
+    bat_icon = (bat["percent"], bat["charging"], chg_phase if (bat["charging"] and bat["percent"] < 100) else 0) if bm in ("both", "icon") else None
+    bat_txt = "{}%".format(bat["percent"]) if bm in ("both", "pct") else ""
+    clk = board.get_timestamp_str(True)[:5]
+    right_txt = " ".join([x for x in (wf_txt, clk, bat_txt) if x])
+
+    status_bar.update(
+        title="PinhOS v{}".format(ver),
+        mode_label=ui.mode_badge,
+        right_text=right_txt,
+        wifi_level=wf_lvl,
+        bat_info=bat_icon,
+        serial_link=bool(runtime_state.get("serial_link", False)),
+    )
+
+
+class _DesktopView:
+    """Phase 3.1 Android-Style Desktop Home Screen (Quick Strip + Split Telemetry/Notes Cards)."""
+
+    def __init__(self, ui, manifest):
+        from ui.widgets import StatusBar, FooterBar
+        from ui.desktop import DesktopHome
+
+        self.ui = ui
+        self.screen = "desktop"
+        self.manifest = manifest or {"version": "1.0.0-alpha.3.1", "arch": "armv7emsp"}
+        self.status_bar = StatusBar(0, 0, 320, 20, title="PinhOS", mode_label=ui.mode_badge)
+        self.desktop = DesktopHome(0, 22, 320, 252)
+        self.footer_bar = FooterBar(0, 276, 320, 44, status="", status_kind="info", hints=_DESKTOP_HINTS)
+
+        ui.clear_widgets()
+        ui.add_widget(self.status_bar)
+        ui.add_widget(self.desktop)
+        ui.add_widget(self.footer_bar)
+        ui.set_focus(self.desktop)
+
+    def sync(self, board, boot_state, elapsed_ms, stabilized, status_msg="", status_kind="info", chg_phase=0):
+        _sync_status_bar(self.status_bar, self.ui, board, self.manifest, chg_phase=chg_phase)
+        cfg = runtime_state.get("config")
+        drawer_layout = str(cfg.get("launcher_layout", "grid") if cfg else "grid").upper()
+        self.desktop.sync_telemetry(
+            board,
+            ui_mode=self.ui.mode_badge,
+            drawer_layout=drawer_layout,
+            stabilized=stabilized,
+        )
+        if not status_msg:
+            status_msg = "Home | Theme: {} [{}]".format(self.ui.theme.name, self.ui.mode_badge)
+            status_kind = "info"
+        self.footer_bar.update(status=status_msg, status_kind=status_kind, hints=_DESKTOP_HINTS)
+
+    def render(self, force=False):
+        return self.ui.render(force=force)
+
+
 class _DashboardView:
-    """Phase 3 Dual-UI Launcher: 3x2 GUI Mosaic / 1-6 TUI List + Dual RAM/CPU Sparkline Strip."""
+    """Phase 3.1 App Drawer: 3x2 GUI Mosaic / 1-6 TUI List + Dual RAM/CPU Sparkline Strip."""
 
     def __init__(self, ui, manifest, sel_action=0, layout="grid"):
         from ui.widgets import StatusBar, MosaicGrid, TelemetryStrip, FooterBar
         from ui.menu import DASHBOARD_ACTIONS
 
         self.ui = ui
-        self.manifest = manifest or {"version": "1.0.0-alpha.3", "arch": "armv7emsp"}
+        self.screen = "drawer"
+        self.manifest = manifest or {"version": "1.0.0-alpha.3.1", "arch": "armv7emsp"}
         self.status_bar = StatusBar(0, 0, 320, 20, title="PinhOS", mode_label=ui.mode_badge)
         self.action_menu = MosaicGrid(
             4, 23, 312, 218,
@@ -573,32 +642,9 @@ class _DashboardView:
 
     def sync(self, board, boot_state, elapsed_ms, stabilized, status_msg="", status_kind="info", chg_phase=0):
         free_kb = (gc.mem_free() // 1024) if hasattr(gc, "mem_free") else 256
-        bat = board.get_battery()
-        ver = self.manifest.get("version", "1.0.0-alpha.3")
         theme_name = self.ui.theme.name
         cfg = runtime_state.get("config")
-        wf_mode = str(cfg.get("wifi_indicator", "bars") if cfg else "bars").lower()
-        wf_lvl, wf_txt = None, ""
-        if wf_mode != "off":
-            try:
-                from net.wifi import get_wifi_bar_info
-                wf_lvl, wf_txt = get_wifi_bar_info(wf_mode)
-            except Exception:
-                wf_lvl, wf_txt = None, ""
-        bm = str(cfg.get("battery_indicator", "both") if cfg else "both").lower()
-        bat_icon = (bat["percent"], bat["charging"], chg_phase if (bat["charging"] and bat["percent"] < 100) else 0) if bm in ("both", "icon") else None
-        bat_txt = "{}%".format(bat["percent"]) if bm in ("both", "pct") else ""
-        clk = board.get_timestamp_str(True)[:5]
-        right_txt = " ".join([x for x in (wf_txt, clk, bat_txt) if x])
-
-        self.status_bar.update(
-            title="PinhOS v{}".format(ver),
-            mode_label=self.ui.mode_badge,
-            right_text=right_txt,
-            wifi_level=wf_lvl,
-            bat_info=bat_icon,
-            serial_link=bool(runtime_state.get("serial_link", False)),
-        )
+        _sync_status_bar(self.status_bar, self.ui, board, self.manifest, chg_phase=chg_phase)
         try:
             import machine
             cpu_mhz = machine.freq() // 1000000
@@ -606,12 +652,44 @@ class _DashboardView:
             cpu_mhz = int(cfg.get("cpu_freq_mhz", 150) if cfg else 150)
         self.telemetry_panel.push(free_kb, cpu_mhz, board.get_cpu_temp_c(), ok=stabilized)
         if not status_msg:
-            status_msg = "Theme: {} | Mode: {}".format(theme_name, self.ui.mode_badge)
+            status_msg = "App Drawer | {} [{}]".format(theme_name, self.ui.mode_badge)
             status_kind = "info"
         self.footer_bar.update(status=status_msg, status_kind=status_kind, hints=_DASHBOARD_HINTS)
 
     def render(self, force=False):
         return self.ui.render(force=force)
+
+
+def _prompt_quick_note(board, ui, fb):
+    """Inline Quick Note entry on FooterBar (ENTER saves, ESC cancels)."""
+    buf = ""
+    board.clear_input()
+    poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
+    while True:
+        fb.update(
+            status="NOTE: {}_".format(buf[-36:]),
+            status_kind="info",
+            hints="ENT:Save Note  BKSP:Del  ESC:Cancel",
+        )
+        ui.render(force=False)
+        k = poll_fn() if poll_fn else None
+        if k:
+            ku = str(k).upper()
+            if ku in ("ENTER", "RETURN"):
+                board.beep(1400, 12)
+                return buf.strip()
+            if ku in ("ESC", "BACK"):
+                board.beep(900, 10)
+                return None
+            if ku == "BACKSPACE":
+                buf = buf[:-1]
+            elif ku == "SPACE":
+                if len(buf) < 80:
+                    buf += " "
+            elif len(k) == 1 and " " <= k <= "~":
+                if len(buf) < 80:
+                    buf += k
+        _sleep_ms(25)
 
 
 def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_cat, run_tool_cb):
@@ -784,7 +862,7 @@ def ui_loop(sel_action=0):
     cfg = runtime_state.get("config")
     logger = runtime_state.get("logger")
     theme_mgr, ui = _ensure_ui_services(board, cfg=cfg)
-    manifest = runtime_state.get("manifest") or {"version": "1.0.0-alpha.3", "arch": "armv7emsp"}
+    manifest = runtime_state.get("manifest") or {"version": "1.0.0-alpha.3.1", "arch": "armv7emsp"}
     boot_state = runtime_state.get("boot_state") or load_boot_state()
     sandbox = runtime_state.get("sandbox")
     from boards.base import MOD_ALT, MOD_CTRL
@@ -792,10 +870,23 @@ def ui_loop(sel_action=0):
     def _cur_layout():
         return str(cfg.get("launcher_layout", "grid") if cfg else "grid").lower()
 
-    view = _DashboardView(ui, manifest, sel_action=sel_action, layout=_cur_layout())
+    screen = str(cfg.get("boot_screen", "desktop") if cfg else "desktop").lower()
+    if screen not in ("desktop", "drawer"):
+        screen = "desktop"
+    drawer_sel = sel_action
+
+    def _mount_view(scr=None):
+        nonlocal screen
+        if scr is not None:
+            screen = scr
+        if screen == "desktop":
+            return _DesktopView(ui, manifest)
+        return _DashboardView(ui, manifest, sel_action=drawer_sel, layout=_cur_layout())
+
+    view = _mount_view(screen)
     prev_crash = runtime_state.get("prev_crash")
     if prev_crash:
-        status_msg = "Prev Crash ({})! Press [L] Logs".format(prev_crash.get("op", "?"))
+        status_msg = "Prev Crash ({})! Press [^L] Logs".format(prev_crash.get("op", "?"))
         status_kind = "warn"
     else:
         status_msg = ""
@@ -812,14 +903,14 @@ def ui_loop(sel_action=0):
                     break
         board.clear_input()
 
-    def _exec_sandbox_file(path, label, wait_after=False):
+    def _exec_sandbox_file(path, label, wait_after=False, args=None):
         poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
         _drain_keys(100)
         if logger:
             logger.set_breadcrumb("TOOL", label[:30])
         smsg, skind = label + " done", "ok"
         if sandbox is not None:
-            res = sandbox.run_file(path, wait_on_error=True)
+            res = sandbox.run_file(path, args=args, wait_on_error=True)
             smsg = "{} OK (d={}B)".format(label[:16], res.get("sram_delta", 0))
             skind = "ok" if res.get("ok") else "err"
             if logger:
@@ -838,8 +929,9 @@ def ui_loop(sel_action=0):
         return smsg, skind
 
     def _run_action(act_id):
-        nonlocal status_msg, status_kind, view
-        cur_sel = view.action_menu.selected
+        nonlocal status_msg, status_kind, view, drawer_sel
+        if screen == "drawer" and hasattr(view, "action_menu"):
+            drawer_sel = view.action_menu.selected
 
         if act_id.startswith("cat:"):
             board.beep(1300, 12)
@@ -854,7 +946,7 @@ def ui_loop(sel_action=0):
             if res == "SLEEP_NOW":
                 return "SLEEP_NOW"
             board.set_lut(theme_mgr.active.lut)
-            view = _DashboardView(ui, manifest, sel_action=cur_sel, layout=_cur_layout())
+            view = _mount_view()
             view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
             view.render(force=True)
             return None
@@ -867,7 +959,7 @@ def ui_loop(sel_action=0):
             path, label, wait_after = TOOL_MAP[act_id]
             board.beep(1400, 15)
             status_msg, status_kind = _exec_sandbox_file(path, label, wait_after)
-            view = _DashboardView(ui, manifest, sel_action=cur_sel, layout=_cur_layout())
+            view = _mount_view()
             view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
             view.render(force=True)
 
@@ -880,14 +972,14 @@ def ui_loop(sel_action=0):
             res = _st.run_all(interactive_wait=True)
             if logger:
                 logger.info("SELFTEST: {}/{} {}".format(
-                    res.get("passed", 0), res.get("total", 10), "PASS" if res.get("ok") else "FAIL"
+                    res.get("passed", 0), res.get("total", 11), "PASS" if res.get("ok") else "FAIL"
                 ))
                 logger.clear_breadcrumb("IDLE")
             _drain_keys(150)
             board.set_lut(theme_mgr.active.lut)
-            view = _DashboardView(ui, manifest, sel_action=cur_sel, layout=_cur_layout())
+            view = _mount_view()
             status_msg = "Self-Test {}/{} {}".format(
-                res.get("passed", 0), res.get("total", 10), "PASS" if res.get("ok") else "FAIL"
+                res.get("passed", 0), res.get("total", 11), "PASS" if res.get("ok") else "FAIL"
             )
             status_kind = "ok" if res.get("ok") else "err"
             view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
@@ -896,11 +988,10 @@ def ui_loop(sel_action=0):
         elif act_id == "logs":
             board.beep(1400, 12)
             _drain_keys(100)
-            cur_sel = view.action_menu.selected
             open_log_viewer(board, ui, logger, kind="crash" if runtime_state.get("prev_crash") else "system")
             runtime_state["prev_crash"] = None
             _drain_keys(120)
-            view = _DashboardView(ui, manifest, sel_action=cur_sel, layout=_cur_layout())
+            view = _mount_view()
             status_msg = "Returned from Logs"
             status_kind = "info"
             view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
@@ -912,6 +1003,8 @@ def ui_loop(sel_action=0):
             if board.get_backlight() < 40:
                 board.set_backlight(80)
             board.set_lut(theme_mgr.active.lut)
+            if screen == "desktop" and hasattr(view, "desktop"):
+                view.desktop.reload_notes()
             status_msg = "Display & Telemetry OK @ " + board.get_timestamp_str(True)
             status_kind = "ok"
             view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
@@ -989,12 +1082,14 @@ def ui_loop(sel_action=0):
                     _run_action("net")
 
                 elif ctrl and k == "V":
-                    nxt = "list" if view.action_menu.layout == "grid" else "grid"
-                    view.action_menu.set_layout(nxt)
+                    cur_l = _cur_layout()
+                    nxt = "list" if cur_l == "grid" else "grid"
                     if cfg:
                         cfg.set("launcher_layout", nxt, save_now=True)
+                    if screen == "drawer" and hasattr(view, "action_menu"):
+                        view.action_menu.set_layout(nxt)
                     board.beep(1350, 12)
-                    status_msg = "Layout: {} [{}]".format(nxt.upper(), ui.mode_badge)
+                    status_msg = "Drawer Layout: {} [{}]".format(nxt.upper(), ui.mode_badge)
                     status_kind = "ok"
                     view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
                     view.render(force=True)
@@ -1022,20 +1117,56 @@ def ui_loop(sel_action=0):
                 elif ctrl and k == "L":
                     _run_action("logs")
 
-                elif k in ("UP", "DOWN", "LEFT", "RIGHT"):
+                elif screen == "desktop" and k == "N" and not ctrl:
+                    board.beep(1300, 10)
+                    txt = _prompt_quick_note(board, ui, view.footer_bar)
+                    if txt:
+                        if view.desktop.add_note(txt):
+                            status_msg, status_kind = "Note saved to notes.txt", "ok"
+                        else:
+                            status_msg, status_kind = "Failed to save note", "err"
+                    else:
+                        status_msg, status_kind = "Note cancelled", "info"
+                    last_act_ms = _ticks_ms()
+                    view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind, chg_phase=chg_phase)
+                    view.render(force=True)
+
+                elif screen == "desktop" and k == "E" and not ctrl:
+                    from ui.desktop import NOTES_PATH
+                    from core.config import PINHOS_ROOT
+                    board.beep(1400, 12)
+                    status_msg, status_kind = _exec_sandbox_file(
+                        PINHOS_ROOT + "/tools/editor.py", "Notes Editor", False, args={"path": NOTES_PATH}
+                    )
+                    view = _mount_view("desktop")
+                    view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind, chg_phase=chg_phase)
+                    view.render(force=True)
+                    last_act_ms = _ticks_ms()
+
+                elif screen == "drawer" and k in ("UP", "DOWN", "LEFT", "RIGHT"):
                     if ui.handle_key(k, allow_hotkeys=False):
+                        drawer_sel = view.action_menu.selected
                         board.beep(1100, 8)
                         # Partial dirty-row redraw ONLY (zero full-screen clear!)
                         view.render(force=False)
 
-                elif k in ("ENTER", "SPACE", " "):
+                elif k == "HOME" or (screen == "desktop" and k in ("ENTER", "SPACE", " ")):
+                    board.beep(1350, 12)
+                    target = "drawer" if screen == "desktop" else "desktop"
+                    view = _mount_view(target)
+                    status_msg = "App Drawer [ESC:Home]" if target == "drawer" else "Desktop Home"
+                    status_kind = "info"
+                    view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind, chg_phase=chg_phase)
+                    view.render(force=True)
+
+                elif screen == "drawer" and k in ("ENTER", "SPACE", " "):
                     item = view.action_menu.get_selected_item()
                     if isinstance(item, dict) and item.get("id"):
                         res = _run_action(item["id"])
                         if res == "EXIT_REPL":
                             on, smsg = toggle_serial_link(board, logger)
                             status_msg, status_kind = smsg, ("ok" if on else "info")
-                            view = _DashboardView(ui, manifest, sel_action=view.action_menu.selected, layout=_cur_layout())
+                            view = _mount_view()
                             view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
                             view.render(force=True)
                         elif res == "SLEEP_NOW":
@@ -1044,7 +1175,7 @@ def ui_loop(sel_action=0):
                             else:
                                 slept = _enter_sleep_mode(board, ui, logger, countdown_s=5)
                                 status_msg, status_kind = ("Woke from Sleep" if slept else "Sleep Cancelled"), "ok"
-                            view = _DashboardView(ui, manifest, sel_action=view.action_menu.selected, layout=_cur_layout())
+                            view = _mount_view()
                             view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
                             view.render(force=True)
                         last_act_ms = _ticks_ms()
@@ -1056,12 +1187,14 @@ def ui_loop(sel_action=0):
                     from ui.menu import DASHBOARD_ACTIONS
                     idx = int(k) - 1
                     if 0 <= idx < len(DASHBOARD_ACTIONS):
-                        view.action_menu.set_selected(idx)
+                        drawer_sel = idx
+                        if screen == "drawer" and hasattr(view, "action_menu"):
+                            view.action_menu.set_selected(idx)
                         res = _run_action(DASHBOARD_ACTIONS[idx]["id"])
                         if res == "EXIT_REPL":
                             on, smsg = toggle_serial_link(board, logger)
                             status_msg, status_kind = smsg, ("ok" if on else "info")
-                            view = _DashboardView(ui, manifest, sel_action=idx, layout=_cur_layout())
+                            view = _mount_view()
                             view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
                             view.render(force=True)
                         elif res == "SLEEP_NOW":
@@ -1070,7 +1203,7 @@ def ui_loop(sel_action=0):
                             else:
                                 slept = _enter_sleep_mode(board, ui, logger, countdown_s=5)
                                 status_msg, status_kind = ("Woke from Sleep" if slept else "Sleep Cancelled"), "ok"
-                            view = _DashboardView(ui, manifest, sel_action=idx, layout=_cur_layout())
+                            view = _mount_view()
                             view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
                             view.render(force=True)
                         last_act_ms = _ticks_ms()
@@ -1093,7 +1226,6 @@ def ui_loop(sel_action=0):
                     bp("[UI] Hard Reload triggered (ALT+F5)")
                     if logger:
                         logger.warn("UI: Hard Reload triggered (ALT+F5)")
-                    cur_sel = view.action_menu.selected
                     if hasattr(board, "init_uart_bridge"):
                         try:
                             board.init_uart_bridge(rebind=True)
@@ -1105,7 +1237,7 @@ def ui_loop(sel_action=0):
                         board.set_backlight(80)
                     theme_mgr.apply(theme_mgr.active.id, persist=False, notify=False)
                     ui.set_mode(ui.mode, persist=False)
-                    view = _DashboardView(ui, manifest, sel_action=cur_sel, layout=_cur_layout())
+                    view = _mount_view()
                     gc.collect()
                     board.beep(1200, 12)
                     board.beep(1600, 15)
@@ -1118,11 +1250,19 @@ def ui_loop(sel_action=0):
                     _run_action("refresh")
 
                 elif k in ("ESC", "BACK", "BACKSPACE"):
-                    board.beep(900, 10)
-                    status_msg = "Dashboard Active (^Q:LNK ^Z:Sleep)"
-                    status_kind = "info"
-                    view.footer_bar.update(status=status_msg, status_kind=status_kind)
-                    view.render(force=False)
+                    if screen == "drawer":
+                        board.beep(1050, 10)
+                        view = _mount_view("desktop")
+                        status_msg = "Desktop Home"
+                        status_kind = "info"
+                        view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind, chg_phase=chg_phase)
+                        view.render(force=True)
+                    else:
+                        board.beep(900, 10)
+                        status_msg = "Home Active (ENT:Apps N:Note ^Q:LNK)"
+                        status_kind = "info"
+                        view.footer_bar.update(status=status_msg, status_kind=status_kind)
+                        view.render(force=False)
 
             anim_ticks += 1
             if anim_ticks >= 20:
@@ -1343,7 +1483,7 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
         _register_recovery_helpers()
 
         boot_msg = "BOOT: PinhOS v{} ({}) starting on {} [{} / {}]".format(
-            manifest.get("version", "1.0.0-alpha.3"),
+            manifest.get("version", "1.0.0-alpha.3.1"),
             manifest.get("arch", "armv7emsp"),
             board.name,
             ui.mode_badge,
@@ -1352,8 +1492,12 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
         logger.info(boot_msg)
         bp("[BOOT]", boot_msg)
 
-        # Step 5: Render initial Dual-UI dashboard and monitor 5-second stability window
-        view = _DashboardView(ui, manifest, sel_action=0, layout=str(cfg.get("launcher_layout", "grid")).lower())
+        # Step 5: Render initial Desktop Home (or App Drawer) and monitor 5-second stability window
+        boot_scr = str(cfg.get("boot_screen", "desktop")).lower()
+        if boot_scr == "drawer":
+            view = _DashboardView(ui, manifest, sel_action=0, layout=str(cfg.get("launcher_layout", "grid")).lower())
+        else:
+            view = _DesktopView(ui, manifest)
         elapsed = _ticks_diff(_ticks_ms(), t0)
         view.sync(board, boot_state, elapsed, False)
         view.render(force=True)
@@ -1394,7 +1538,7 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
         gc.collect()
         free_b = gc.mem_free() if hasattr(gc, "mem_free") else 262144
         bp("<<PINHOS:BOOT_OK:v{}:FREE_RAM={}>>".format(
-            manifest.get("version", "1.0.0-alpha.3"), free_b
+            manifest.get("version", "1.0.0-alpha.3.1"), free_b
         ))
         if interactive:
             ui_loop()
@@ -1402,7 +1546,7 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
             "mode": "NORMAL",
             "ui_mode": ui.mode,
             "theme": theme_mgr.active.id,
-            "version": manifest.get("version", "1.0.0-alpha.3"),
+            "version": manifest.get("version", "1.0.0-alpha.3.1"),
             "board": board.id,
             "stabilized": runtime_state["stabilized"],
             "strikes": boot_state.get("boot_strikes", 0),

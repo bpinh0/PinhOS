@@ -220,6 +220,7 @@ class PicoCalcBoard(BoardBase):
         self.set_backlight(self._backlight_pct)
         self.set_kb_backlight(self._kb_backlight_pct)
         self.clear_input()
+        self.init_uart_bridge(rebind=False)
         self.initialized = True
         return True
 
@@ -575,6 +576,22 @@ class PicoCalcBoard(BoardBase):
         """
         count = 0
         raw = None
+
+        # 0. Non-blocking COM4 (UART0) Ctrl-C interrupt check:
+        # On RP2350 MicroPython, UART(0) on dupterm(0) does not raise KeyboardInterrupt
+        # while ui_loop() polls I2C. Reading 0x03 directly makes COM4 tools work anytime.
+        if self._uart is not None:
+            try:
+                if self._uart.any():
+                    ch = self._uart.read(1)
+                    if ch and (b"\x03" in ch):
+                        raise KeyboardInterrupt
+                    if hasattr(os, "dupterm_notify"):
+                        os.dupterm_notify(self._uart)
+            except KeyboardInterrupt:
+                raise
+            except Exception:
+                pass
 
         # 1. Direct STM32 I2C keyboard controller (via picocalc.keyboard.keyEvent() / 0x1F)
         raw = self._poll_i2c_keyboard()

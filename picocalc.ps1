@@ -70,6 +70,7 @@ $DeployManifest = @(
     @{ Local = "ui\tui.py";             Remote = "/sd/pinhos/ui/tui.py" },
     @{ Local = "ui\engine.py";          Remote = "/sd/pinhos/ui/engine.py" },
     @{ Local = "ui\menu.py";            Remote = "/sd/pinhos/ui/menu.py" },
+    @{ Local = "ui\desktop.py";         Remote = "/sd/pinhos/ui/desktop.py" },
     @{ Local = "net\__init__.py";       Remote = "/sd/pinhos/net/__init__.py" },
     @{ Local = "net\wifi.py";           Remote = "/sd/pinhos/net/wifi.py" },
     @{ Local = "net\sync.py";           Remote = "/sd/pinhos/net/sync.py" },
@@ -220,7 +221,11 @@ function Wait-RawPrompt($sp, [int]$maxMs = 5000, [string]$RequiredMarker = "") {
     $sb = New-Object System.Text.StringBuilder
     while ($sw.ElapsedMilliseconds -lt $maxMs) {
         if ($sp.BytesToRead -gt 0) {
-            [void]$sb.Append($sp.ReadExisting())
+            $rd = $sp.ReadExisting()
+            [void]$sb.Append($rd)
+            if ($rd.IndexOf([char]4) -lt 0 -and $rd.IndexOf('>') -lt 0) {
+                continue
+            }
             $acc = $sb.ToString()
             $hasMarker = $true
             $markerIdx = 0
@@ -578,9 +583,11 @@ if ($Action -in @("com", "check", "ping", "status")) {
         Write-Host "[COM CHECK] Port '$ResolvedPort' opened OK @ $BaudRate baud. Probing PicoCalc REPL..." -ForegroundColor Cyan
         Start-Sleep -Milliseconds 120
         $sp.Write([string][char]3)
-        Start-Sleep -Milliseconds 80
+        Start-Sleep -Milliseconds 90
+        $sp.Write([string][char]3)
+        Start-Sleep -Milliseconds 180
         $sp.Write("`r`n")
-        $probe = Read-UntilIdle $sp 150 700
+        $probe = Read-UntilIdle $sp 220 1200
         if ($probe -match ">>>|raw REPL|KeyboardInterrupt|PINHOS") {
             Write-Host "[COM CHECK] PASS: '$ResolvedPort' is OPEN and PicoCalc REPL responded ($($probe.Trim() -replace '\s+', ' '))" -ForegroundColor Green
             exit 0
@@ -727,7 +734,7 @@ if picocalc and hasattr(picocalc, 'display'):
         _d.recoverRefresh()
         _d.fill(0)
         _d.rect(18, 118, 284, 64, 3)
-        _d.text('DEPLOYING PinhOS v1.0.0-alpha.3', 36, 134, 3)
+        _d.text('DEPLOYING PinhOS v1.0.0-alpha.3.1', 36, 134, 3)
         _d.rect(40, 154, 240, 12, 3)
     except Exception:
         pass
@@ -777,7 +784,7 @@ _bp('INIT_OK')
         Write-Host "[PinhOS] Launching /sd/pinhos/main.py and streaming Boot Guard stabilization..."
         $launchCode = @"
 import os, sys, io, gc, machine
-for _m in ('main','boards','boards.base','boards.picocalc','boards.generic_spi','core','core.config','core.logger','core.swap','core.sandbox','core.theme','ui','ui.widgets','ui.gui','ui.tui','ui.engine','ui.menu','net','net.wifi','net.sync','tools','tools.shell','tools._shell_cmds','tools.editor','tools.files','tools.net_tools','tools.uart_term','tools.sysmon','tests.selftest','tests.selftest_p3'):
+for _m in ('main','boards','boards.base','boards.picocalc','boards.generic_spi','core','core.config','core.logger','core.swap','core.sandbox','core.theme','ui','ui.widgets','ui.gui','ui.tui','ui.engine','ui.menu','ui.desktop','net','net.wifi','net.sync','tools','tools.shell','tools._shell_cmds','tools.editor','tools.files','tools.net_tools','tools.uart_term','tools.sysmon','tests.selftest','tests.selftest_p3'):
  if _m in sys.modules:del sys.modules[_m]
 gc.collect()
 if '/sd/pinhos' not in sys.path:sys.path.insert(0,'/sd/pinhos')
@@ -843,14 +850,14 @@ _bp('PREP_OK')
 
         $runTestCmd = @"
 import os, sys, io, gc
-for _m in ('tests.selftest','tests.selftest_p3','tests','main','boards','boards.base','boards.picocalc','boards.generic_spi','core','core.config','core.logger','core.swap','core.sandbox','core.theme','ui','ui.widgets','ui.gui','ui.tui','ui.engine','ui.menu','net','net.wifi','net.sync','tools','tools.shell','tools._shell_cmds','tools.editor','tools.files','tools.net_tools','tools.uart_term','tools.sysmon'):
+for _m in ('tests.selftest','tests.selftest_p3','tests','main','boards','boards.base','boards.picocalc','boards.generic_spi','core','core.config','core.logger','core.swap','core.sandbox','core.theme','ui','ui.widgets','ui.gui','ui.tui','ui.engine','ui.menu','ui.desktop','net','net.wifi','net.sync','tools','tools.shell','tools._shell_cmds','tools.editor','tools.files','tools.net_tools','tools.uart_term','tools.sysmon'):
  if _m in sys.modules:del sys.modules[_m]
 gc.collect()
 try:
  import tests.selftest as _st
  _st.run_all(interactive_wait=False)
 except Exception as _e:
- _buf=io.StringIO();sys.print_exception(_e,_buf);_bp('<<PINHOS:SELFTEST:FAIL:0/10>>\r\n'+_buf.getvalue())
+ _buf=io.StringIO();sys.print_exception(_e,_buf);_bp('<<PINHOS:SELFTEST:FAIL:0/11>>\r\n'+_buf.getvalue())
 "@
         $testOut = Stream-RawReplCommand $sp $runTestCmd "<<PINHOS:SELFTEST:" 90000
         # Exit Raw REPL cleanly (Ctrl-B) back to friendly >>> prompt with dupterm preserved
@@ -892,7 +899,7 @@ except Exception as _e:
         Initialize-PicoRawSession $sp
         $outFile = if ($Arg1 -and $Arg1.Trim().Length -gt 0) { $Arg1.Trim() } else { Join-Path $PSScriptRoot "picocalc_shot.bmp" }
         $shotCode = @"
-import sys, binascii
+import sys, time, binascii
 if '/sd/pinhos' not in sys.path: sys.path.insert(0, '/sd/pinhos')
 from boards import get_board
 _b = get_board()
@@ -903,12 +910,14 @@ else:
     _bp('SHOT_PATH:' + _p)
     with open(_p, 'rb') as _f:
         while True:
-            _c = _f.read(384)
+            _c = _f.read(60)
             if not _c: break
             _bp('B64:' + binascii.b2a_base64(_c).decode().strip())
+            time.sleep_ms(8)
+    time.sleep_ms(40)
     _bp('SHOT_DONE')
 "@
-        $shotOut = Invoke-RawRepl $sp $shotCode 30000 16 12 -RequiredMarker "SHOT_DONE"
+        $shotOut = Invoke-RawRepl $sp $shotCode 60000 16 12 -RequiredMarker "SHOT_DONE"
         $sp.Write([string][char]2)
         [void](Read-UntilIdle $sp 150 500)
         if ($shotOut -match "SHOT_DONE") {

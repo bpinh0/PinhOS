@@ -48,7 +48,7 @@ def test_manifest_and_dirs(root="/sd/pinhos"):
         _assert(bool(st[0] & 0x4000), "Missing canonical directory: " + full)
 
     manifest = load_version_manifest(root=root)
-    _assert(manifest.get("version") == "1.0.0-alpha.3", "Expected version 1.0.0-alpha.3")
+    _assert(manifest.get("version") == "1.0.0-alpha.3.1", "Expected version 1.0.0-alpha.3.1")
     _assert(manifest.get("arch") == "armv7emsp", "Expected target arch armv7emsp")
     _assert(isinstance(manifest.get("ota"), dict) and "channel" in manifest["ota"], "Missing OTA channel field")
     return "v{} ({}) +{} dirs".format(
@@ -142,6 +142,8 @@ def test_hal_init(root="/sd/pinhos"):
         "ui/gui.py",
         "ui/tui.py",
         "ui/engine.py",
+        "ui/menu.py",
+        "ui/desktop.py",
         "tools/shell.py",
         "tools/editor.py",
         "tools/files.py",
@@ -726,13 +728,33 @@ def test_busybox_shell(root="/sd/pinhos"):
 
 
 def test_phase3_field_tools(root="/sd/pinhos"):
+    for _m in ("main", "ui.desktop"):
+        sys.modules.pop(_m, None)
     gc.collect()
     import tests.selftest_p3 as _p3
     try:
         return _p3.test_phase3_field_tools(root=root)
     finally:
         _p3 = None
-        sys.modules.pop("tests.selftest_p3", None)
+        for _m in ("tests.selftest_p3", "main", "ui.desktop"):
+            sys.modules.pop(_m, None)
+        gc.collect()
+
+
+def test_desktop_home(root="/sd/pinhos"):
+    for _m in (
+        "main", "ui.desktop", "core.sandbox", "core.swap", "core.logger", "net.wifi", "net.sync",
+        "tools.shell", "tools._shell_cmds",
+    ):
+        sys.modules.pop(_m, None)
+    gc.collect(); gc.collect()
+    import tests.selftest_p3 as _p3
+    try:
+        return _p3.test_desktop_home(root=root)
+    finally:
+        _p3 = None
+        for _m in ("tests.selftest_p3", "ui.menu", "ui.desktop"):
+            sys.modules.pop(_m, None)
         gc.collect()
 
 
@@ -753,9 +775,10 @@ def run_all(root="/sd/pinhos", interactive_wait=False):
         ("8. Dual-UI Dirty-Redraw & SRAM", test_dual_ui_engine),
         ("9. BusyBox Shell & Streaming FS", test_busybox_shell),
         ("10. Field Tools & Sandbox Meta", test_phase3_field_tools),
+        ("11. Desktop Home & Quick Notes", test_desktop_home),
     ]
 
-    _bp("=== PinhOS v1.0.0-alpha.3 Phase 1+2+3 Self-Test Suite ===")
+    _bp("=== PinhOS v1.0.0-alpha.3.1 Phase 1+2+3.1 Self-Test Suite ===")
     passed = 0
     results = []
 
@@ -789,13 +812,13 @@ def run_all(root="/sd/pinhos", interactive_wait=False):
                 7,
                 0,
             )
-            y = 26
+            y = 24
             for label, ok, detail in results:
                 tag = "[PASS]" if ok else "[FAIL]"
                 col = 10 if ok else 9
                 board.text("{} {}".format(tag, label[:44]), 4, y, col)
-                board.text(" " + str(detail)[:50], 4, y + 10, 15)
-                y += 24
+                board.text(" " + str(detail)[:50], 4, y + 9, 15)
+                y += 22
             free_kb = (gc.mem_free() // 1024) if hasattr(gc, "mem_free") else 256
             board.fill_rect(0, 272, 320, 22, 8)
             if interactive_wait:
