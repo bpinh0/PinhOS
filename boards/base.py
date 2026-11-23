@@ -312,6 +312,28 @@ class BoardBase:
     def get_cpu_temp_c(self):
         return 28.0
 
+    # --- Read-only Bus Diagnostics (Phase 3 field tools: hwinfo / i2cscan) ---
+
+    def i2c_scan(self):
+        """Return a sorted list of responding 7-bit I2C addresses (read-only probe)."""
+        return []
+
+    def get_i2c_known(self):
+        """Return {addr: label} for board-known I2C peripherals (labels live in boards/)."""
+        return {}
+
+    def get_bus_info(self):
+        """Return a dict summarising bus/peripheral state: {'i2c': bool, 'uart': bool, 'sd': bool}."""
+        return {"i2c": False, "uart": False, "sd": bool(self._sd_mounted)}
+
+    def open_aux_uart(self, baud=115200, bits=8, parity=None, stop=1):
+        """Open auxiliary field UART (never UART0 COM4 REPL). Subclasses override."""
+        return None
+
+    def close_aux_uart(self):
+        """Close auxiliary field UART if open."""
+        pass
+
     def ensure_serial_repl(self):
         """Ensure board serial REPL bridge (dupterm) is active. Subclasses override."""
         return None
