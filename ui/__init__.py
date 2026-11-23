@@ -1,4 +1,4 @@
-# PinhOS Phase 2 — Dual-UI Engine Package (ui/__init__.py)
+# PinhOS Phase 2/3 — Dual-UI Engine Package (ui/__init__.py)
 
 from ui.widgets import (
     Widget,
@@ -9,6 +9,9 @@ from ui.widgets import (
     ProgressBar,
     Dialog,
     TextView,
+    TermView,
+    MosaicGrid,
+    layout_term_screen,
 )
 from ui.gui import GUIBackend
 from ui.tui import TUIBackend
@@ -23,6 +26,9 @@ __all__ = [
     "ProgressBar",
     "Dialog",
     "TextView",
+    "TermView",
+    "MosaicGrid",
+    "layout_term_screen",
     "GUIBackend",
     "TUIBackend",
     "UIEngine",

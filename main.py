@@ -1,4 +1,4 @@
-# PinhOS v1.0.0-alpha.2 — Phase 1+2 Boot Entry, 3-Strike Crash Guard & Dual-UI Engine (main.py)
+# PinhOS v1.0.0-alpha.3 — Phase 1+2+3 Boot Entry, 3-Strike Crash Guard & Dual-UI Engine (main.py)
 # Zero hardcoded pin numbers outside boards/.
 
 import os
@@ -49,6 +49,7 @@ runtime_state = {
     "boot_state": None,
     "stabilized": False,
     "safe_mode": False,
+    "serial_link": False,
 }
 
 def bp(*args):
@@ -253,6 +254,7 @@ def _register_recovery_helpers():
         "recovery_reset_config": recovery_reset_config,
         "recovery_clear_swap": recovery_clear_swap,
         "recovery_reboot": recovery_reboot,
+        "ui": ui_loop,
     }
     if builtins is not None:
         for k, fn in helpers.items():
@@ -290,6 +292,11 @@ def enter_safe_recovery_mode(board=None, state=None, reason=None, state_path=Non
             board = None
 
     if board is not None:
+        if hasattr(board, "init_uart_bridge"):
+            try:
+                board.init_uart_bridge(rebind=True)
+            except Exception:
+                pass
         try:
             if hasattr(board, "reset_default_lut"):
                 board.reset_default_lut()
@@ -407,6 +414,12 @@ def show_bsod(board, title, exc, context="", interactive=True):
     if board is None:
         return "REPL"
 
+    if hasattr(board, "init_uart_bridge"):
+        try:
+            board.init_uart_bridge(rebind=True)
+        except Exception:
+            pass
+
     try:
         if hasattr(board, "reset_default_lut"):
             board.reset_default_lut()
@@ -469,141 +482,16 @@ def show_bsod(board, title, exc, context="", interactive=True):
 
 
 def open_log_viewer(board, ui, logger, kind="system"):
-    """
-    On-device scrollable System & Crash Log Viewer built on Dual-UI TextView.
-    [UP/DN] Scroll | [TAB/S] Switch system.log/crash.log | [R] Reload | [C] Clear | [ESC/Q] Back
-    """
-    from ui.widgets import StatusBar, TextView, FooterBar
-
-    cur_kind = "crash" if kind == "crash" else "system"
-    sb = StatusBar(0, 0, 320, 20, title="PinhOS Logs", mode_label=ui.mode_badge)
-    tv = TextView(4, 23, 312, 250, title="SYSTEM.LOG", lines=[])
-    fb = FooterBar(
-        0, 276, 320, 44,
-        status="",
-        status_kind="info",
-        hints="UP/DN:Scr S:Sys/Crsh C:Clr ESC:Back",
-    )
-
-    def _format_log_line(raw_line):
-        """Compact '[YYYY-MM-DD HH:MM:SS] [LEVEL] msg' -> 'HH:MM:SS L msg' for 320px display."""
-        s = str(raw_line).strip()
-        if len(s) > 22 and s[0] == "[" and s[11] == " " and s[20] == "]":
-            hhmmss = s[12:20]
-            rest = s[21:].lstrip()
-            lvl = ""
-            for tag, short in (("[INFO]", "I"), ("[WARN]", "W"), ("[ERROR]", "E"), ("[CRASH]", "!"), ("[DEBUG]", "D")):
-                if rest.startswith(tag):
-                    lvl = short
-                    rest = rest[len(tag):].lstrip()
-                    break
-            return "{} {} {}".format(hhmmss, lvl, rest) if lvl else "{} {}".format(hhmmss, rest)
-        return s
-
-    def _word_wrap(text, width=36, cont_indent="  "):
-        """Word-wrap text cleanly at spaces without splitting words."""
-        if len(text) <= width:
-            return [text]
-        out = []
-        words = text.split(" ")
-        cur = ""
-        limit = width
-        for w in words:
-            if not cur:
-                if len(w) <= limit:
-                    cur = w
-                else:
-                    # Single token longer than line width: chunk it
-                    for i in range(0, len(w), limit):
-                        chunk = w[i:i + limit]
-                        if i + limit < len(w):
-                            out.append((cont_indent if out else "") + chunk)
-                        else:
-                            cur = chunk
-            elif len(cur) + 1 + len(w) <= limit:
-                cur = cur + " " + w
-            else:
-                out.append((cont_indent if out else "") + cur)
-                limit = width - len(cont_indent)
-                cur = w
-        if cur:
-            out.append((cont_indent if out else "") + cur)
-        return out
-
-    def _load_lines():
-        raw_lines = logger.read_tail(kind=cur_kind, max_lines=80) if logger else []
-        if not raw_lines:
-            raw_lines = ["(No entries in {}.log)".format(cur_kind)]
-        wrapped = []
-        for ln in raw_lines:
-            fmt = _format_log_line(ln)
-            wrapped.extend(_word_wrap(fmt, width=49))
-        tv.title = "CRASH.LOG ({} ln)".format(len(wrapped)) if cur_kind == "crash" else "SYSTEM.LOG ({} ln)".format(len(wrapped))
-        tv.set_lines(wrapped, reset_scroll=False)
-        vis = tv.visible_lines()
-        tv.scroll_offset = max(0, len(wrapped) - vis)
-        theme_short = ui.theme.name.split()[0][:10]
-        sb.update(title="Logs: {}.log".format(cur_kind), mode_label=ui.mode_badge, right_text=theme_short)
-        fb.update(
-            status="Tail: /sd/pinhos/logs/{}.log".format(cur_kind),
-            status_kind="warn" if cur_kind == "crash" else "ok",
-        )
-
-    ui.clear_widgets()
-    ui.add_widget(sb)
-    ui.add_widget(tv)
-    ui.add_widget(fb)
-    ui.set_focus(tv)
-    _load_lines()
-    ui.render(force=True)
-
-    board.clear_input()
-    poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
-    try:
-        while True:
-            k = poll_fn() if poll_fn else None
-            if k:
-                ku = str(k).upper()
-                if ku in ("ESC", "Q", "BACK", "BACKSPACE"):
-                    board.beep(900, 10)
-                    break
-                elif ku in ("UP", "LEFT"):
-                    if tv.scroll(-2):
-                        ui.render(force=False)
-                elif ku in ("DOWN", "RIGHT"):
-                    if tv.scroll(2):
-                        ui.render(force=False)
-                elif ku in ("S", "TAB"):
-                    cur_kind = "crash" if cur_kind == "system" else "system"
-                    board.beep(1300, 10)
-                    _load_lines()
-                    ui.render(force=True)
-                elif ku == "R":
-                    board.beep(1400, 10)
-                    _load_lines()
-                    ui.render(force=True)
-                elif ku == "C":
-                    if logger:
-                        logger.clear_logs(kind=cur_kind)
-                    board.beep(1000, 15)
-                    _load_lines()
-                    fb.update(status="Cleared {}.log".format(cur_kind), status_kind="warn")
-                    ui.render(force=True)
-            _sleep_ms(30)
-    except KeyboardInterrupt:
-        pass
-    gc.collect()
+    from ui.menu import open_log_viewer as _olv
+    return _olv(board, ui, logger, kind=kind)
 
 
-_DASHBOARD_ACTIONS = (
-    {"id": "selftest", "label": "Run On-Device Self-Test", "badge": "[F2]"},
-    {"id": "hello", "label": "Sandbox: Hello PinhOS", "badge": "[1]"},
-    {"id": "matrix", "label": "Sandbox: Matrix Rain", "badge": "[2]"},
-    {"id": "logs", "label": "System & Crash Logs", "badge": "[L]"},
-    {"id": "refresh", "label": "Refresh Telemetry & Beep", "badge": "[R]"},
-)
+_DASHBOARD_HINTS = "^B:Sh ^F:Fil ^V:View ^M:UI ^T:Thm ^Z:Slp ^Q:LNK"
 
-_DASHBOARD_HINTS = "M/TAB:Mode T:Theme L:Logs Q:REPL"
+
+def confirm_dialog(board, ui, title, lines, footer="[Y/ENTER] Yes  [N/ESC] No", kind="warn"):
+    from ui.menu import confirm_dialog as _cd
+    return _cd(board, ui, title, lines, footer=footer, kind=kind)
 
 
 def _build_telemetry_rows(board, boot_state, elapsed_ms, stabilized):
@@ -657,42 +545,66 @@ def _ensure_ui_services(board, cfg=None):
 
 
 class _DashboardView:
-    """Phase 2 Dual-UI Dashboard composed of reusable dirty-tracked widgets."""
+    """Phase 3 Dual-UI Launcher: 3x2 GUI Mosaic / 1-6 TUI List + Dual RAM/CPU Sparkline Strip."""
 
-    def __init__(self, ui, manifest, sel_action=0):
-        from ui.widgets import StatusBar, Panel, ListMenu, FooterBar
+    def __init__(self, ui, manifest, sel_action=0, layout="grid"):
+        from ui.widgets import StatusBar, MosaicGrid, TelemetryStrip, FooterBar
+        from ui.menu import DASHBOARD_ACTIONS
 
         self.ui = ui
-        self.manifest = manifest or {"version": "1.0.0-alpha.2", "arch": "armv7emsp"}
+        self.manifest = manifest or {"version": "1.0.0-alpha.3", "arch": "armv7emsp"}
         self.status_bar = StatusBar(0, 0, 320, 20, title="PinhOS", mode_label=ui.mode_badge)
-        self.telemetry_panel = Panel(4, 23, 312, 144, title="SYSTEM TELEMETRY", label_width=102)
-        self.action_menu = ListMenu(
-            4, 170, 312, 104,
-            title="PINHOS ACTIONS",
-            items=_DASHBOARD_ACTIONS,
+        self.action_menu = MosaicGrid(
+            4, 23, 312, 218,
+            items=DASHBOARD_ACTIONS,
             selected=sel_action,
+            cols=3,
+            layout=layout,
         )
+        self.telemetry_panel = TelemetryStrip(4, 245, 312, 28, max_samples=16)
         self.footer_bar = FooterBar(0, 276, 320, 44, status="", status_kind="info", hints=_DASHBOARD_HINTS)
 
         ui.clear_widgets()
         ui.add_widget(self.status_bar)
-        ui.add_widget(self.telemetry_panel)
         ui.add_widget(self.action_menu)
+        ui.add_widget(self.telemetry_panel)
         ui.add_widget(self.footer_bar)
         ui.set_focus(self.action_menu)
 
-    def sync(self, board, boot_state, elapsed_ms, stabilized, status_msg="", status_kind="info"):
-        rows, bat = _build_telemetry_rows(board, boot_state, elapsed_ms, stabilized)
-        ver = self.manifest.get("version", "1.0.0-alpha.2")
+    def sync(self, board, boot_state, elapsed_ms, stabilized, status_msg="", status_kind="info", chg_phase=0):
+        free_kb = (gc.mem_free() // 1024) if hasattr(gc, "mem_free") else 256
+        bat = board.get_battery()
+        ver = self.manifest.get("version", "1.0.0-alpha.3")
         theme_name = self.ui.theme.name
-        right_txt = "{}%".format(bat["percent"])
+        cfg = runtime_state.get("config")
+        wf_mode = str(cfg.get("wifi_indicator", "bars") if cfg else "bars").lower()
+        wf_lvl, wf_txt = None, ""
+        if wf_mode != "off":
+            try:
+                from net.wifi import get_wifi_bar_info
+                wf_lvl, wf_txt = get_wifi_bar_info(wf_mode)
+            except Exception:
+                wf_lvl, wf_txt = None, ""
+        bm = str(cfg.get("battery_indicator", "both") if cfg else "both").lower()
+        bat_icon = (bat["percent"], bat["charging"], chg_phase if (bat["charging"] and bat["percent"] < 100) else 0) if bm in ("both", "icon") else None
+        bat_txt = "{}%".format(bat["percent"]) if bm in ("both", "pct") else ""
+        clk = board.get_timestamp_str(True)[:5]
+        right_txt = " ".join([x for x in (wf_txt, clk, bat_txt) if x])
 
         self.status_bar.update(
             title="PinhOS v{}".format(ver),
             mode_label=self.ui.mode_badge,
             right_text=right_txt,
+            wifi_level=wf_lvl,
+            bat_info=bat_icon,
+            serial_link=bool(runtime_state.get("serial_link", False)),
         )
-        self.telemetry_panel.set_rows(rows)
+        try:
+            import machine
+            cpu_mhz = machine.freq() // 1000000
+        except Exception:
+            cpu_mhz = int(cfg.get("cpu_freq_mhz", 150) if cfg else 150)
+        self.telemetry_panel.push(free_kb, cpu_mhz, board.get_cpu_temp_c(), ok=stabilized)
         if not status_msg:
             status_msg = "Theme: {} | Mode: {}".format(theme_name, self.ui.mode_badge)
             status_kind = "info"
@@ -702,13 +614,157 @@ class _DashboardView:
         return self.ui.render(force=force)
 
 
+def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_cat, run_tool_cb):
+    from ui.menu import open_menu_tree as _omt
+    return _omt(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_cat, run_tool_cb)
+
+
+def _stop_repl_watcher():
+    if builtins is not None:
+        t = getattr(builtins, "_pinhos_repl_timer", None)
+        if t is not None:
+            try:
+                t.deinit()
+            except Exception:
+                pass
+            try:
+                setattr(builtins, "_pinhos_repl_timer", None)
+            except Exception:
+                pass
+
+
+def toggle_serial_link(board=None, logger=None, enable=None):
+    """
+    Non-blocking COM4 Serial Link (LNK) toggle:
+    - Keeps board.init_uart_bridge() / ensure_serial_repl() active
+    - Toggles runtime_state["serial_link"] and shows LNK badge in StatusBar
+    - Keeps PinhOS UI/menus 100% responsive while suppressing auto-sleep
+    Returns (active_bool, status_msg).
+    """
+    if board is None:
+        board = runtime_state.get("board")
+    if logger is None:
+        logger = runtime_state.get("logger")
+    cur = bool(runtime_state.get("serial_link", False))
+    nxt = (not cur) if enable is None else bool(enable)
+    runtime_state["serial_link"] = nxt
+    if board is not None:
+        if hasattr(board, "init_uart_bridge"):
+            board.init_uart_bridge(rebind=True)
+        if hasattr(board, "ensure_serial_repl"):
+            board.ensure_serial_repl()
+        board.beep(1400 if nxt else 950, 12)
+    msg = "COM4 Serial Link: LNK ON (sleep off)" if nxt else "COM4 Serial Link: OFF"
+    if logger is not None:
+        try:
+            logger.info("SERIAL_LINK: " + ("ON" if nxt else "OFF"))
+        except Exception:
+            pass
+    bp("[SERIAL_LINK]", msg)
+    return nxt, msg
+
+
+def _enter_sleep_mode(board, ui, logger, countdown_s=5):
+    """
+    Android-style Sleep Mode with 5-second countdown Dialog:
+    - Suppressed whenever COM4 Serial Link (LNK) is active so REPL sessions never sleep.
+    - Any key during the 5s countdown cancels sleep immediately.
+    - After countdown, dims LCD & KB backlights to 0% (Core 1 & COM4 stay intact).
+    - Any key / Power button tap wakes instantaneously and restores backlights.
+    Returns True if slept & woke, False if cancelled or suppressed by LNK.
+    """
+    if runtime_state.get("serial_link"):
+        bp("[POWER] Sleep suppressed while COM4 Serial Link (LNK) is active.")
+        return False
+    from ui.widgets import Dialog
+    dlg = Dialog(
+        20, 82, 280, 144,
+        title="SLEEP MODE",
+        lines=[
+            "Entering low-power sleep in {}s...".format(countdown_s),
+            "Display & keyboard backlight",
+            "will turn off to save battery.",
+            "",
+        ],
+        footer="[ANY KEY] Cancel Sleep",
+        kind="warn",
+    )
+    ui.add_widget(dlg)
+    ui.render(force=False)
+    board.clear_input()
+    poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
+
+    # 5-second live countdown (any key cancels)
+    for rem in range(int(countdown_s), 0, -1):
+        dlg.set_content(lines=[
+            "Entering low-power sleep in {}s...".format(rem),
+            "Display & keyboard backlight",
+            "will turn off to save battery.",
+            "",
+        ])
+        ui.render(force=False)
+        t0 = _ticks_ms()
+        while _ticks_diff(_ticks_ms(), t0) < 1000:
+            if poll_fn and poll_fn() is not None:
+                board.beep(1200, 10)
+                ui.remove_widget(dlg)
+                ui.mark_all_dirty(True)
+                board.clear_input()
+                return False
+            _sleep_ms(30)
+
+    # Enter low-power standby (zero backlight, low poll cadence, Core 1 & COM4 preserved)
+    ui.remove_widget(dlg)
+    ui.mark_all_dirty(True)
+    orig_lcd = board.get_backlight()
+    orig_kb = board.get_kb_backlight()
+    if logger:
+        try:
+            logger.info("POWER: Entering sleep standby")
+        except Exception:
+            pass
+    board.set_backlight(0)
+    board.set_kb_backlight(0)
+    board.clear_input()
+    gc.collect()
+
+    try:
+        ticks = 0
+        while True:
+            if poll_fn and poll_fn() is not None:
+                break
+            ticks += 1
+            if ticks >= 50:
+                ticks = 0
+                gc.collect()
+            _sleep_ms(120)
+    finally:
+        board.set_backlight(max(20, orig_lcd))
+        board.set_kb_backlight(orig_kb)
+        board.clear_input()
+        board.beep(1400, 12)
+        if logger:
+            try:
+                logger.info("POWER: Woke from sleep")
+            except Exception:
+                pass
+    return True
+
+
+def _repl_standby_popup(board, ui, logger):
+    """Non-blocking wrapper for backward compatibility: toggles COM4 Serial Link (LNK) without blocking UI."""
+    toggle_serial_link(board, logger)
+    return False
+
+
 def ui_loop(sel_action=0):
     """
     Interactive Phase 2 Dual-UI keyboard event loop.
     Polls STM32 I2C keyboard via board.poll_key() without starving Core 1 LCD refresh,
     supports live GUI<->TUI switching ([TAB]/[M]) and theme cycling ([T]),
-    and cleanly exits to REPL on [Q] or serial Ctrl+C (\\x03).
+    and cleanly exits to REPL on [ALT+Q] (bare [Q] asks for confirmation) or serial Ctrl+C (\\x03).
     """
+    _stop_repl_watcher()
     board = runtime_state.get("board")
     if board is None:
         from boards import get_board
@@ -728,12 +784,15 @@ def ui_loop(sel_action=0):
     cfg = runtime_state.get("config")
     logger = runtime_state.get("logger")
     theme_mgr, ui = _ensure_ui_services(board, cfg=cfg)
-    manifest = runtime_state.get("manifest") or {"version": "1.0.0-alpha.2", "arch": "armv7emsp"}
+    manifest = runtime_state.get("manifest") or {"version": "1.0.0-alpha.3", "arch": "armv7emsp"}
     boot_state = runtime_state.get("boot_state") or load_boot_state()
     sandbox = runtime_state.get("sandbox")
-    from boards.base import MOD_ALT
+    from boards.base import MOD_ALT, MOD_CTRL
 
-    view = _DashboardView(ui, manifest, sel_action=sel_action)
+    def _cur_layout():
+        return str(cfg.get("launcher_layout", "grid") if cfg else "grid").lower()
+
+    view = _DashboardView(ui, manifest, sel_action=sel_action, layout=_cur_layout())
     prev_crash = runtime_state.get("prev_crash")
     if prev_crash:
         status_msg = "Prev Crash ({})! Press [L] Logs".format(prev_crash.get("op", "?"))
@@ -753,11 +812,66 @@ def ui_loop(sel_action=0):
                     break
         board.clear_input()
 
+    def _exec_sandbox_file(path, label, wait_after=False):
+        poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
+        _drain_keys(100)
+        if logger:
+            logger.set_breadcrumb("TOOL", label[:30])
+        smsg, skind = label + " done", "ok"
+        if sandbox is not None:
+            res = sandbox.run_file(path, wait_on_error=True)
+            smsg = "{} OK (d={}B)".format(label[:16], res.get("sram_delta", 0))
+            skind = "ok" if res.get("ok") else "err"
+            if logger:
+                logger.info("TOOL {}: ok={} delta={}B".format(label, res.get("ok"), res.get("sram_delta", 0)))
+            if wait_after and res.get("ok"):
+                board.clear_input()
+                while True:
+                    if poll_fn and poll_fn() is not None:
+                        board.beep(1100, 10)
+                        break
+                    _sleep_ms(30)
+        if logger:
+            logger.clear_breadcrumb("IDLE")
+        _drain_keys(120)
+        board.set_lut(theme_mgr.active.lut)
+        return smsg, skind
+
     def _run_action(act_id):
         nonlocal status_msg, status_kind, view
-        poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
+        cur_sel = view.action_menu.selected
 
-        if act_id == "selftest":
+        if act_id.startswith("cat:"):
+            board.beep(1300, 12)
+            _drain_keys(100)
+            res = open_menu_tree(
+                board, ui, theme_mgr, cfg, logger, sandbox, manifest,
+                act_id[4:], _exec_sandbox_file,
+            )
+            _drain_keys(100)
+            if res == "EXIT_REPL":
+                return "EXIT_REPL"
+            if res == "SLEEP_NOW":
+                return "SLEEP_NOW"
+            board.set_lut(theme_mgr.active.lut)
+            view = _DashboardView(ui, manifest, sel_action=cur_sel, layout=_cur_layout())
+            view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
+            view.render(force=True)
+            return None
+
+        if act_id.startswith("tool:"):
+            act_id = act_id[5:]
+
+        from ui.menu import TOOL_MAP
+        if act_id in TOOL_MAP:
+            path, label, wait_after = TOOL_MAP[act_id]
+            board.beep(1400, 15)
+            status_msg, status_kind = _exec_sandbox_file(path, label, wait_after)
+            view = _DashboardView(ui, manifest, sel_action=cur_sel, layout=_cur_layout())
+            view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
+            view.render(force=True)
+
+        elif act_id == "selftest":
             board.beep(1400, 15)
             _drain_keys(120)
             if logger:
@@ -766,60 +880,16 @@ def ui_loop(sel_action=0):
             res = _st.run_all(interactive_wait=True)
             if logger:
                 logger.info("SELFTEST: {}/{} {}".format(
-                    res.get("passed", 0), res.get("total", 8), "PASS" if res.get("ok") else "FAIL"
+                    res.get("passed", 0), res.get("total", 10), "PASS" if res.get("ok") else "FAIL"
                 ))
                 logger.clear_breadcrumb("IDLE")
             _drain_keys(150)
-            # Re-apply active theme LUT in case selftest changed it
             board.set_lut(theme_mgr.active.lut)
+            view = _DashboardView(ui, manifest, sel_action=cur_sel, layout=_cur_layout())
             status_msg = "Self-Test {}/{} {}".format(
-                res.get("passed", 0), res.get("total", 8), "PASS" if res.get("ok") else "FAIL"
+                res.get("passed", 0), res.get("total", 10), "PASS" if res.get("ok") else "FAIL"
             )
             status_kind = "ok" if res.get("ok") else "err"
-            view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
-            view.render(force=True)
-
-        elif act_id == "hello":
-            board.beep(1400, 15)
-            _drain_keys(120)
-            if logger:
-                logger.set_breadcrumb("APP", "hello_world")
-            if sandbox is not None:
-                res = sandbox.run_file("/sd/pinhos/apps/hello_world.py", wait_on_error=True)
-                status_msg = "Hello OK (delta={}B)".format(res.get("sram_delta", 0))
-                status_kind = "ok" if res.get("ok") else "err"
-                if logger:
-                    logger.info("APP hello_world: ok={} delta={}B".format(res.get("ok"), res.get("sram_delta", 0)))
-                if res.get("ok"):
-                    board.clear_input()
-                    while True:
-                        ak = poll_fn() if poll_fn else None
-                        if ak is not None:
-                            board.beep(1100, 10)
-                            break
-                        _sleep_ms(30)
-            if logger:
-                logger.clear_breadcrumb("IDLE")
-            _drain_keys(150)
-            board.set_lut(theme_mgr.active.lut)
-            view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
-            view.render(force=True)
-
-        elif act_id == "matrix":
-            board.beep(1400, 15)
-            _drain_keys(120)
-            if logger:
-                logger.set_breadcrumb("APP", "matrix_deck")
-            if sandbox is not None:
-                res = sandbox.run_file("/sd/pinhos/apps/matrix_deck.py", wait_on_error=True)
-                status_msg = "Matrix OK (delta={}B)".format(res.get("sram_delta", 0))
-                status_kind = "ok" if res.get("ok") else "err"
-                if logger:
-                    logger.info("APP matrix_deck: ok={} delta={}B".format(res.get("ok"), res.get("sram_delta", 0)))
-            if logger:
-                logger.clear_breadcrumb("IDLE")
-            _drain_keys(150)
-            board.set_lut(theme_mgr.active.lut)
             view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
             view.render(force=True)
 
@@ -830,7 +900,7 @@ def ui_loop(sel_action=0):
             open_log_viewer(board, ui, logger, kind="crash" if runtime_state.get("prev_crash") else "system")
             runtime_state["prev_crash"] = None
             _drain_keys(120)
-            view = _DashboardView(ui, manifest, sel_action=cur_sel)
+            view = _DashboardView(ui, manifest, sel_action=cur_sel, layout=_cur_layout())
             status_msg = "Returned from Logs"
             status_kind = "info"
             view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
@@ -853,29 +923,83 @@ def ui_loop(sel_action=0):
     view.render(force=True)
 
     idle_ticks = 0
+    anim_ticks = 0
+    chg_phase = 0
+    last_act_ms = _ticks_ms()
     try:
         while True:
             poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
             key = poll_fn() if poll_fn else None
             if key:
                 idle_ticks = 0
+                last_act_ms = _ticks_ms()
                 k = str(key).upper()
+                mods = board.get_modifiers()
+                ctrl = bool(mods & MOD_CTRL)
 
-                if k == "Q":
-                    board.beep(800, 15)
-                    if logger:
-                        logger.info("UI: Clean exit to REPL (key=Q)")
-                        logger.clear_breadcrumb("CLEAN_EXIT")
-                    bp("[UI] Exiting Dual-UI loop to REPL (key=Q)")
-                    view.footer_bar.update(
-                        status="EXITED TO REPL (COM4) | _pm.ui_loop()",
-                        status_kind="ok",
-                        hints="REPL ACTIVE (>>>) | UART0 READY",
-                    )
+                if (ctrl and k == "P") or getattr(board, "pending_screenshot", None):
+                    from ui.menu import show_screenshot_toast
+                    _, smsg = show_screenshot_toast(board, ui, view.footer_bar)
+                    if smsg:
+                        status_msg = smsg
+                        status_kind = "ok"
+                        view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind, chg_phase=chg_phase)
+                        view.render(force=True)
+                    continue
+
+                if k == "POWER" or (ctrl and k == "Z"):
+                    board.beep(900, 12)
+                    if runtime_state.get("serial_link"):
+                        status_msg = "Sleep disabled while LNK is ON (^Q)"
+                        status_kind = "warn"
+                    else:
+                        slept = _enter_sleep_mode(board, ui, logger, countdown_s=5)
+                        status_msg = "Woke from Sleep" if slept else "Sleep Cancelled"
+                        status_kind = "ok"
+                    last_act_ms = _ticks_ms()
+                    view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
+                    view.render(force=True)
+
+                elif ctrl and k == "Q":
+                    # Non-blocking COM4 Serial Link (LNK) toggle: keeps UI 100% responsive & suppresses sleep
+                    on, smsg = toggle_serial_link(board, logger)
+                    last_act_ms = _ticks_ms()
+                    status_msg = smsg
+                    status_kind = "ok" if on else "info"
+                    view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind, chg_phase=chg_phase)
                     view.render(force=False)
-                    break
+                    continue
 
-                elif k in ("TAB", "M"):
+                elif (ctrl and k == "B") or k == "F3":
+                    _run_action("shell")
+
+                elif ctrl and k == "F":
+                    _run_action("files")
+
+                elif ctrl and k == "S":
+                    _run_action("sysmon")
+
+                elif ctrl and k == "E":
+                    _run_action("editor")
+
+                elif ctrl and k == "U":
+                    _run_action("uart")
+
+                elif ctrl and k == "N":
+                    _run_action("net")
+
+                elif ctrl and k == "V":
+                    nxt = "list" if view.action_menu.layout == "grid" else "grid"
+                    view.action_menu.set_layout(nxt)
+                    if cfg:
+                        cfg.set("launcher_layout", nxt, save_now=True)
+                    board.beep(1350, 12)
+                    status_msg = "Layout: {} [{}]".format(nxt.upper(), ui.mode_badge)
+                    status_kind = "ok"
+                    view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
+                    view.render(force=True)
+
+                elif k == "TAB" or (ctrl and k == "M"):
                     ui.toggle_mode(persist=True)
                     if logger:
                         logger.info("UI: Mode -> {}".format(ui.mode_badge))
@@ -885,7 +1009,7 @@ def ui_loop(sel_action=0):
                     view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
                     view.render(force=True)
 
-                elif k == "T":
+                elif ctrl and k == "T":
                     new_theme = ui.cycle_theme(step=1, persist=True)
                     if logger:
                         logger.info("UI: Theme -> {}".format(new_theme.id))
@@ -895,7 +1019,7 @@ def ui_loop(sel_action=0):
                     view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
                     view.render(force=True)
 
-                elif k == "L":
+                elif ctrl and k == "L":
                     _run_action("logs")
 
                 elif k in ("UP", "DOWN", "LEFT", "RIGHT"):
@@ -907,18 +1031,51 @@ def ui_loop(sel_action=0):
                 elif k in ("ENTER", "SPACE", " "):
                     item = view.action_menu.get_selected_item()
                     if isinstance(item, dict) and item.get("id"):
-                        _run_action(item["id"])
+                        res = _run_action(item["id"])
+                        if res == "EXIT_REPL":
+                            on, smsg = toggle_serial_link(board, logger)
+                            status_msg, status_kind = smsg, ("ok" if on else "info")
+                            view = _DashboardView(ui, manifest, sel_action=view.action_menu.selected, layout=_cur_layout())
+                            view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
+                            view.render(force=True)
+                        elif res == "SLEEP_NOW":
+                            if runtime_state.get("serial_link"):
+                                status_msg, status_kind = "Sleep disabled while LNK is ON (^Q)", "warn"
+                            else:
+                                slept = _enter_sleep_mode(board, ui, logger, countdown_s=5)
+                                status_msg, status_kind = ("Woke from Sleep" if slept else "Sleep Cancelled"), "ok"
+                            view = _DashboardView(ui, manifest, sel_action=view.action_menu.selected, layout=_cur_layout())
+                            view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
+                            view.render(force=True)
+                        last_act_ms = _ticks_ms()
 
                 elif k == "F2":
                     _run_action("selftest")
 
-                elif k == "1":
-                    _run_action("hello")
+                elif k in ("1", "2", "3", "4", "5", "6"):
+                    from ui.menu import DASHBOARD_ACTIONS
+                    idx = int(k) - 1
+                    if 0 <= idx < len(DASHBOARD_ACTIONS):
+                        view.action_menu.set_selected(idx)
+                        res = _run_action(DASHBOARD_ACTIONS[idx]["id"])
+                        if res == "EXIT_REPL":
+                            on, smsg = toggle_serial_link(board, logger)
+                            status_msg, status_kind = smsg, ("ok" if on else "info")
+                            view = _DashboardView(ui, manifest, sel_action=idx, layout=_cur_layout())
+                            view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
+                            view.render(force=True)
+                        elif res == "SLEEP_NOW":
+                            if runtime_state.get("serial_link"):
+                                status_msg, status_kind = "Sleep disabled while LNK is ON (^Q)", "warn"
+                            else:
+                                slept = _enter_sleep_mode(board, ui, logger, countdown_s=5)
+                                status_msg, status_kind = ("Woke from Sleep" if slept else "Sleep Cancelled"), "ok"
+                            view = _DashboardView(ui, manifest, sel_action=idx, layout=_cur_layout())
+                            view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
+                            view.render(force=True)
+                        last_act_ms = _ticks_ms()
 
-                elif k == "2":
-                    _run_action("matrix")
-
-                elif k == "F5" and (board.get_modifiers() & MOD_ALT):
+                elif k == "F5" and (mods & MOD_ALT):
                     # ALT+F5 once = Hard Reload UI; ALT+F5 twice within 3s = hardware reset escape hatch
                     now_ms = _ticks_ms()
                     if last_reload_ms and _ticks_diff(now_ms, last_reload_ms) < 3000:
@@ -937,13 +1094,18 @@ def ui_loop(sel_action=0):
                     if logger:
                         logger.warn("UI: Hard Reload triggered (ALT+F5)")
                     cur_sel = view.action_menu.selected
+                    if hasattr(board, "init_uart_bridge"):
+                        try:
+                            board.init_uart_bridge(rebind=True)
+                        except Exception:
+                            pass
                     if hasattr(board, "reset_default_lut"):
                         board.reset_default_lut()
                     if board.get_backlight() < 50:
                         board.set_backlight(80)
                     theme_mgr.apply(theme_mgr.active.id, persist=False, notify=False)
                     ui.set_mode(ui.mode, persist=False)
-                    view = _DashboardView(ui, manifest, sel_action=cur_sel)
+                    view = _DashboardView(ui, manifest, sel_action=cur_sel, layout=_cur_layout())
                     gc.collect()
                     board.beep(1200, 12)
                     board.beep(1600, 15)
@@ -952,22 +1114,49 @@ def ui_loop(sel_action=0):
                     view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
                     view.render(force=True)
 
-                elif k in ("R", "F1"):
+                elif (ctrl and k == "R") or k == "F1":
                     _run_action("refresh")
 
                 elif k in ("ESC", "BACK", "BACKSPACE"):
                     board.beep(900, 10)
-                    status_msg = "Dashboard Active (Press Q for REPL)"
+                    status_msg = "Dashboard Active (^Q:LNK ^Z:Sleep)"
                     status_kind = "info"
                     view.footer_bar.update(status=status_msg, status_kind=status_kind)
                     view.render(force=False)
 
+            anim_ticks += 1
+            if anim_ticks >= 20:
+                anim_ticks = 0
+                bat_now = board.get_battery()
+                if bat_now.get("charging") and bat_now.get("percent", 0) < 100:
+                    chg_phase = (chg_phase + 1) & 3
+                    view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind, chg_phase=chg_phase)
+                    view.render(force=False)
             idle_ticks += 1
             if idle_ticks >= 40:
                 idle_ticks = 0
                 gc.collect()
+                        # Refresh live top-bar clock & telemetry strip (dirty-only, zero flicker)
+                view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind, chg_phase=chg_phase)
+                view.render(force=False)
+                # Check configurable auto-sleep timeout (suppressed when COM4 Serial Link LNK is active)
+                st_s = int(cfg.get("sleep_timeout_s", 300) if cfg else 300)
+                if runtime_state.get("serial_link"):
+                    last_act_ms = _ticks_ms()
+                elif st_s > 0 and _ticks_diff(_ticks_ms(), last_act_ms) >= (st_s * 1000):
+                    slept = _enter_sleep_mode(board, ui, logger, countdown_s=5)
+                    last_act_ms = _ticks_ms()
+                    view.sync(board, boot_state, BOOT_STABLE_MS, True, "Woke from Sleep" if slept else "Sleep Cancelled", "ok", chg_phase=chg_phase)
+                    view.render(force=True)
             _sleep_ms(30)
     except KeyboardInterrupt:
+        _stop_repl_watcher()
+        runtime_state["serial_link"] = True
+        if logger:
+            try:
+                logger.clear_breadcrumb("CLEAN_EXIT")
+            except Exception:
+                pass
         if hasattr(board, "init_uart_bridge"):
             board.init_uart_bridge()
         bp("[UI] Interrupted via serial Ctrl+C; returning to REPL.")
@@ -979,14 +1168,16 @@ def ui_loop(sel_action=0):
             context="mode={} theme={}".format(ui.mode, theme_mgr.active.id),
             interactive=True,
         )
-        if choice == "RECOVER":
-            theme_mgr.apply("cyber_amber", persist=False)
-            ui.set_mode("gui", persist=False)
-            return ui_loop(sel_action=0)
-        if choice == "LOGS":
-            theme_mgr.apply("cyber_amber", persist=False)
-            ui.set_mode("gui", persist=False)
-            open_log_viewer(board, ui, logger, kind="crash")
+        if choice in ("RECOVER", "LOGS"):
+            saved_tid = cfg.get("theme", theme_mgr.active.id) if cfg else theme_mgr.active.id
+            saved_mode = cfg.get("ui_mode", ui.mode) if cfg else ui.mode
+            try:
+                theme_mgr.apply(saved_tid, persist=False)
+            except Exception:
+                theme_mgr.apply("cyber_amber", persist=False)
+            ui.set_mode(saved_mode, persist=False)
+            if choice == "LOGS":
+                open_log_viewer(board, ui, logger, kind="crash")
             return ui_loop(sel_action=0)
         if choice == "SAFE_MODE":
             return enter_safe_recovery_mode(board=board, state=boot_state, reason=repr(ui_exc), interactive=True)
@@ -994,18 +1185,25 @@ def ui_loop(sel_action=0):
             board.init_uart_bridge()
 
 
+_boot_splash_active = False
+
+
 def _boot_progress(pct, msg, pause_ms=0, clear_splash=False):
-    """Advance the frozen pinhos_boot splash progress bar if active during cold boot."""
-    pb = sys.modules.get("pinhos_boot")
-    if pb is not None and getattr(pb, "_splash_drawn", False) and hasattr(pb, "set_progress"):
-        try:
-            pb.set_progress(pct, msg)
-            if pause_ms > 0:
-                _sleep_ms(pause_ms)
-            if clear_splash:
-                pb._splash_drawn = False
-        except Exception:
-            pass
+    """Advance the frozen pinhos_boot splash progress bar in-place during cold boot."""
+    global _boot_splash_active
+    if not _boot_splash_active:
+        return
+    try:
+        import pinhos_boot as pb
+        pb._splash_drawn = True
+        pb.set_progress(pct, msg)
+        if pause_ms > 0:
+            _sleep_ms(pause_ms)
+        if clear_splash:
+            pb._splash_drawn = False
+            _boot_splash_active = False
+    except Exception:
+        pass
 
 
 def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_strike_increment=False, interactive=False):
@@ -1019,6 +1217,9 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
     6. Optionally enter interactive Dual-UI keyboard loop (ui_loop) while keeping UART0 dupterm active.
     """
     t0 = _ticks_ms()
+    _stop_repl_watcher()
+    global _boot_splash_active
+    _boot_splash_active = bool(interactive)
 
     # Step 1: Increment persistent boot strike counter BEFORE mounting SD or importing core/UI
     if skip_strike_increment:
@@ -1044,7 +1245,7 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
             board.init_uart_bridge()
         board.mount_sd("/sd", retries=3)
         runtime_state["board"] = board
-        _boot_progress(90, "Board HAL & SD Ready...")
+        _boot_progress(94, "Board HAL & SD Ready...", pause_ms=60)
 
         # Step 4: Initialize canonical /sd/pinhos/ filesystem hierarchy, core services & Dual-UI
         from core.config import ensure_canonical_dirs, load_version_manifest, ConfigManager
@@ -1058,13 +1259,26 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
         manifest = load_version_manifest()
         cfg = ConfigManager()
 
-        # Re-sync board profile & backlights from loaded config
+        # Re-sync board profile, CPU clock (safe-guarded), & backlights from loaded config
         desired_board = cfg.get("board", "picocalc")
         if desired_board != board.id:
             board = get_board(profile=desired_board, config=cfg.as_dict(), force_new=True)
             runtime_state["board"] = board
         board.set_backlight(cfg.get("lcd_brightness", 80))
         board.set_kb_backlight(cfg.get("kb_brightness", 60))
+        if hasattr(board, "config") and isinstance(board.config, dict):
+            board.config["sound"] = bool(cfg.get("sound", True))
+        try:
+            import machine
+            req_mhz = int(cfg.get("cpu_freq_mhz", 150))
+            if boot_state.get("boot_strikes", 0) >= 2 and req_mhz > 150:
+                req_mhz = 150
+            if 50 <= req_mhz <= 260 and (machine.freq() // 1000000) != req_mhz:
+                machine.freq(req_mhz * 1000000)
+                if hasattr(board, "init_uart_bridge"):
+                    board.init_uart_bridge(rebind=True)
+        except Exception:
+            pass
 
         # Mirror boot_state onto SD now that /sd is mounted
         if state_path is None:
@@ -1077,7 +1291,44 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
         swap = get_swap_manager()
         swap.prune_stale()
 
-        _boot_progress(95, "Loading Theme & Dual-UI...")
+        _boot_progress(94, "Core Services Ready...", pause_ms=80)
+
+        # Optional Wi-Fi Auto-Connect + Auto-NTP on interactive boot (bounded timeout)
+        if interactive:
+            try:
+                from net.wifi import get_wifi_manager, sync_ntp
+                wm = get_wifi_manager()
+                if wm.get_auto_connect() and wm.list_saved():
+                    _boot_progress(96, "Wi-Fi Auto-Connect...")
+                    wok, wmsg = wm.auto_connect_saved(
+                        timeout_s=15,
+                        max_attempts=3,
+                        status_cb=lambda ph, _e, _t, _s: _boot_progress(96, ("Wi-Fi " + str(ph))[:32]),
+                    )
+                    logger.info("WIFI BOOT: " + str(wmsg))
+                    bp("[WIFI_BOOT]", wmsg)
+                    if wok and cfg.get("ntp_auto", True):
+                        _boot_progress(98, "Syncing NTP Clock...")
+                        nok, nmsg = sync_ntp(
+                            board=board,
+                            tz_offset_h=int(cfg.get("tz_offset_h", 0)),
+                            host=str(cfg.get("ntp_server", "162.159.200.1")),
+                            timeout_s=8,
+                        )
+                        logger.info("NTP BOOT: " + str(nmsg))
+                        bp("[NTP_BOOT]", nmsg)
+            except Exception as _we:
+                bp("[WIFI_BOOT_ERR]", repr(_we))
+
+        # Show clean 100% on native monochrome boot splash, cut cleanly to black BEFORE applying theme LUT!
+        _boot_progress(100, "PinhOS Ready!", pause_ms=400, clear_splash=True)
+        try:
+            board.fill(0)
+            board.show()
+        except Exception:
+            pass
+        gc.collect()
+
         theme_mgr = get_theme_manager(config=cfg, board=board, force_new=True)
         ui = UIEngine(board=board, theme_manager=theme_mgr, config=cfg)
         sandbox = SandboxRunner(board=board, config=cfg, swap=swap, logger=logger, theme=theme_mgr, ui=ui)
@@ -1092,7 +1343,7 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
         _register_recovery_helpers()
 
         boot_msg = "BOOT: PinhOS v{} ({}) starting on {} [{} / {}]".format(
-            manifest.get("version", "1.0.0-alpha.2"),
+            manifest.get("version", "1.0.0-alpha.3"),
             manifest.get("arch", "armv7emsp"),
             board.name,
             ui.mode_badge,
@@ -1100,10 +1351,9 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
         )
         logger.info(boot_msg)
         bp("[BOOT]", boot_msg)
-        _boot_progress(100, "PinhOS Ready!", pause_ms=180, clear_splash=True)
 
         # Step 5: Render initial Dual-UI dashboard and monitor 5-second stability window
-        view = _DashboardView(ui, manifest, sel_action=0)
+        view = _DashboardView(ui, manifest, sel_action=0, layout=str(cfg.get("launcher_layout", "grid")).lower())
         elapsed = _ticks_diff(_ticks_ms(), t0)
         view.sync(board, boot_state, elapsed, False)
         view.render(force=True)
@@ -1144,7 +1394,7 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
         gc.collect()
         free_b = gc.mem_free() if hasattr(gc, "mem_free") else 262144
         bp("<<PINHOS:BOOT_OK:v{}:FREE_RAM={}>>".format(
-            manifest.get("version", "1.0.0-alpha.2"), free_b
+            manifest.get("version", "1.0.0-alpha.3"), free_b
         ))
         if interactive:
             ui_loop()
@@ -1152,7 +1402,7 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
             "mode": "NORMAL",
             "ui_mode": ui.mode,
             "theme": theme_mgr.active.id,
-            "version": manifest.get("version", "1.0.0-alpha.2"),
+            "version": manifest.get("version", "1.0.0-alpha.3"),
             "board": board.id,
             "stabilized": runtime_state["stabilized"],
             "strikes": boot_state.get("boot_strikes", 0),
@@ -1163,16 +1413,27 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
         err_msg = repr(exc)
         boot_state["last_error"] = err_msg[:120]
         save_boot_state(boot_state, state_path=state_path)
+        b_ref = runtime_state.get("board")
+        if b_ref is not None and hasattr(b_ref, "init_uart_bridge"):
+            try:
+                b_ref.init_uart_bridge(rebind=True)
+            except Exception:
+                pass
         if runtime_state.get("logger"):
             runtime_state["logger"].exception("BOOT", exc)
         if boot_state.get("boot_strikes", 0) >= int(boot_state.get("strike_limit", STRIKE_LIMIT)):
             return enter_safe_recovery_mode(
-                board=runtime_state.get("board"),
+                board=b_ref,
                 state=boot_state,
                 reason=err_msg,
                 state_path=state_path,
                 interactive=interactive,
             )
+        if interactive and b_ref is not None:
+            choice = show_bsod(b_ref, "BOOT_EXCEPTION", exc, context="start()", interactive=True)
+            if choice == "SAFE_MODE":
+                return enter_safe_recovery_mode(board=b_ref, state=boot_state, reason=err_msg, state_path=state_path, interactive=True)
+            return {"mode": "BSOD_REPL", "error": err_msg}
         raise
 
 
