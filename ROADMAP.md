@@ -1,7 +1,7 @@
 # 🌲 PinhOS — Architectural Specification & Engineering Roadmap
 
 > **Target Platform:** ClockworkPi PicoCalc (Raspberry Pi Pico 2W / RP2350 — Dual ARM Cortex-M33 @ 150 MHz, 520 KB SRAM, 4 MB Flash, CYW43439 Wi-Fi 4 + BLE 5.2, 320×320 SPI LCD, I2C STM32 Southbridge, SPI microSD).  
-> **Current Status:** Active Development — `v1.0.0-alpha.3` (**Phase 1 + Phase 2 + Phase 3 Complete & Verified 10/10 on Hardware** — Built-In BusyBox CLI, On-Device Editor, File Commander, Net Probes, HAL UART1 Console, System Monitor, BMP Screenshot Capture & Hierarchical Settings Tree; **Phase 3.1 Desktop Home Screen next, followed by Phase 4 WebPortal**).
+> **Current Status:** Active Development — `v1.0.0-alpha.3.1` (**Phase 1 + Phase 2 + Phase 3 + Phase 3.1 Complete & Verified 11/11 on Hardware** — Android-Style Desktop Home Screen with live Telemetry & `<= 1 KB` Quick Notes, App Drawer `GRID`/`LIST`, Reorganized 5-Category Settings Tree, Built-In BusyBox CLI, On-Device Editor, File Commander, Net Probes, HAL UART1 Console, System Monitor & BMP Screenshots; **Phase 4 WebPortal Browser IDE next**).
 
 ---
 
@@ -129,12 +129,12 @@ def main(ctx):
 
 ---
 
-### Phase 3.1: Android-Style Desktop Home Screen & Settings Overhaul (`v1.0.0-alpha.4`)
-- [ ] **3.1.1 Desktop Home Workspace & App Drawer Navigation (`ui/desktop.py` & `main.py`):**
-  - Implement a self-contained `DesktopHome` workspace matching `docs/mockups/` as the primary **Home Screen**, featuring a top quick-category strip (`[1] TOOLKIT`–`[6] NET`) and split cards (`SYS TELEMETRY` live SRAM sparkline/CPU/temp/battery/WLAN + `QUICK NOTES` persistent scratchpad backed by `/sd/pinhos/notes.txt` with `<= 1 KB` streaming R/W).
-  - Provide Android-style two-layer navigation: `ENTER` / `HOME` opens the customizable **App Drawer** (`GRID` 3×2 Mosaic or `LIST` view toggled via `CTRL+V`), while `ESC` returns cleanly to Desktop Home (`boot_screen` configurable between `"desktop"` and `"drawer"` in `config.json`, `< 2 KB` SRAM delta).
-- [ ] **3.1.2 Reorganized 5-Category Settings Architecture (`ui/menu.py`):**
-  - Restructure `MENU_TREE["settings"]` into 5 intuitive, intent-grouped categories with live right-aligned state badges:
+### Phase 3.1: Android-Style Desktop Home Screen & Settings Overhaul (`v1.0.0-alpha.3.1`)
+- [x] **3.1.1 Desktop Home Workspace & App Drawer Navigation (`ui/desktop.py` & `main.py`):**
+  - Implemented self-contained `DesktopHome` workspace matching `docs/mockups/` as the primary **Home Screen**, featuring a top quick-category strip (`[1] TOOL`–`[6] NET`) and split cards (`SYS TELEMETRY` live SRAM sparkline/CPU/temp/battery/WLAN + `QUICK NOTES` persistent scratchpad backed by `/sd/pinhos/notes.txt` with `<= 1 KB` streaming R/W, inline `[N]` entry, and `[E]` full editor launch).
+  - Provided Android-style two-layer navigation: `ENTER` / `HOME` opens the customizable **App Drawer** (`GRID` 3×2 Mosaic or `LIST` view toggled via `CTRL+V`), while `ESC` returns cleanly to Desktop Home (`boot_screen` configurable between `"desktop"` and `"drawer"` in `config.json`, `0 B` SRAM delta verified in Gate 11).
+- [x] **3.1.2 Reorganized 5-Category Settings Architecture (`ui/menu.py`):**
+  - Restructured `MENU_TREE["settings"]` into 5 intuitive, intent-grouped categories with live right-aligned state badges (**11/11 PASS verified on PicoCalc hardware**):
     1. **Connectivity & Time** (`[LAN >]` — Wi-Fi Status/Scan/Saved/Auto-Connect/Off, NTP Sync/Auto-NTP/Timezone, GitHub Version/Theme/App Sync)
     2. **Display & Appearance** (`[SCR >]` — Theme, UI Mode `GUI`/`TUI`, App Drawer Style `GRID`/`LIST`, Boot Screen `Home`/`Drawer`, LCD & KB Backlights)
     3. **Status Bar & Sound** (`[UI >]` — Wi-Fi Indicator style, Battery Indicator style, Key Sound/Beep)
