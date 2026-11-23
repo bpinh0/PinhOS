@@ -2,7 +2,7 @@
 
 **A modular, dual-UI MicroPython operating system and portable field cyberdeck platform for the ClockworkPi PicoCalc & Raspberry Pi Pico 2W (RP2350).**
 
-> 🚀 **Status: `v1.0.0-alpha.3` — Phase 1, Phase 2 & Phase 3 Complete & Verified 10/10 on Hardware.** Hardware Abstraction (`boards/`), 3-Strike Boot Guard & BSOD (`main.py`), Sandboxed App Runner (`core/sandbox.py`), Cooperative Swap (`core/swap.py`), Unified Theme Engine (`core/theme.py` + 4 JSON themes), Dual-UI Engine (`ui/` 3×2 GUI Mosaic ↔ TUI List + Android-style Hierarchical Menu & Settings Tree with `0 B` SRAM delta), Built-In BusyBox CLI (`tools/shell.py`), On-Device Text Editor (`tools/editor.py`), File Commander (`tools/files.py`), Network Probes (`tools/net_tools.py`), HAL-Routed UART1 Console (`tools/uart_term.py`), System Monitor & SD Benchmark (`tools/sysmon.py`), Wi-Fi STA/NTP & GitHub Sync (`net/wifi.py`, `net/sync.py`), 4-Bit Indexed BMP Screenshots (`CTRL+P`), 10/10 On-Device Self-Test Gate (`tests/selftest.py` + `tests/selftest_p3.py`), and Custom RP2350 Auto-Boot UF2 (`firmware/`) are all complete and verified on the ClockworkPi PicoCalc (Pico 2W). **Phase 3.1 (Desktop Home Screen & Settings Overhaul) is next, followed by Phase 4 (WebPortal Browser IDE).**
+> 🚀 **Status: `v1.0.0-alpha.3.1` — Phase 1, Phase 2, Phase 3 & Phase 3.1 Complete & Verified 11/11 on Hardware.** Hardware Abstraction (`boards/`), 3-Strike Boot Guard & BSOD (`main.py`), Sandboxed App Runner (`core/sandbox.py`), Cooperative Swap (`core/swap.py`), Unified Theme Engine (`core/theme.py` + 4 JSON themes), Dual-UI Engine (`ui/` Android-style Desktop Home Screen with live Telemetry & `<= 1 KB` Quick Notes ↔ 3×2 GUI Mosaic / TUI List App Drawer + 5-Category Hierarchical Settings Tree with `0 B` SRAM delta), Built-In BusyBox CLI (`tools/shell.py`), On-Device Text Editor (`tools/editor.py`), File Commander (`tools/files.py`), Network Probes (`tools/net_tools.py`), HAL-Routed UART1 Console (`tools/uart_term.py`), System Monitor & SD Benchmark (`tools/sysmon.py`), Wi-Fi STA/NTP & GitHub Sync (`net/wifi.py`, `net/sync.py`), 4-Bit Indexed BMP Screenshots (`CTRL+P`), 11/11 On-Device Self-Test Gate (`tests/selftest.py` + `tests/selftest_p3.py`), and Custom RP2350 Auto-Boot UF2 (`firmware/`) are all complete and verified on the ClockworkPi PicoCalc (Pico 2W). **Phase 4 (WebPortal Browser IDE) is next.**
 
 ---
 
@@ -31,7 +31,7 @@ PinhOS turns the ClockworkPi PicoCalc (and custom RP2350 hardware builds) into a
 
 | Version | Milestone | Focus & Deliverables |
 | :--- | :--- | :--- |
-| **`v1.0.0`** | **Foundation & Daily Driver** *(Active)* | `boards/` HAL (PicoCalc & custom SPI/CardKB decks), 3-strike boot guard, sandboxed app runner & `.swap/`, GUI/TUI dual-UI + Desktop Home (`v1.0.0-alpha.4`), unified JSON theme engine, BusyBox/net/UART field tools (`v1.0.0-alpha.3`), WebPortal browser IDE, GitHub OTA/App Store, and BLE 5.2 HID host. |
+| **`v1.0.0`** | **Foundation & Daily Driver** *(Active)* | `boards/` HAL (PicoCalc & custom SPI/CardKB decks), 3-strike boot guard, sandboxed app runner & `.swap/`, GUI/TUI dual-UI + Desktop Home (`v1.0.0-alpha.3.1`), unified JSON theme engine, BusyBox/net/UART field tools (`v1.0.0-alpha.3`), WebPortal browser IDE, GitHub OTA/App Store, and BLE 5.2 HID host. |
 | **`v1.1.0`** | **Power & Native Performance** | Multi-UF2 SD card chainloader (supporting both RP2350 ARM Cortex-M33 and RISC-V Hazard3 `.uf2` images) and dynamic C `.mpy` native modules (`py/dynruntime.h`) for real-time MP3 audio decoding, DSP, and fast framebuffer blits. |
 | **`v1.2.0`** | **Commercial Packaging & IP Protection** | Frozen `.mpy` core bytecode compiled into signed RP2350 `.uf2` firmware (flash XIP execution), RP2350 OTP + Secure Boot + `machine.unique_id()` node-locked licensing, and AES-encrypted OTA Pro Field Packs decrypted strictly in SRAM. |
 
@@ -58,7 +58,8 @@ pinhos/
 ├── ui/                     # Dual-UI rendering engine (zero full-screen framebuffers)
 │   ├── engine.py           # UIEngine: GUI <-> TUI switching, focus routing & dirty-region renders
 │   ├── widgets.py          # Shared dirty-tracked widgets (StatusBar, MosaicGrid, TelemetryStrip, etc.)
-│   ├── menu.py             # Android-style hierarchical drill-down menu, Settings tree & log viewer
+│   ├── desktop.py          # Android-style Desktop Home workspace (Quick Strip, Telemetry, Quick Notes)
+│   ├── menu.py             # Android-style hierarchical drill-down menu, 5-category Settings & log viewer
 │   ├── gui.py              # 320x320 graphical card/panel backend
 │   └── tui.py              # High-density terminal grid backend
 ├── net/                    # Connectivity, wireless HID & GitHub distribution
@@ -79,7 +80,7 @@ pinhos/
 │   └── sysmon.py           # Live SRAM sparkline, GC counter, RP2350 temp/clock, SD benchmark & BL sliders
 ├── apps/                   # Community & user applets (single-entry APP_META contract)
 ├── themes/                 # Built-in & user JSON themes (cyber_amber, phosphor_green, arctic_daylight, synthwave_pulse)
-├── tests/                  # On-device hardware, SRAM leak, theme, Dual-UI & Phase 3 self-test suite (10/10 PASS)
+├── tests/                  # On-device hardware, SRAM leak, theme, Dual-UI & Phase 3.1 self-test suite (11/11 PASS)
 ├── firmware/               # Custom RP2350 PicoCalc MicroPython UF2 builder & frozen Dual-Boot router
 │   ├── frozen/_boot.py     # Early hardware init (PicoDisplay, PicoKeyboard, PicoSD, UART0 COM4)
 │   ├── frozen/pinhos_boot.py # Cold-boot splash (5s countdown, 0-100% progress bar, version.json), [F1] Recovery, [F2] Boot Menu & [CTRL+C] REPL
@@ -108,7 +109,7 @@ pinhos/
    ```powershell
    .\picocalc.ps1 com              # Fast COM4 port & live REPL health check
    .\picocalc.ps1 upload_and_start # Incremental SD sync + 5s Boot Guard launch
-   .\picocalc.ps1 test             # 10/10 on-device Phase 1–3 self-test gate
+   .\picocalc.ps1 test             # 11/11 on-device Phase 1–3.1 self-test gate
    .\picocalc.ps1 screenshot       # Capture & pull 320x320 4-bit BMP over COM4
    ```
 4. **Cold-Boot Hotkeys (during the 5.0s PinhOS splash with live countdown & progress bar):**

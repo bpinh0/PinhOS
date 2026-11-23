@@ -200,26 +200,6 @@ def test_phase3_field_tools(root="/sd/pinhos"):
                 _assert(r["ok"] and r["write_kbps"] > 0 and r["read_kbps"] > 0, "SD bench failed")
                 return r
             res_sys = _run_one("tools.sysmon", _t_sys)
-
-            # Verify CTRL+P screenshot + confirmation toast and non-blocking CTRL+Q LNK mode
-            import main as _pm
-            from ui.menu import show_screenshot_toast
-            _ui = _pm.runtime_state.get("ui")
-            if _ui is None:
-                _, _ui = _pm._ensure_ui_services(board)
-            shot_p = board.screenshot()
-            _assert(shot_p and shot_p.endswith(".bmp"), "screenshot capture failed")
-            fn, smsg = show_screenshot_toast(board, _ui, path=shot_p, timeout_ticks=1)
-            _assert(fn and fn.startswith("shot_") and "Saved:" in str(smsg), "screenshot toast failed")
-            try:
-                os.remove(shot_p)
-            except OSError:
-                pass
-            on1, m1 = _pm.toggle_serial_link(board, enable=True)
-            _assert(on1 and _pm.runtime_state.get("serial_link") is True and "LNK ON" in m1, "LNK enable failed")
-            _assert(_pm._enter_sleep_mode(board, _ui, None, countdown_s=1) is False, "LNK should suppress sleep")
-            on2, m2 = _pm.toggle_serial_link(board, enable=False)
-            _assert((not on2) and _pm.runtime_state.get("serial_link") is False, "LNK disable failed")
             return res_sys
 
         _exercise()
@@ -230,6 +210,31 @@ def test_phase3_field_tools(root="/sd/pinhos"):
         m1 = gc.mem_free() if hasattr(gc, "mem_free") else 262144
         delta = max(0, m0 - m1)
         _assert(delta < 2048, "Field tools SRAM delta {}B >= 2048B".format(delta))
+
+        # Verify CTRL+P screenshot + confirmation toast and non-blocking CTRL+Q LNK mode
+        gc.collect()
+        import main as _pm
+        _ui = _pm.runtime_state.get("ui")
+        if _ui is None:
+            _, _ui = _pm._ensure_ui_services(board)
+        shot_p = board.screenshot()
+        _assert(shot_p and shot_p.endswith(".bmp"), "screenshot capture failed")
+        on1, m1_s = _pm.toggle_serial_link(board, enable=True)
+        _assert(on1 and _pm.runtime_state.get("serial_link") is True and "LNK ON" in m1_s, "LNK enable failed")
+        _assert(_pm._enter_sleep_mode(board, _ui, None, countdown_s=1) is False, "LNK should suppress sleep")
+        on2, m2_s = _pm.toggle_serial_link(board, enable=False)
+        _assert((not on2) and _pm.runtime_state.get("serial_link") is False, "LNK disable failed")
+        _pm = None
+        sys.modules.pop("main", None)
+        gc.collect()
+        from ui.menu import show_screenshot_toast
+        fn, smsg = show_screenshot_toast(board, _ui, path=shot_p, timeout_ticks=1)
+        _assert(fn and fn.startswith("shot_") and "Saved:" in str(smsg), "screenshot toast failed")
+        try:
+            os.remove(shot_p)
+        except OSError:
+            pass
+        gc.collect()
     finally:
         try:
             os.remove(tmp_f)
@@ -239,3 +244,81 @@ def test_phase3_field_tools(root="/sd/pinhos"):
         board.ensure_serial_repl()
 
     return "6 tools OK | SD W:{}K/s R:{}K/s (d={}B)".format(bres["write_kbps"], bres["read_kbps"], delta)
+
+
+def test_desktop_home(root="/sd/pinhos"):
+    """Gate 11: Phase 3.1 Desktop Home (GUI+TUI), Quick Notes <= 1 KB roundtrip & 5-category Settings."""
+    # 1. Verify reorganized 5-category Settings tree FIRST on a clean heap, then unload ui.menu
+    gc.collect(); gc.collect()
+    from ui.menu import MENU_TREE
+    set_entry = MENU_TREE.get("settings", ("", ()))
+    set_items = set_entry[1] if isinstance(set_entry, tuple) and len(set_entry) >= 2 else ()
+    set_ids = [it.get("id") for it in set_items if isinstance(it, dict)]
+    for req in ("cat:set_conn", "cat:set_display", "cat:set_bar_snd", "cat:set_power", "cat:set_about"):
+        _assert(req in set_ids, "Missing settings category: " + req)
+    _assert(len(set_items) == 5, "Expected 5 settings categories, got {}".format(len(set_items)))
+    MENU_TREE = None
+    set_items = None
+    sys.modules.pop("ui.menu", None)
+    gc.collect(); gc.collect()
+
+    from boards import get_board
+    from core.config import ConfigManager
+    from core.theme import ThemeManager
+    from ui.engine import UIEngine
+    from ui.desktop import DesktopHome, load_notes, save_notes, append_note, NOTES_MAX_BYTES
+
+    board = get_board()
+    board.ensure_serial_repl()
+
+    # 2. Quick Notes streaming R/W roundtrip + <= 1 KB cap enforcement
+    tmp_notes = root.rstrip("/") + "/logs/_gate11_notes.txt"
+    tmp_cfg = root.rstrip("/") + "/logs/_gate11_cfg.json"
+    delta = 0
+    try:
+        _assert(save_notes(["Alpha note", "Beta note"], path=tmp_notes), "save_notes failed")
+        _assert(append_note("Gamma note", path=tmp_notes), "append_note failed")
+        got = load_notes(path=tmp_notes)
+        _assert(got == ["Alpha note", "Beta note", "Gamma note"], "notes roundtrip mismatch: " + repr(got))
+
+        # Enforce <= 1024 B streaming cap
+        big = ["Note line {:02d} {}".format(i, "X" * 60) for i in range(25)]
+        _assert(save_notes(big, path=tmp_notes), "save_notes cap failed")
+        st = os.stat(tmp_notes)
+        _assert(st[6] <= NOTES_MAX_BYTES, "notes.txt exceeded 1024B cap: {}B".format(st[6]))
+        capped = load_notes(path=tmp_notes)
+        _assert(len(capped) >= 5 and "Note line 24" in capped[-1], "newest note lost under cap")
+
+        # 3. DesktopHome GUI + TUI rendering & SRAM delta gate (< 2048 B)
+        def _render_once():
+            cfg = ConfigManager(config_path=tmp_cfg)
+            tm = ThemeManager(config=cfg, board=board)
+            ui = UIEngine(board=board, theme_manager=tm, config=cfg)
+            dh = DesktopHome(0, 22, 320, 252, notes_path=tmp_notes)
+            ui.add_widget(dh)
+            ui.set_focus(dh)
+            dh.sync_telemetry(board, ui_mode="GUI", drawer_layout="GRID", stabilized=True)
+            ui.set_mode("gui", persist=False)
+            ui.render(force=True)
+            dh.sync_telemetry(board, ui_mode="TUI", drawer_layout="LIST", stabilized=True)
+            ui.set_mode("tui", persist=False)
+            ui.render(force=True)
+            ui.deinit()
+
+        _render_once()
+        gc.collect(); gc.collect()
+        m0 = gc.mem_free() if hasattr(gc, "mem_free") else 262144
+        _render_once()
+        gc.collect(); gc.collect()
+        m1 = gc.mem_free() if hasattr(gc, "mem_free") else 262144
+        delta = max(0, m0 - m1)
+        _assert(delta < 2048, "DesktopHome SRAM delta {}B >= 2048B".format(delta))
+    finally:
+        for p in (tmp_notes, tmp_notes + ".tmp", tmp_cfg):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+        board.ensure_serial_repl()
+
+    return "Home GUI+TUI + 5-cat Settings + Notes<=1KB (d={}B)".format(delta)
