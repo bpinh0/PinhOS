@@ -1,20 +1,20 @@
 {
   "name": "PinhOS",
-  "version": "1.0.0-alpha.2",
-  "firmware_version": "1.0.0-uf2.4",
-  "phase": 2,
-  "codename": "Dual-UI",
-  "build_timestamp": "2026-11-19T11:38:00Z",
-  "build_id": "20261119.1",
+  "version": "1.0.0-alpha.3",
+  "firmware_version": "1.0.1_build20112026",
+  "phase": 3,
+  "codename": "BusyBox Field Kit",
+  "build_timestamp": "2026-11-23T09:30:00Z",
+  "build_id": "20261123.1",
   "arch": "armv7emsp",
   "mcu": "RP2350",
   "sram_kb": 520,
   "board_default": "picocalc",
   "ota": {
     "channel": "alpha",
-    "repo": "PinhOS/PinhOS",
+    "repo": "bpinh0/PinhOS",
     "branch": "main",
-    "manifest_url": "https://raw.githubusercontent.com/PinhOS/PinhOS/main/version.json"
+    "manifest_url": "https://raw.githubusercontent.com/bpinh0/PinhOS/main/version.json"
   },
   "directories": [
     "/sd/pinhos",
@@ -28,6 +28,7 @@
     "/sd/pinhos/themes",
     "/sd/pinhos/.swap",
     "/sd/pinhos/logs",
+    "/sd/pinhos/screenshots",
     "/sd/pinhos/tests"
   ]
 }

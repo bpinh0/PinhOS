@@ -50,7 +50,7 @@ function Resolve-PicoPort([string]$PreferredPort) {
 
 $ResolvedPort = Resolve-PicoPort $PortName
 
-# Canonical Phase 1+2 OS tree deployed EXCLUSIVELY to /sd/pinhos/
+# Canonical Phase 1+2+3 OS tree deployed EXCLUSIVELY to /sd/pinhos/
 $DeployManifest = @(
     @{ Local = "version.json";          Remote = "/sd/pinhos/version.json" },
     @{ Local = "main.py";               Remote = "/sd/pinhos/main.py" },
@@ -69,9 +69,22 @@ $DeployManifest = @(
     @{ Local = "ui\gui.py";             Remote = "/sd/pinhos/ui/gui.py" },
     @{ Local = "ui\tui.py";             Remote = "/sd/pinhos/ui/tui.py" },
     @{ Local = "ui\engine.py";          Remote = "/sd/pinhos/ui/engine.py" },
+    @{ Local = "ui\menu.py";            Remote = "/sd/pinhos/ui/menu.py" },
+    @{ Local = "net\__init__.py";       Remote = "/sd/pinhos/net/__init__.py" },
+    @{ Local = "net\wifi.py";           Remote = "/sd/pinhos/net/wifi.py" },
+    @{ Local = "net\sync.py";           Remote = "/sd/pinhos/net/sync.py" },
+    @{ Local = "tools\shell.py";        Remote = "/sd/pinhos/tools/shell.py" },
+    @{ Local = "tools\_shell_cmds.py";  Remote = "/sd/pinhos/tools/_shell_cmds.py" },
+    @{ Local = "tools\editor.py";       Remote = "/sd/pinhos/tools/editor.py" },
+    @{ Local = "tools\files.py";        Remote = "/sd/pinhos/tools/files.py" },
+    @{ Local = "tools\net_tools.py";    Remote = "/sd/pinhos/tools/net_tools.py" },
+    @{ Local = "tools\uart_term.py";    Remote = "/sd/pinhos/tools/uart_term.py" },
+    @{ Local = "tools\sysmon.py";       Remote = "/sd/pinhos/tools/sysmon.py" },
     @{ Local = "apps\hello_world.py";   Remote = "/sd/pinhos/apps/hello_world.py" },
     @{ Local = "apps\matrix_deck.py";   Remote = "/sd/pinhos/apps/matrix_deck.py" },
-    @{ Local = "tests\selftest.py";     Remote = "/sd/pinhos/tests/selftest.py" }
+    @{ Local = "apps\doom_deck.py";     Remote = "/sd/pinhos/apps/doom_deck.py" },
+    @{ Local = "tests\selftest.py";     Remote = "/sd/pinhos/tests/selftest.py" },
+    @{ Local = "tests\selftest_p3.py";  Remote = "/sd/pinhos/tests/selftest_p3.py" }
 )
 
 $themesDir = Join-Path $ProjectRoot "themes"
@@ -132,6 +145,11 @@ def _save_st(st):
             pass
 
 def _safe_mode(reason, strikes=3):
+    try:
+        import machine
+        os.dupterm(machine.UART(0, 115200, rxbuf=4096), 0)
+    except Exception:
+        pass
     _bp('<<PINHOS:SAFE_RECOVERY_MODE:strikes={}>> {}'.format(strikes, reason))
     try:
         import picocalc
@@ -341,20 +359,21 @@ function Read-UntilIdle($sp, [int]$idleMs = 250, [int]$maxMs = 8000) {
 function Initialize-PicoRawSession($sp) {
     # Wait 150ms after opening COM4, interrupt any running loop (Ctrl-C x2), then enter Raw REPL (Ctrl-A)
     Start-Sleep -Milliseconds 150
-    $sp.Write([string][char]3)
-    Start-Sleep -Milliseconds 80
-    $sp.Write([string][char]3)
-    Start-Sleep -Milliseconds 120
-    [void](Read-UntilIdle $sp 60 300)
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $sp.Write([string][char]3)
+        Start-Sleep -Milliseconds 80
+        $sp.Write([string][char]3)
+        Start-Sleep -Milliseconds 140
+        [void](Read-UntilIdle $sp 80 400)
 
-    $sp.Write([string][char]1)
-    [void](Read-UntilIdle $sp 80 400)
+        $sp.Write([string][char]1)
+        [void](Read-UntilIdle $sp 80 400)
 
-    # Bootstrap imports first (1-liner, no newlines) so binascii is ready for Base64 exec
-    [void](Invoke-RawRepl $sp "import os,sys,gc,io,json,time,binascii,machine" 3000 16 12 -RawText)
+        # Bootstrap imports first (1-liner, no newlines) so binascii is ready for Base64 exec
+        [void](Invoke-RawRepl $sp "import os,sys,gc,io,json,time,binascii,machine" 3000 16 12 -RawText)
 
-    # Define _bp() and sequential chunk writer _wchk() using standard print()
-    $stage1 = @"
+        # Define _bp() and sequential chunk writer _wchk() using standard print()
+        $stage1 = @"
 def _bp(*a):
     print(' '.join(str(x) for x in a))
 def _wchk(s):
@@ -364,17 +383,45 @@ def _wchk(s):
         _bp('ERR:' + repr(_e))
 _bp('HANDSHAKE_OK')
 "@
-    $hsOut = Invoke-RawRepl $sp $stage1 4000 16 12 -RequiredMarker "HANDSHAKE_OK"
-    if ($hsOut -notmatch "HANDSHAKE_OK") {
-        $sp.Write([string][char]3)
-        Start-Sleep -Milliseconds 80
-        $sp.Write([string][char]3)
-        Start-Sleep -Milliseconds 120
-        [void](Read-UntilIdle $sp 60 300)
-        $sp.Write([string][char]1)
-        [void](Read-UntilIdle $sp 80 400)
-        [void](Invoke-RawRepl $sp "import os,sys,gc,io,json,time,binascii,machine" 3000 16 12 -RawText)
         $hsOut = Invoke-RawRepl $sp $stage1 4000 16 12 -RequiredMarker "HANDSHAKE_OK"
+        if ($hsOut -match "HANDSHAKE_OK") {
+            break
+        }
+    }
+
+    if ($hsOut -notmatch "HANDSHAKE_OK") {
+        foreach ($fallbackBaud in @(153600, 184320, 192000, 76800)) {
+            try {
+                $sp.BaudRate = $fallbackBaud
+                Start-Sleep -Milliseconds 100
+                $sp.Write([string][char]3)
+                Start-Sleep -Milliseconds 80
+                $sp.Write([string][char]3)
+                Start-Sleep -Milliseconds 120
+                [void](Read-UntilIdle $sp 80 300)
+                $sp.Write([string][char]1)
+                [void](Read-UntilIdle $sp 80 300)
+                [void](Invoke-RawRepl $sp "import os,machine;_u=machine.UART(0,115200,rxbuf=4096);os.dupterm(_u,0)" 2000 16 12 -RawText)
+                $sp.Write([string][char]2)
+                Start-Sleep -Milliseconds 80
+                $sp.BaudRate = $BaudRate
+                Start-Sleep -Milliseconds 100
+                $sp.Write([string][char]3)
+                Start-Sleep -Milliseconds 80
+                $sp.Write([string][char]3)
+                Start-Sleep -Milliseconds 120
+                [void](Read-UntilIdle $sp 80 300)
+                $sp.Write([string][char]1)
+                [void](Read-UntilIdle $sp 80 300)
+                [void](Invoke-RawRepl $sp "import os,sys,gc,io,json,time,binascii,machine" 3000 16 12 -RawText)
+                $hsOut = Invoke-RawRepl $sp $stage1 4000 16 12 -RequiredMarker "HANDSHAKE_OK"
+                if ($hsOut -match "HANDSHAKE_OK") {
+                    break
+                }
+            } catch {
+                $sp.BaudRate = $BaudRate
+            }
+        }
     }
 
     if ($hsOut -notmatch "HANDSHAKE_OK") {
@@ -477,7 +524,7 @@ if ((-not $NoMpremote) -and $mpremoteCmd) {
         $tmpMain = Join-Path $env:TEMP "pinhos_main_stub.py"
         [System.IO.File]::WriteAllText($tmpBoot, $FlashBootStub)
         [System.IO.File]::WriteAllText($tmpMain, $FlashMainStub)
-        & $mp connect $ResolvedPort exec "import os; [os.mkdir(d) for d in ('/sd/pinhos','/sd/pinhos/boards','/sd/pinhos/core','/sd/pinhos/ui','/sd/pinhos/net','/sd/pinhos/web','/sd/pinhos/tools','/sd/pinhos/apps','/sd/pinhos/themes','/sd/pinhos/.swap','/sd/pinhos/logs','/sd/pinhos/tests') if d.split('/')[-1] not in os.listdir('/'.join(d.split('/')[:-1]) or '/')]"
+        & $mp connect $ResolvedPort exec "import os; [os.mkdir(d) for d in ('/sd/pinhos','/sd/pinhos/boards','/sd/pinhos/core','/sd/pinhos/ui','/sd/pinhos/net','/sd/pinhos/web','/sd/pinhos/tools','/sd/pinhos/apps','/sd/pinhos/themes','/sd/pinhos/.swap','/sd/pinhos/logs','/sd/pinhos/screenshots','/sd/pinhos/tests') if d.split('/')[-1] not in os.listdir('/'.join(d.split('/')[:-1]) or '/')]"
         & $mp connect $ResolvedPort fs cp $tmpBoot ":/boot.py"
         & $mp connect $ResolvedPort fs cp $tmpMain ":/main.py"
         $totalFiles = $DeployManifest.Count
@@ -512,7 +559,39 @@ $sp.WriteTimeout = 5000
 # Keep DtrEnable & RtsEnable FALSE for ClockworkPi PicoCalc CH340 (VID_1A86&PID_7523)
 $sp.DtrEnable = $false
 $sp.RtsEnable = $false
-$sp.Open()
+
+$availPorts = [System.IO.Ports.SerialPort]::GetPortNames()
+if ($availPorts -notcontains $ResolvedPort) {
+    Write-Host "[ERROR] Serial port '$ResolvedPort' is not detected (available: $($availPorts -join ', '))." -ForegroundColor Red
+    exit 1
+}
+
+try {
+    $sp.Open()
+} catch {
+    Write-Host "[ERROR] Cannot open '$ResolvedPort' (port is locked by another process or access denied): $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+
+if ($Action -in @("com", "check", "ping", "status")) {
+    try {
+        Write-Host "[COM CHECK] Port '$ResolvedPort' opened OK @ $BaudRate baud. Probing PicoCalc REPL..." -ForegroundColor Cyan
+        Start-Sleep -Milliseconds 120
+        $sp.Write([string][char]3)
+        Start-Sleep -Milliseconds 80
+        $sp.Write("`r`n")
+        $probe = Read-UntilIdle $sp 150 700
+        if ($probe -match ">>>|raw REPL|KeyboardInterrupt|PINHOS") {
+            Write-Host "[COM CHECK] PASS: '$ResolvedPort' is OPEN and PicoCalc REPL responded ($($probe.Trim() -replace '\s+', ' '))" -ForegroundColor Green
+            exit 0
+        } else {
+            Write-Host "[COM CHECK] WARN: '$ResolvedPort' OS port is OPEN (not locked), but PicoCalc REPL did not echo '>>>' (press CTRL+Q / LNK or CTRL+C on boot splash)." -ForegroundColor Yellow
+            exit 2
+        }
+    } finally {
+        if ($sp -and $sp.IsOpen) { $sp.Close() }
+    }
+}
 
 try {
     if ($Action -eq "upload_and_start") {
@@ -562,11 +641,15 @@ try:
     machine.RTC().datetime($rtcTuple)
 except Exception:
     pass
-for _d in ('/sd/pinhos','/sd/pinhos/boards','/sd/pinhos/core','/sd/pinhos/ui','/sd/pinhos/net','/sd/pinhos/web','/sd/pinhos/tools','/sd/pinhos/apps','/sd/pinhos/themes','/sd/pinhos/.swap','/sd/pinhos/logs','/sd/pinhos/tests'):
+for _d in ('/sd/pinhos','/sd/pinhos/boards','/sd/pinhos/core','/sd/pinhos/ui','/sd/pinhos/net','/sd/pinhos/web','/sd/pinhos/tools','/sd/pinhos/apps','/sd/pinhos/themes','/sd/pinhos/.swap','/sd/pinhos/logs','/sd/pinhos/screenshots','/sd/pinhos/tests'):
     try:
         os.mkdir(_d)
     except Exception:
         pass
+try:
+    os.remove('/sd/pinhos/config_snapshot.json')
+except Exception:
+    pass
 def _sig(p):
     try:
         n=0;s=0;a=-1;z=0
@@ -644,7 +727,7 @@ if picocalc and hasattr(picocalc, 'display'):
         _d.recoverRefresh()
         _d.fill(0)
         _d.rect(18, 118, 284, 64, 3)
-        _d.text('DEPLOYING PinhOS v1.0.0-alpha.2', 36, 134, 3)
+        _d.text('DEPLOYING PinhOS v1.0.0-alpha.3', 36, 134, 3)
         _d.rect(40, 154, 240, 12, 3)
     except Exception:
         pass
@@ -694,7 +777,7 @@ _bp('INIT_OK')
         Write-Host "[PinhOS] Launching /sd/pinhos/main.py and streaming Boot Guard stabilization..."
         $launchCode = @"
 import os, sys, io, gc, machine
-for _m in ('main','boards','boards.base','boards.picocalc','boards.generic_spi','core','core.config','core.logger','core.swap','core.sandbox','core.theme','ui','ui.widgets','ui.gui','ui.tui','ui.engine','tests.selftest'):
+for _m in ('main','boards','boards.base','boards.picocalc','boards.generic_spi','core','core.config','core.logger','core.swap','core.sandbox','core.theme','ui','ui.widgets','ui.gui','ui.tui','ui.engine','ui.menu','net','net.wifi','net.sync','tools','tools.shell','tools._shell_cmds','tools.editor','tools.files','tools.net_tools','tools.uart_term','tools.sysmon','tests.selftest','tests.selftest_p3'):
  if _m in sys.modules:del sys.modules[_m]
 gc.collect()
 if '/sd/pinhos' not in sys.path:sys.path.insert(0,'/sd/pinhos')
@@ -709,13 +792,12 @@ except Exception as _e:
         [void](Stream-RawReplCommand $sp $launchCode "<<PINHOS:BOOT_OK:" 12000)
         # Exit Raw REPL cleanly (Ctrl-B) and start interactive keyboard ui_loop() in Friendly REPL
         $sp.Write([string][char]2)
-        Start-Sleep -Milliseconds 120
-        if ($sp.BytesToRead -gt 0) { [void]$sp.ReadExisting() }
+        [void](Read-UntilIdle $sp 150 600)
         Send-Paced $sp "_pm.ui_loop()`r`n"
-        Start-Sleep -Milliseconds 100
+        Start-Sleep -Milliseconds 250
     }
     elseif ($Action -eq "test") {
-        Write-Host "[PinhOS] Running Phase 1+2 Self-Test Gate on $ResolvedPort..."
+        Write-Host "[PinhOS] Running Phase 1+2+3 Self-Test Gate on $ResolvedPort..."
         Initialize-PicoRawSession $sp
 
         $prepTestCode = @"
@@ -761,16 +843,16 @@ _bp('PREP_OK')
 
         $runTestCmd = @"
 import os, sys, io, gc
-for _m in ('tests.selftest','tests','main','boards','boards.base','boards.picocalc','boards.generic_spi','core','core.config','core.logger','core.swap','core.sandbox','core.theme','ui','ui.widgets','ui.gui','ui.tui','ui.engine'):
+for _m in ('tests.selftest','tests.selftest_p3','tests','main','boards','boards.base','boards.picocalc','boards.generic_spi','core','core.config','core.logger','core.swap','core.sandbox','core.theme','ui','ui.widgets','ui.gui','ui.tui','ui.engine','ui.menu','net','net.wifi','net.sync','tools','tools.shell','tools._shell_cmds','tools.editor','tools.files','tools.net_tools','tools.uart_term','tools.sysmon'):
  if _m in sys.modules:del sys.modules[_m]
 gc.collect()
 try:
  import tests.selftest as _st
  _st.run_all(interactive_wait=False)
 except Exception as _e:
- _buf=io.StringIO();sys.print_exception(_e,_buf);_bp('<<PINHOS:SELFTEST:FAIL:0/8>>\r\n'+_buf.getvalue())
+ _buf=io.StringIO();sys.print_exception(_e,_buf);_bp('<<PINHOS:SELFTEST:FAIL:0/10>>\r\n'+_buf.getvalue())
 "@
-        $testOut = Stream-RawReplCommand $sp $runTestCmd "<<PINHOS:SELFTEST:" 45000
+        $testOut = Stream-RawReplCommand $sp $runTestCmd "<<PINHOS:SELFTEST:" 90000
         # Exit Raw REPL cleanly (Ctrl-B) back to friendly >>> prompt with dupterm preserved
         $sp.Write([string][char]2)
         [void](Read-UntilIdle $sp 150 500)
@@ -805,12 +887,53 @@ except Exception as _e:
         [void](Read-UntilIdle $sp 150 500)
         Write-Output $out
     }
+    elseif ($Action -eq "screenshot") {
+        Write-Host "[PinhOS] Capturing 320x320 BMP screenshot from $ResolvedPort..." -ForegroundColor Cyan
+        Initialize-PicoRawSession $sp
+        $outFile = if ($Arg1 -and $Arg1.Trim().Length -gt 0) { $Arg1.Trim() } else { Join-Path $PSScriptRoot "picocalc_shot.bmp" }
+        $shotCode = @"
+import sys, binascii
+if '/sd/pinhos' not in sys.path: sys.path.insert(0, '/sd/pinhos')
+from boards import get_board
+_b = get_board()
+_p = _b.screenshot()
+if not _p:
+    _bp('SHOT_ERR:no_fb')
+else:
+    _bp('SHOT_PATH:' + _p)
+    with open(_p, 'rb') as _f:
+        while True:
+            _c = _f.read(384)
+            if not _c: break
+            _bp('B64:' + binascii.b2a_base64(_c).decode().strip())
+    _bp('SHOT_DONE')
+"@
+        $shotOut = Invoke-RawRepl $sp $shotCode 30000 16 12 -RequiredMarker "SHOT_DONE"
+        $sp.Write([string][char]2)
+        [void](Read-UntilIdle $sp 150 500)
+        if ($shotOut -match "SHOT_DONE") {
+            $ms = New-Object System.IO.MemoryStream
+            foreach ($ln in ($shotOut -split "`r?`n")) {
+                if ($ln.StartsWith("B64:")) {
+                    $chunk = [Convert]::FromBase64String($ln.Substring(4).Trim())
+                    $ms.Write($chunk, 0, $chunk.Length)
+                }
+            }
+            [System.IO.File]::WriteAllBytes($outFile, $ms.ToArray())
+            Write-Host "[PinhOS] Saved screenshot ($($ms.Length) B) -> $outFile" -ForegroundColor Green
+        } else {
+            Write-Host "[ERROR] Screenshot capture failed: $shotOut" -ForegroundColor Red
+            exit 1
+        }
+    }
 } finally {
     if ($sp -and $sp.IsOpen) {
-        try {
-            $sp.Write([string][char]2)
-            Start-Sleep -Milliseconds 100
-        } catch {
+        if ($Action -ne "upload_and_start") {
+            try {
+                $sp.Write([string][char]2)
+                Start-Sleep -Milliseconds 100
+            } catch {
+            }
         }
         $sp.Close()
     }

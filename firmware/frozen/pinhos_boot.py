@@ -12,6 +12,8 @@ VERSION_JSON_PATHS = ("/sd/pinhos/version.json", "/version.json")
 BOOT_STATE_PATHS = ("/sd/pinhos/boot_state.json", "/boot_state.json")
 BOOT_TARGET_PATHS = ("/sd/pinhos/boot_target.json", "/boot_target.json")
 
+UF2_VERSION = "1.0.1_build20112026"
+
 _cached_ver = None
 _splash_drawn = False
 _ctrl_held = False
@@ -23,7 +25,7 @@ def _load_version_info():
     if _cached_ver is not None:
         return _cached_ver
     os_ver = "SD-RECOVERY"
-    fw_ver = "base"
+    fw_ver = UF2_VERSION
     for p in VERSION_JSON_PATHS:
         try:
             with open(p, "r") as f:
@@ -103,21 +105,21 @@ def _draw_splash_frame(os_ver, fw_ver, sub="[F1]Recov [F2]Menu [ENT]Boot", sub2=
         if not _splash_drawn:
             d.recoverRefresh()
         d.fill(0)
-        d.rect(10, 68, 300, 184, 3)
-        d.fill_rect(12, 70, 296, 26, 3)
+        d.rect(10, 68, 300, 184, 15)
+        d.fill_rect(12, 70, 296, 26, 15)
         hdr = "PinhOS v" + os_ver
         hx = max(16, (320 - len(hdr) * 8) // 2)
         d.text(hdr[:34], hx, 79, 0)
         d.text("ClockworkPi PicoCalc (RP2350)", 40, 110, 15)
-        d.text(("UF2: " + fw_ver)[:34], 24, 126, 6)
+        d.text(("UF2: " + fw_ver)[:34], 24, 126, 7)
         # Progress bar outline (inner 268x10 at x=26, y=166)
-        d.rect(24, 164, 272, 14, 3)
-        d.hline(18, 206, 284, 6)
+        d.rect(24, 164, 272, 14, 15)
+        d.hline(18, 206, 284, 7)
         sx1 = max(16, (320 - len(sub[:36]) * 8) // 2)
-        d.text(sub[:36], sx1, 215, 14)
+        d.text(sub[:36], sx1, 215, 7)
         if sub2:
             sx2 = max(16, (320 - len(sub2[:36]) * 8) // 2)
-            d.text(sub2[:36], sx2, 232, 6)
+            d.text(sub2[:36], sx2, 232, 7)
         d.show()
         _splash_drawn = True
     except Exception as e:
@@ -136,12 +138,12 @@ def set_progress(pct, status_msg="", sub=None):
         # Clear and update status line
         d.fill_rect(18, 144, 284, 14, 0)
         if status_msg:
-            d.text(str(status_msg)[:34], 24, 146, 10)
+            d.text(str(status_msg)[:34], 24, 146, 7)
         # Clear and fill progress bar interior
         d.fill_rect(26, 166, 268, 10, 0)
         fill_w = (p * 268) // 100
         if fill_w > 0:
-            d.fill_rect(26, 166, fill_w, 10, 3)
+            d.fill_rect(26, 166, fill_w, 10, 15)
         # Update percentage readout
         d.fill_rect(18, 184, 284, 14, 0)
         pct_txt = "{}%".format(p)
@@ -150,7 +152,7 @@ def set_progress(pct, status_msg="", sub=None):
             d.fill_rect(14, 212, 292, 34, 0)
             s = str(sub)[:36]
             sx = max(16, (320 - len(s) * 8) // 2)
-            d.text(s, sx, 222, 14)
+            d.text(s, sx, 222, 7)
         d.show()
     except Exception as e:
         print("[BOOT_PROG_ERR]", repr(e))
@@ -201,9 +203,9 @@ def _show_boot_menu(kb):
         import picocalc
         d = picocalc.display
         d.fill(0)
-        d.fill_rect(0, 0, 320, 24, 3)
+        d.fill_rect(0, 0, 320, 24, 15)
         d.text(("PinhOS BOOT MGR v" + os_ver)[:36], 16, 8, 0)
-        d.rect(6, 30, 308, 252, 3)
+        d.rect(6, 30, 308, 252, 15)
         d.fill_rect(0, 294, 320, 26, 8)
         d.text("UP/DN:Select  ENT:Boot  ESC:Recov", 20, 303, 15)
         d.show()
@@ -220,14 +222,14 @@ def _show_boot_menu(kb):
             for idx in range(len(items)):
                 num, label, _ = items[idx]
                 if idx == cur_sel:
-                    d.fill_rect(12, y - 4, 296, 20, 3)
+                    d.fill_rect(12, y - 4, 296, 20, 15)
                     d.text("> [{}] {}".format(num, label[:29]), 16, y + 2, 0)
                 else:
                     d.text("  [{}] {}".format(num, label[:29]), 16, y + 2, 15)
                 y += 34
             if cur_note:
-                d.hline(14, 218, 292, 6)
-                d.text(str(cur_note)[:35], 16, 232, 14)
+                d.hline(14, 218, 292, 7)
+                d.text(str(cur_note)[:35], 16, 232, 7)
             d.show()
         except Exception as e:
             print("[BOOT_MENU_DRAW_ERR]", repr(e))
