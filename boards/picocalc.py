@@ -87,11 +87,15 @@ SD_BAUDRATE  = 12_000_000
 PIN_AUDIO_L  = 26
 PIN_AUDIO_R  = 27
 
-# Serial Bridge: UART0
+# Serial Bridge: UART0 (COM4 dupterm) & Auxiliary Field Console: UART1 (side header)
 UART_BRIDGE_BUS = 0
 PIN_UART_TX     = 0
 PIN_UART_RX     = 1
 UART_BAUDRATE   = 115200
+
+UART_AUX_BUS    = 1
+PIN_AUX_UART_TX = 8
+PIN_AUX_UART_RX = 9
 
 # RP2350 Internal Die Temperature ADC Channel
 ADC_TEMP_CH = 4
@@ -148,12 +152,15 @@ class PicoCalcBoard(BoardBase):
         self._kb = None
         self._i2c = None
         self._uart = None
+        self._aux_uart = None
         self._stdin_poll = None
         self._kbuf = bytearray(8)
         self._lut = _build_default_lut()
         self._refresh_active = False
         self._fb_buf = None
         self._fb = None
+        self.last_screenshot = None
+        self.pending_screenshot = None
         self._bat_cache = {
             "percent": 100,
             "voltage_mv": 4150,
@@ -206,7 +213,10 @@ class PicoCalcBoard(BoardBase):
                 self._stdin_poll = None
 
         self.recover_refresh()
-        self.set_lut(self._lut)
+        import sys as _sys
+        _m = _sys.modules.get("main")
+        if not (_m is not None and getattr(_m, "_boot_splash_active", False)):
+            self.set_lut(self._lut)
         self.set_backlight(self._backlight_pct)
         self.set_kb_backlight(self._kb_backlight_pct)
         self.clear_input()
@@ -214,7 +224,8 @@ class PicoCalcBoard(BoardBase):
         return True
 
     def restore_state(self):
-        """Restore default LUT, display auto-refresh, and clear input after sandbox exit."""
+        """Restore default LUT, display auto-refresh, close aux UART, and clear input after sandbox exit."""
+        self.close_aux_uart()
         super().restore_state()
         self.set_lut(self._lut)
 
@@ -365,16 +376,14 @@ class PicoCalcBoard(BoardBase):
                 return (None, mods)
             b = bytes([b[1]])
 
-        # Standalone STM32 modifier keycodes (Shift, Ctrl, Alt, Sym/Caps)
+        # Standalone STM32 modifier keycodes (0xA1/0xA2 Shift, 0xA3/0xA5 Ctrl on PicoCalc, 0xA4 Alt)
         if len(b) == 1 and b[0] in (0xA1, 0xA2, 0xA3, 0xA4, 0xA5):
             if b[0] in (0xA1, 0xA2):
                 mods |= MOD_SHIFT
-            elif b[0] == 0xA3:
+            elif b[0] in (0xA3, 0xA5):
                 mods |= MOD_CTRL
             elif b[0] == 0xA4:
                 mods |= MOD_ALT
-            elif b[0] == 0xA5:
-                mods |= MOD_SYM
             self._modifiers = mods
             return (None, mods)
 
@@ -421,6 +430,8 @@ class PicoCalcBoard(BoardBase):
             return ("TAB", mods)
         if b in (b"\x1b", b"\x1b\x1b", b"\xb1"):
             return ("ESC", mods)
+        if b in (b"\xb0", b"\xd0", b"\x91"):
+            return ("POWER", mods)
 
         # Alt + Key (ESC prefix followed by printable char)
         if len(b) == 2 and b[0] == 0x1B and 32 <= b[1] <= 126:
@@ -498,12 +509,10 @@ class PicoCalcBoard(BoardBase):
             if state == 3:
                 if code in (0xA1, 0xA2):
                     self._modifiers &= ~MOD_SHIFT
-                elif code == 0xA3:
+                elif code in (0xA3, 0xA5):
                     self._modifiers &= ~MOD_CTRL
                 elif code == 0xA4:
                     self._modifiers &= ~MOD_ALT
-                elif code == 0xA5:
-                    self._modifiers &= ~MOD_SYM
                 continue
 
             # Key pressed (state == 1) or held (state == 2)
@@ -511,14 +520,11 @@ class PicoCalcBoard(BoardBase):
                 if code in (0xA1, 0xA2):
                     self._modifiers |= MOD_SHIFT
                     continue
-                if code == 0xA3:
+                if code in (0xA3, 0xA5):
                     self._modifiers |= MOD_CTRL
                     continue
                 if code == 0xA4:
                     self._modifiers |= MOD_ALT
-                    continue
-                if code == 0xA5:
-                    self._modifiers |= MOD_SYM
                     continue
                 return bytes([code])
 
@@ -581,6 +587,14 @@ class PicoCalcBoard(BoardBase):
         if raw:
             key_name, mods = self._decode_raw_key(raw)
             self._modifiers = mods
+            # Global screenshot shortcut CTRL+P: capture clean 4-bit BMP FIRST in the HAL,
+            # beep, and also pass the CTRL+P key event through so the active view/tool can
+            # show the "SCREENSHOT SAVED" confirmation toast + FooterBar status immediately.
+            if key_name is not None and (mods & MOD_CTRL) and str(key_name).upper() == "P":
+                try:
+                    self.screenshot()
+                except Exception:
+                    pass
             if key_name is not None:
                 self.push_event({
                     "type": "key",
@@ -594,6 +608,98 @@ class PicoCalcBoard(BoardBase):
     def poll_key(self):
         """Non-blocking key poll returning the next key string or None."""
         return self.read_key()
+
+    # --- Screenshot (4bpp indexed BMP streamed to SD, zero extra SRAM) ---
+
+    SCREENSHOT_DIR = "/sd/pinhos/screenshots"
+
+    def get_framebuffer(self):
+        """Return a zero-copy memoryview of the live 4bpp GS4_HMSB framebuffer (or None)."""
+        try:
+            if self._disp is not None:
+                return memoryview(self._disp)
+            if self._fb_buf is not None:
+                return memoryview(self._fb_buf)
+        except Exception:
+            pass
+        return None
+
+    def _screenshot_path(self):
+        try:
+            os.mkdir("/sd/pinhos")
+        except Exception:
+            pass
+        try:
+            os.mkdir(self.SCREENSHOT_DIR)
+        except Exception:
+            pass
+        d = self.get_rtc_datetime()
+        base = "{}/shot_{:04d}{:02d}{:02d}_{:02d}{:02d}{:02d}".format(
+            self.SCREENSHOT_DIR, d[0], d[1], d[2], d[4], d[5], d[6]
+        )
+        path = base + ".bmp"
+        n = 1
+        while True:
+            try:
+                os.stat(path)
+            except OSError:
+                return path
+            path = "{}_{}.bmp".format(base, n)
+            n += 1
+
+    def screenshot(self, path=None):
+        """
+        Save the current screen as a 320x320 4-bit indexed BMP (palette = live theme LUT).
+        Streams row-by-row from the framebuffer (bottom-up), so SRAM cost is ~200 bytes.
+        Returns the saved path, or None on failure.
+        """
+        import struct
+        mv = self.get_framebuffer()
+        if mv is None:
+            return None
+        w, h = self.display_width, self.display_height
+        row = w // 2
+        if len(mv) < row * h:
+            return None
+        if path is None:
+            path = self._screenshot_path()
+        try:
+            data_sz = row * h
+            f = open(path, "wb")
+            try:
+                f.write(struct.pack("<2sIHHI", b"BM", 14 + 40 + 64 + data_sz, 0, 0, 14 + 40 + 64))
+                f.write(struct.pack("<IiiHHIIiiII", 40, w, h, 1, 4, 0, data_sz, 2835, 2835, 16, 16))
+                pal = bytearray(64)
+                for i in range(16):
+                    e = self._lut[i]
+                    v = ((e & 0xFF) << 8) | (e >> 8)  # undo byte-swapped LUT entry
+                    r5 = (v >> 11) & 31
+                    g6 = (v >> 5) & 63
+                    b5 = v & 31
+                    pal[i * 4] = (b5 << 3) | (b5 >> 2)
+                    pal[i * 4 + 1] = (g6 << 2) | (g6 >> 4)
+                    pal[i * 4 + 2] = (r5 << 3) | (r5 >> 2)
+                f.write(pal)
+                for y in range(h - 1, -1, -1):
+                    f.write(mv[y * row:(y + 1) * row])
+            finally:
+                f.close()
+        except Exception:
+            return None
+        self.last_screenshot = path
+        self.pending_screenshot = path
+        self.beep(1800, 25)
+        self.beep(2400, 25)
+        try:
+            self.serial_print("[SCREENSHOT]", path)
+        except Exception:
+            pass
+        return path
+
+    def pop_pending_screenshot(self):
+        p = self.pending_screenshot
+        self.pending_screenshot = None
+        return p
 
     # --- SPI microSD Card Mount / Unmount with Retry Logic ---
 
@@ -815,6 +921,69 @@ class PicoCalcBoard(BoardBase):
         except Exception:
             return 28.0
 
+    # --- Read-only Bus Diagnostics (hwinfo / i2cscan) ---
+
+    def i2c_scan(self):
+        """
+        Fast, STM32-safe read-only I2C probe on the 10 kHz southbridge bus.
+        Avoids a full 119-address blind scan that can stall/timeout the 10 kHz STM32 I2C1 bus.
+        """
+        if self._i2c is None:
+            return []
+        found = []
+        # Always verify STM32 southbridge (0x1F) + common field I2C expansion addresses
+        for addr in (SB_I2C_ADDR, 0x20, 0x27, 0x3C, 0x3D, 0x48, 0x50, 0x57, 0x68, 0x76, 0x77):
+            try:
+                if addr == SB_I2C_ADDR and self._kb is not None:
+                    found.append(addr)
+                else:
+                    self._i2c.writeto(addr, b"")
+                    found.append(addr)
+            except Exception:
+                pass
+        return sorted(found)
+
+    def get_i2c_known(self):
+        return {SB_I2C_ADDR: "STM32 southbridge (kbd/bat/bkl)"}
+
+    def get_bus_info(self):
+        return {
+            "i2c": self._i2c is not None,
+            "uart": self._uart is not None,
+            "aux_uart": self._aux_uart is not None,
+            "sd": bool(self.is_sd_mounted()),
+        }
+
+    def open_aux_uart(self, baud=115200, bits=8, parity=None, stop=1):
+        """Open auxiliary field UART1 (GP4 TX / GP5 RX) without touching UART0 COM4 dupterm."""
+        self.close_aux_uart()
+        if machine is None:
+            return None
+        try:
+            self._aux_uart = machine.UART(
+                UART_AUX_BUS,
+                baudrate=int(baud),
+                bits=int(bits),
+                parity=parity,
+                stop=int(stop),
+                tx=machine.Pin(PIN_AUX_UART_TX),
+                rx=machine.Pin(PIN_AUX_UART_RX),
+                rxbuf=1024,
+            )
+            return self._aux_uart
+        except Exception:
+            self._aux_uart = None
+            return None
+
+    def close_aux_uart(self):
+        if self._aux_uart is not None:
+            try:
+                if hasattr(self._aux_uart, "deinit"):
+                    self._aux_uart.deinit()
+            except Exception:
+                pass
+            self._aux_uart = None
+
     def ensure_serial_repl(self):
         """
         Keep active dupterm REPL stream intact without calling os.dupterm(None, 0)
@@ -822,8 +991,19 @@ class PicoCalcBoard(BoardBase):
         """
         return self._uart
 
-    def init_uart_bridge(self):
-        return self.ensure_serial_repl()
+    def init_uart_bridge(self, rebind=False):
+        """
+        Ensure UART(0) GP0/GP1 (CH340 COM4) is attached to os.dupterm(..., 0) at 115200 baud.
+        When rebind=True (e.g. on CTRL+Q LNK toggle or after machine.freq() clock changes),
+        re-initializes UART(0) @ 115200 baud so the baud divisor matches the active CPU clock.
+        """
+        if machine is not None and (rebind or self._uart is None):
+            try:
+                self._uart = machine.UART(UART_BRIDGE_BUS, UART_BAUDRATE, rxbuf=4096)
+                os.dupterm(self._uart, 0)
+            except Exception:
+                pass
+        return self._uart
 
     def serial_print(self, *args):
         """Print diagnostic text via paced print() so 115200 baud UART0 TX never overflows."""

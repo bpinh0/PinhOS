@@ -17,43 +17,55 @@ CANONICAL_SUBDIRS = (
     "themes",
     ".swap",
     "logs",
+    "screenshots",
     "tests",
 )
 
 DEFAULT_VERSION_MANIFEST = {
     "name": "PinhOS",
-    "version": "1.0.0-alpha.2",
-    "phase": 2,
-    "codename": "Dual-UI",
-    "build_timestamp": "2026-11-19T11:38:00Z",
-    "build_id": "20261119.1",
+    "version": "1.0.0-alpha.3",
+    "phase": 3,
+    "codename": "BusyBox Field Kit",
+    "build_timestamp": "2026-11-23T09:30:00Z",
+    "build_id": "20261123.1",
     "arch": "armv7emsp",
     "mcu": "RP2350",
     "sram_kb": 520,
     "board_default": "picocalc",
     "ota": {
         "channel": "alpha",
-        "repo": "PinhOS/PinhOS",
+        "repo": "bpinh0/PinhOS",
         "branch": "main",
-        "manifest_url": "https://raw.githubusercontent.com/PinhOS/PinhOS/main/version.json",
+        "manifest_url": "https://raw.githubusercontent.com/bpinh0/PinhOS/main/version.json",
     },
 }
 
 DEFAULT_CONFIG = {
     "board": "picocalc",
     "ui_mode": "gui",
+    "launcher_layout": "grid",
     "theme": "cyber_amber",
     "lcd_brightness": 80,
     "kb_brightness": 60,
     "sound": True,
+    "wifi_indicator": "bars",
+    "battery_indicator": "both",
+    "sleep_timeout_s": 300,
+    "tz_offset_h": 0,
+    "ntp_auto": True,
+    "ntp_server": "162.159.200.1",
+    "cpu_freq_mhz": 150,
     "swap_enabled": True,
     "swap_low_sram": 65536,
     "boot_strike_limit": 3,
     "boot_stable_ms": 5000,
     "ota_channel": "alpha",
-    "ota_repo": "PinhOS/PinhOS",
+    "ota_repo": "bpinh0/PinhOS",
     "ota_branch": "main",
 }
+
+SNAPSHOT_PATH = PINHOS_ROOT + "/config.snap.json"
+LEGACY_SNAPSHOT_PATH = PINHOS_ROOT + "/config_snapshot.json"
 
 
 def _dir_exists(path):
@@ -198,6 +210,8 @@ class ConfigManager:
                 loaded = json.load(f)
             if isinstance(loaded, dict):
                 self.data.update(loaded)
+                if self.data.get("ntp_server") in ("pool.ntp.org", "", None):
+                    self.data["ntp_server"] = "162.159.200.1"
                 return True
         except Exception:
             pass
@@ -233,6 +247,62 @@ class ConfigManager:
         if save_now:
             return self.save()
         return True
+
+    def has_snapshot(self, snap_path=None):
+        p = snap_path or SNAPSHOT_PATH
+        try:
+            os.stat(p)
+            return True
+        except Exception:
+            if snap_path is None:
+                try:
+                    os.stat(LEGACY_SNAPSHOT_PATH)
+                    return True
+                except Exception:
+                    pass
+            return False
+
+    def save_snapshot(self, snap_path=None):
+        """Save current configuration atomically to SD snapshot file (config.snap.json)."""
+        p = snap_path or SNAPSHOT_PATH
+        payload = {"snapshot_version": 1, "config": dict(self.data)}
+        ok = atomic_write_json(p, payload)
+        if ok and snap_path is None:
+            try:
+                os.remove(LEGACY_SNAPSHOT_PATH)
+            except Exception:
+                pass
+        return ok
+
+    def load_snapshot(self, snap_path=None, save_now=True):
+        """Restore configuration from SD snapshot file (config.snap.json). Returns (ok, msg)."""
+        p = snap_path or SNAPSHOT_PATH
+        raw = None
+        try:
+            with open(p, "r") as f:
+                raw = json.load(f)
+        except Exception:
+            if snap_path is None:
+                try:
+                    with open(LEGACY_SNAPSHOT_PATH, "r") as f:
+                        raw = json.load(f)
+                except Exception:
+                    raw = None
+        if raw is None:
+            return False, "No snapshot on SD"
+        if not isinstance(raw, dict):
+            return False, "Invalid snapshot JSON"
+        src = raw.get("config") if isinstance(raw.get("config"), dict) else raw
+        if not isinstance(src, dict) or not src:
+            return False, "Empty snapshot"
+        merged = dict(self.defaults)
+        merged.update(src)
+        self.data = merged
+        if save_now:
+            self.save()
+            if snap_path is None:
+                self.save_snapshot()
+        return True, "Snapshot restored!"
 
     def as_dict(self):
         return dict(self.data)

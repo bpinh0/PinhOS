@@ -16,22 +16,48 @@ class TUIBackend:
         self.board.fill(theme.color("bg"))
 
     def draw_status_bar(self, bar, theme):
+        from ui.widgets import draw_pine_logo, draw_wifi_icon, draw_battery_icon
         b = self.board
         c_bg = theme.color("bg")
         c_acc = theme.color("accent")
+        c_afg = theme.color("accent_fg")
         c_txt = theme.color("text")
         c_bdr = theme.color("border")
 
         b.fill_rect(bar.x, bar.y, bar.w, bar.h, c_bg)
-        left_txt = "[{}] {}".format(bar.mode_label[:4], bar.title)
+        draw_pine_logo(b, bar.x + 2, bar.y + 1, c_acc)
+        left_x = bar.x + 18
         right_str = bar.right_text or ""
-        right_w = len(right_str) * 6
-        max_left = max(1, (bar.w - right_w - 8) // 6)
+        right_w = (len(right_str) * 6 + 4) if right_str else 0
+        wl = getattr(bar, "wifi_level", None)
+        bi = getattr(bar, "bat_info", None)
+        lnk = bool(getattr(bar, "serial_link", False))
+        bat_w = 20 if bi is not None else 0
+        wf_w = 17 if wl is not None else 0
+        lnk_w = 24 if lnk else 0
+        max_left = max(1, (bar.w - left_x - right_w - bat_w - wf_w - lnk_w - 6) // 6)
 
-        b.text(left_txt[:max_left], bar.x + 2, bar.y + 4, c_acc)
+        b.text(bar.title[:max_left], left_x, bar.y + 4, c_acc)
+        cur_x = bar.x + bar.w - 3
+        if bi is not None:
+            cur_x -= 17
+            fill_c = theme.color("ok" if (bi[1] or bi[0] > 25) else "err")
+            ph = bi[2] if len(bi) > 2 else 0
+            draw_battery_icon(b, cur_x, bar.y + 3, bi[0], bi[1], c_txt, fill_c, c_bg, phase=ph)
+            cur_x -= 3
         if right_str:
-            rx = bar.x + bar.w - right_w - 4
-            b.text(right_str, rx, bar.y + 4, c_txt)
+            cur_x -= len(right_str) * 6
+            b.text(right_str, cur_x, bar.y + 4, c_txt)
+            cur_x -= 4
+        if wl is not None:
+            cur_x -= 13
+            draw_wifi_icon(b, cur_x, bar.y + 3, wl, c_acc, c_bdr)
+            cur_x -= 4
+        if lnk:
+            cur_x -= 20
+            b.fill_rect(cur_x, bar.y + 2, 20, 11, c_acc)
+            b.text("LNK", cur_x + 1, bar.y + 4, c_afg)
+            cur_x -= 4
         # Double-line terminal header rule
         b.hline(bar.x, bar.y + bar.h - 3, bar.w, c_bdr)
         b.hline(bar.x, bar.y + bar.h - 1, bar.w, c_acc)
@@ -198,5 +224,138 @@ class TUIBackend:
         vis = tv.visible_lines(line_h=11, header_h=header_h)
         y = tv.y + header_h + 2
         for line in tv.lines[tv.scroll_offset:tv.scroll_offset + vis]:
-            b.text(str(line)[:max_ch], tv.x + 2, y, c_txt)
+            if isinstance(line, tuple):
+                txt, tok = line[0], line[1]
+                col = theme.color(tok, default="text")
+            else:
+                txt, col = line, c_txt
+            b.text(str(txt)[:max_ch], tv.x + 2, y, col)
             y += 11
+
+    def term_metrics(self, tv):
+        """Return (x0, y0, line_h, cols, nrows, clear_x, clear_w) for a TermView (full-density, 8px rows)."""
+        lh = 8
+        cols = min(53, tv.w // 6)
+        nrows = max(1, (tv.h - 2) // lh)
+        return (tv.x, tv.y + 1, lh, cols, nrows, tv.x, tv.w)
+
+    def draw_term_view(self, tv, theme, dirty_rows=None):
+        b = self.board
+        geom = self.term_metrics(tv)
+        if dirty_rows is None:
+            b.fill_rect(tv.x, tv.y, tv.w, tv.h, theme.color("bg"))
+            indices = range(geom[4])
+        else:
+            indices = list(dirty_rows)
+        tv.paint(b, theme, geom, "bg", indices)
+
+    def draw_mosaic_grid(self, grid, theme, dirty_tiles=None):
+        """Render the 6 launcher categories in either TUI 3x2 GRID or TUI 1-6 LIST."""
+        b = self.board
+        c_bg = theme.color("bg")
+        c_bdr = theme.color("border")
+        c_acc = theme.color("accent")
+        c_txt = theme.color("text")
+        c_muted = theme.color("text_muted")
+        c_sbg = theme.color("sel_bg")
+        c_sfg = theme.color("sel_fg")
+
+        if getattr(grid, "layout", "list") == "grid":
+            cols = grid.cols
+            rows = max(1, (len(grid.items) + cols - 1) // cols)
+            gap = 4
+            tw = (grid.w - gap * (cols - 1)) // cols
+            th = (grid.h - gap * (rows - 1)) // rows
+            if dirty_tiles is None:
+                b.fill_rect(grid.x, grid.y, grid.w, grid.h, c_bg)
+                indices = range(len(grid.items))
+            else:
+                indices = [i for i in dirty_tiles if 0 <= i < len(grid.items)]
+            for idx in indices:
+                item = grid.items[idx]
+                r, c = idx // cols, idx % cols
+                tx = grid.x + c * (tw + gap)
+                ty = grid.y + r * (th + gap)
+                is_sel = (idx == grid.selected)
+                fill_c = c_sbg if is_sel else c_bg
+                fg_c = c_sfg if is_sel else c_txt
+                b.fill_rect(tx, ty, tw, th, fill_c)
+                b.rect(tx, ty, tw, th, c_acc if is_sel else c_bdr)
+                num = "[{}]".format(idx + 1)
+                b.text(num, tx + 5, ty + 6, fg_c if is_sel else c_acc)
+                bdg = str(item.get("tui_badge", item.get("badge", "")))[:10]
+                if bdg:
+                    b.text(bdg, tx + max(4, tw - len(bdg) * 6 - 5), ty + 6, fg_c if is_sel else c_muted)
+                b.hline(tx + 2, ty + 18, tw - 4, c_acc if is_sel else c_bdr)
+                lbl = str(item.get("short", item.get("label", "")))[:14]
+                lx = tx + max(4, (tw - len(lbl) * 6) // 2)
+                b.text(lbl, lx, ty + th // 2 + 2, fg_c)
+                mark = ">> OPEN <<" if is_sel else ""
+                if mark:
+                    mx = tx + max(4, (tw - len(mark) * 6) // 2)
+                    b.text(mark, mx, ty + th - 14, fg_c)
+            return
+
+        row_h = max(18, (grid.h - 8) // max(1, len(grid.items)))
+        if dirty_tiles is None:
+            b.fill_rect(grid.x, grid.y, grid.w, grid.h, c_bg)
+            b.rect(grid.x, grid.y, grid.w, grid.h, c_bdr)
+            indices = range(len(grid.items))
+        else:
+            indices = [i for i in dirty_tiles if 0 <= i < len(grid.items)]
+
+        for idx in indices:
+            item = grid.items[idx]
+            ry = grid.y + 4 + idx * row_h
+            is_sel = (idx == grid.selected)
+            bg_c = c_sbg if is_sel else c_bg
+            fg_c = c_sfg if is_sel else c_txt
+            b.fill_rect(grid.x + 2, ry, grid.w - 4, row_h - 2, bg_c)
+
+            pref = ">" if is_sel else " "
+            lbl = "{} {}. {}".format(pref, idx + 1, str(item.get("label", "")))
+            bdg = str(item.get("tui_badge", item.get("badge", "")))
+            max_lbl = max(1, (grid.w - len(bdg) * 6 - 16) // 6)
+            b.text(lbl[:max_lbl], grid.x + 6, ry + (row_h - 10) // 2, fg_c)
+            if bdg:
+                bx = grid.x + grid.w - len(bdg) * 6 - 6
+                b.text(bdg, bx, ry + (row_h - 10) // 2, fg_c if is_sel else c_acc)
+
+    def draw_telemetry_strip(self, strip, theme):
+        b = self.board
+        c_bg = theme.color("bg")
+        c_bdr = theme.color("border")
+        c_ok = theme.color("ok")
+        c_inf = theme.color("info")
+        c_wrn = theme.color("warn")
+        c_txt = theme.color("text")
+        b.fill_rect(strip.x, strip.y, strip.w, strip.h, c_bg)
+        b.rect(strip.x, strip.y, strip.w, strip.h, c_bdr)
+        mid = strip.x + strip.w // 2
+        b.vline(mid, strip.y + 2, strip.h - 4, c_bdr)
+
+        b.text(strip.ram_label[:11], strip.x + 4, strip.y + (strip.h - 8) // 2, c_inf)
+        sx1 = strip.x + 74
+        sw1 = max(24, (mid - 4) - sx1)
+        sh = strip.h - 8
+        sy = strip.y + 4
+        b.rect(sx1, sy, sw1, sh, c_bdr)
+        if strip.ram_hist:
+            bw = max(2, (sw1 - 2) // max(1, strip.max_samples))
+            for i, v in enumerate(strip.ram_hist):
+                bh = max(1, (v * (sh - 2)) // 100)
+                bx = sx1 + 1 + i * bw
+                if bx + bw <= sx1 + sw1 - 1:
+                    b.fill_rect(bx, sy + sh - 1 - bh, max(1, bw - 1), bh, c_ok if strip.ok else c_wrn)
+
+        b.text(strip.cpu_label[:13], mid + 4, strip.y + (strip.h - 8) // 2, c_txt)
+        sx2 = mid + 86
+        sw2 = max(24, (strip.x + strip.w - 4) - sx2)
+        b.rect(sx2, sy, sw2, sh, c_bdr)
+        if strip.cpu_hist:
+            bw = max(2, (sw2 - 2) // max(1, strip.max_samples))
+            for i, v in enumerate(strip.cpu_hist):
+                bh = max(1, (v * (sh - 2)) // 100)
+                bx = sx2 + 1 + i * bw
+                if bx + bw <= sx2 + sw2 - 1:
+                    b.fill_rect(bx, sy + sh - 1 - bh, max(1, bw - 1), bh, c_wrn if v >= 65 else c_inf)

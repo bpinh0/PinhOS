@@ -5,6 +5,8 @@
 # 3. Cooperative .swap/ R/W Roundtrip, Corruption Recovery & Core Helpers
 # 4. Sandbox APP_META Static Inspection, Handle Leak Closure, Module Purge & SRAM Reclamation (< 2048 B)
 # 5. 3-Strike Boot Guard & Safe Recovery Mode Trigger Logic
+# 6-8. Input/Boot router, Unified Theme Engine, Dual-UI dirty redraw (Phase 2)
+# 9. BusyBox Shell & Streaming File Commands (Phase 3)
 
 import os
 import sys
@@ -46,7 +48,7 @@ def test_manifest_and_dirs(root="/sd/pinhos"):
         _assert(bool(st[0] & 0x4000), "Missing canonical directory: " + full)
 
     manifest = load_version_manifest(root=root)
-    _assert(manifest.get("version") == "1.0.0-alpha.2", "Expected version 1.0.0-alpha.2")
+    _assert(manifest.get("version") == "1.0.0-alpha.3", "Expected version 1.0.0-alpha.3")
     _assert(manifest.get("arch") == "armv7emsp", "Expected target arch armv7emsp")
     _assert(isinstance(manifest.get("ota"), dict) and "channel" in manifest["ota"], "Missing OTA channel field")
     return "v{} ({}) +{} dirs".format(
@@ -140,6 +142,12 @@ def test_hal_init(root="/sd/pinhos"):
         "ui/gui.py",
         "ui/tui.py",
         "ui/engine.py",
+        "tools/shell.py",
+        "tools/editor.py",
+        "tools/files.py",
+        "tools/net_tools.py",
+        "tools/uart_term.py",
+        "tools/sysmon.py",
         "boards/base.py",
     ):
         p = root.rstrip("/") + "/" + mod_rel
@@ -362,6 +370,7 @@ def main(ctx):
 
 
 def test_boot_guard(root="/sd/pinhos"):
+    had_main = "main" in sys.modules
     import main as pinhos_main
 
     test_state_path = root.rstrip("/") + "/logs/_selftest_boot_state.json"
@@ -417,6 +426,9 @@ def test_boot_guard(root="/sd/pinhos"):
             pass
         # Ensure real device boot_state is clean (0 strikes) and serial REPL stays bound
         pinhos_main.clear_boot_strikes()
+        if not had_main:
+            sys.modules.pop("main", None)
+        gc.collect()
         try:
             from boards import get_board
             get_board().ensure_serial_repl()
@@ -702,6 +714,28 @@ def test_dual_ui_engine(root="/sd/pinhos"):
     return "GUI<->TUI + 2-row dirty (d={}B)".format(delta)
 
 
+def test_busybox_shell(root="/sd/pinhos"):
+    gc.collect()
+    import tests.selftest_p3 as _p3
+    try:
+        return _p3.test_busybox_shell(root=root)
+    finally:
+        _p3 = None
+        sys.modules.pop("tests.selftest_p3", None)
+        gc.collect()
+
+
+def test_phase3_field_tools(root="/sd/pinhos"):
+    gc.collect()
+    import tests.selftest_p3 as _p3
+    try:
+        return _p3.test_phase3_field_tools(root=root)
+    finally:
+        _p3 = None
+        sys.modules.pop("tests.selftest_p3", None)
+        gc.collect()
+
+
 def run_all(root="/sd/pinhos", interactive_wait=False):
     from boards import get_board
 
@@ -717,9 +751,11 @@ def run_all(root="/sd/pinhos", interactive_wait=False):
         ("6. Input & Boot Router Integrity", test_input_and_boot_router),
         ("7. Unified Theme Engine (4 JSON)", test_theme_engine),
         ("8. Dual-UI Dirty-Redraw & SRAM", test_dual_ui_engine),
+        ("9. BusyBox Shell & Streaming FS", test_busybox_shell),
+        ("10. Field Tools & Sandbox Meta", test_phase3_field_tools),
     ]
 
-    _bp("=== PinhOS v1.0.0-alpha.2 Phase 1+2 Self-Test Suite ===")
+    _bp("=== PinhOS v1.0.0-alpha.3 Phase 1+2+3 Self-Test Suite ===")
     passed = 0
     results = []
 
@@ -758,8 +794,8 @@ def run_all(root="/sd/pinhos", interactive_wait=False):
                 tag = "[PASS]" if ok else "[FAIL]"
                 col = 10 if ok else 9
                 board.text("{} {}".format(tag, label[:44]), 4, y, col)
-                board.text(" " + str(detail)[:50], 4, y + 11, 15)
-                y += 30
+                board.text(" " + str(detail)[:50], 4, y + 10, 15)
+                y += 24
             free_kb = (gc.mem_free() // 1024) if hasattr(gc, "mem_free") else 256
             board.fill_rect(0, 272, 320, 22, 8)
             if interactive_wait:

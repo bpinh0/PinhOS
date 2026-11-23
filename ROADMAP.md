@@ -1,7 +1,7 @@
 # 🌲 PinhOS — Architectural Specification & Engineering Roadmap
 
 > **Target Platform:** ClockworkPi PicoCalc (Raspberry Pi Pico 2W / RP2350 — Dual ARM Cortex-M33 @ 150 MHz, 520 KB SRAM, 4 MB Flash, CYW43439 Wi-Fi 4 + BLE 5.2, 320×320 SPI LCD, I2C STM32 Southbridge, SPI microSD).  
-> **Current Status:** Active Development — `v1.0.0-alpha.2` (**Phase 1 + Phase 2 Complete & Verified 8/8 on Hardware** — Dual-UI Engine, Unified Theme System, Crash/Breadcrumb Logger & BSOD; **Phase 3 next**).
+> **Current Status:** Active Development — `v1.0.0-alpha.3` (**Phase 1 + Phase 2 + Phase 3 Complete & Verified 10/10 on Hardware** — Built-In BusyBox CLI, On-Device Editor, File Commander, Net Probes, HAL UART1 Console, System Monitor, BMP Screenshot Capture & Hierarchical Settings Tree; **Phase 3.1 Desktop Home Screen next, followed by Phase 4 WebPortal**).
 
 ---
 
@@ -25,7 +25,7 @@
 ## 2. Standard Contracts & Schemas
 
 ### App Entry Contract (`APP_META`)
-Every applet in `/sd/pinhos/apps/<app_name>/` exposes a single `main(ctx)` entry point and module-level metadata dictionary so the launcher, Store, and sandbox can validate memory requirements before execution:
+Every applet in `/sd/pinhos/apps/` or `/sd/pinhos/tools/` exposes a single `main(ctx)` entry point and module-level metadata dictionary so the launcher, Store, and sandbox can validate memory requirements before execution:
 ```python
 APP_META = {
     "id": "uart_term",
@@ -35,7 +35,7 @@ APP_META = {
     "description": "Hardware serial terminal with baud presets and macros",
     "entry": "main",
     "min_sram": 32768,               # Minimum free bytes required before launch
-    "ui_modes": ["native", "lvgl"],  # Supported rendering backends
+    "ui_modes": ["gui", "tui"],      # Supported rendering backends
     "native_libs": []                # Optional .mpy C dependencies (v1.1.0+)
 }
 
@@ -72,17 +72,17 @@ def main(ctx):
 
 ### Phase 1: Hardware Abstraction, Boot Guard & Resilient Runtime
 - [x] **1.1 Canonical Filesystem & Manifest (`version.json`):**
-  - Initialize `/sd/pinhos/` directory hierarchy (`boards/`, `core/`, `ui/`, `net/`, `web/`, `tools/`, `apps/`, `themes/`, `.swap/`, `logs/`).
+  - Initialize `/sd/pinhos/` directory hierarchy (`boards/`, `core/`, `ui/`, `net/`, `web/`, `tools/`, `apps/`, `themes/`, `.swap/`, `logs/`, `screenshots/`).
   - Create `version.json` containing semantic version, build timestamp, target architecture (`armv7emsp`), and OTA channel metadata.
 - [x] **1.2 Board Hardware Abstraction Layer (`boards/`):**
   - `boards/base.py`: Define abstract base class and capability flags for display (`320x320` RGB565 blit/fill), keyboard/pointer input queue, microSD mount/unmount, battery voltage/percentage/charging state, PWM backlight (`0–100%`), PWM/I2S audio, and RTC.
-  - `boards/picocalc.py`: Full hardware driver for ClockworkPi PicoCalc (SPI LCD controller, I2C STM32 southbridge keyboard scan + modifier decoding + battery registers, SPI SD card mount with retry logic, keyboard & screen backlight PWM).
+  - `boards/picocalc.py`: Full hardware driver for ClockworkPi PicoCalc (SPI LCD controller, I2C STM32 southbridge keyboard scan + modifier decoding + battery registers, SPI SD card mount with retry logic, keyboard & screen backlight PWM, 4-bit indexed BMP screenshot capture).
   - `boards/generic_spi.py`: Configurable fallback driver for bare Pico 2W setups using standard ST7789/ILI9341 SPI displays and I2C CardKB keyboards.
   - Board auto-detection / `config.json` profile selector at boot.
 - [x] **1.3 Crash-Proof 3-Strike Boot Guard (`main.py`):**
   - Read and increment `boot_strikes` in persistent flash state prior to mounting SD or importing UI/network modules.
   - Reset `boot_strikes = 0` only after the main event loop runs cleanly for `5 seconds` (or upon explicit self-test pass).
-  - Trigger **Safe Recovery Mode** when `boot_strikes >= 3`: boots with minimal framebuffer text output, USB serial REPL access, and a stripped-down emergency WebPortal to restore configs or roll back OTA updates.
+  - Trigger **Safe Recovery Mode** when `boot_strikes >= 3`: boots with minimal framebuffer text output, USB serial REPL access, and recovery helpers to restore configs or roll back updates.
 - [x] **1.4 Sandboxed App Runner (`core/sandbox.py`):**
   - Parse `APP_META` safely without executing top-level app logic; verify `gc.mem_free() >= min_sram`.
   - Snapshot `set(sys.modules.keys())` and track opened file/socket wrappers before invoking `main(ctx)`.
@@ -102,30 +102,44 @@ def main(ctx):
 ### Phase 2: Dual-UI Engine & Unified Theme System
 - [x] **2.1 Unified Theme Engine (`core/theme.py` & `themes/`):**
   - Load and validate all 4 BOM-free JSON themes (`cyber_amber.json`, `phosphor_green.json`, `arctic_daylight.json`, `synthwave_pulse.json`) with automatic fallback to built-in `cyber_amber` if SD is missing or a file is malformed.
-  - Precompute 16-entry RGB565 LUT arrays applied in-place to `boards/picocalc.py` (Core 1-safe, zero full-screen framebuffer allocation) with runtime `[T]` hot-swapping and `config.json` persistence.
+  - Precompute 16-entry RGB565 LUT arrays applied in-place to `boards/picocalc.py` (Core 1-safe, zero full-screen framebuffer allocation) with runtime `[CTRL+T]` hot-swapping and `config.json` persistence.
 - [x] **2.2 Shared Widget Toolkit & Dual Rendering Backends (`ui/widgets.py`, `ui/gui.py`, `ui/tui.py`):**
   - Reusable dirty-tracked widgets (`StatusBar`, `FooterBar`, `Panel`, `ListMenu`, `ProgressBar`, `Dialog`, `TextView`) with 2-row partial redraws on `ListMenu` navigation (`delta=0B` SRAM verified on hardware).
   - **GUI Mode (320×320 Graphical):** Framed panels, accent header/footer bars, bordered cards, and graphical progress indicators.
   - **TUI Mode (High-Density Terminal):** Crisp monochrome/accent grid layout, dense list rows, ASCII dividers, and minimal draw overhead.
 - [x] **2.3 Seamless Live UI Mode Switcher (`ui/engine.py`):**
-  - Switch live between GUI and TUI modes (`[TAB]` / `[M]`) and cycle themes (`[T]`) with deterministic backend cleanup, `config.json` persistence, and `< 2 KB` SRAM delta (`0 B` verified on hardware).
+  - Switch live between GUI and TUI modes (`[TAB]` / `[CTRL+M]`) and cycle themes (`[CTRL+T]`) with deterministic backend cleanup, `config.json` persistence, and `< 2 KB` SRAM delta (`0 B` verified on hardware).
 - [x] **2.4 Crash Forensics, BSOD Guard & On-Device Log Viewer (`core/logger.py` & `main.py`):**
-  - Persistent `system.log` / `crash.log` with rotation, `breadcrumb.json` + `machine.reset_cause()` unclean-shutdown detection, `[L]` scrollable Dual-UI log viewer, `[ALT+F5]` Hard Reload (`x2` emergency reset), and `show_bsod()` fault fallback (**8/8 PASS verified on PicoCalc hardware**).
+  - Persistent `system.log` / `crash.log` with rotation, `breadcrumb.json` + `machine.reset_cause()` unclean-shutdown detection, `[CTRL+L]` scrollable Dual-UI log viewer, `[ALT+F5]` Hard Reload (`x2` emergency reset), and `show_bsod()` fault fallback (**8/8 PASS verified on PicoCalc hardware**).
 
 ---
 
 ### Phase 3: Built-In BusyBox CLI & Field Utilities (`tools/`)
-- [ ] **3.1 Interactive Shell (`tools/shell.py`):**
-  - Command-line REPL with command history, path tab-completion, environment variables, 53-column 6×8 scrolling output (`TextView`), and core UNIX-style commands (`ls`, `cd`, `cat`, `cp`, `mv`, `rm`, `mkdir`, `df`, `free`, `ps`, `uname`, `logs`, `reboot`).
-  - Add `[ALT+Q]` or confirmation guard for serial `COM4` REPL exit so standalone users cannot accidentally strand the UI.
-- [ ] **3.2 File Manager (`tools/files.py`):**
-  - Keyboard-driven file browser across `/sd/` and internal flash with file size/timestamp metadata, copy/move/rename/delete operations, streaming text/JSON viewer (1 KB chunked reads to protect RP2350 SRAM), and hex dump inspector.
-- [ ] **3.3 Network & Hardware Field Utilities (`tools/net_tools.py` & `tools/uart_term.py`):**
-  - **Net Probes:** Raw ICMP `ping` with RTT stats, fast async TCP port scanner, local subnet host sweep, Wake-on-LAN (`WoL`) magic packet sender, and DNS resolver.
-  - **UART Serial Console:** Hardware UART terminal (`boards/` UART pins) with configurable baud rates (`9600` to `921600`), `8N1` framing options, ASCII/Hex display toggle, SD session logging, and programmable F-key macro strings.
-- [ ] **3.4 System Monitor, Settings & Launcher Polish (`tools/sysmon.py`):**
-  - Live SRAM free/allocated sparkline, GC cycle counter, RP2350 internal temperature & CPU frequency readout, SD read/write speed benchmark, backlight brightness slider, and UI/theme switcher.
-  - Evolve the GUI launcher toward the `docs/mockups/` 3×2 icon-tile **Mosaic** & **Desktop** layouts (primitive-drawn icons + `SYS TELEMETRY` / `QUICK NOTES` cards) as Phase 3 tools populate the 6 top-level categories (`Dashboard`, `Apps & Studio`, `Terminal & Toolkit`, `Files /sd`, `HW Lab`, `Sys & OTA`).
+- [x] **3.1 Interactive Shell (`tools/shell.py` + `tools/_shell_cmds.py`):**
+  - Command-line REPL with 20-entry history ring, path/command tab-completion, environment variables, quote-aware `;` / `|` / `>` / `>>`, bounded 53-column 6×8 scrolling output (`TermView`), and core UNIX-style + hardware commands (`ls`, `cd`, `cat`, `head`, `tail`, `grep`, `wc`, `cp`, `mv`, `rm` with protected-path guard, `mkdir`, `hexdump`, `df`, `free`, `ps`, `uname`, `ver`, `dmesg`/`log`, `bat`, `bl`, `theme`, `mode`, `hwinfo`, `i2cscan`, `com4`, `edit`, `reboot`).
+  - Non-blocking `[CTRL+Q]` COM4 Serial Link (`LNK` badge) toggle that rebinds `UART0 @ 115200` on demand (and on BSOD/Safe Recovery/Sandbox fault screens) while keeping the UI 100% responsive and suppressing auto-sleep during REPL sessions.
+- [x] **3.2 File Manager & Text Editor (`tools/files.py` & `tools/editor.py`):**
+  - Keyboard-driven file browser across `/sd/` and internal flash with file size/type metadata, copy/move/rename/delete/mkdir, streaming 1 KB text/JSON viewer, 8-byte hex dump inspector, and nano-style on-device text/JSON editor (`16 KB` RAM cap + JSON validation).
+- [x] **3.3 Network & Hardware Field Utilities (`tools/net_tools.py` & `tools/uart_term.py`):**
+  - **Net Probes:** Wi-Fi STA status, DNS resolver, 4× TCP RTT ping, TCP port scanner, local subnet host sweep, and 102-byte Wake-on-LAN (`WoL`) magic packet sender.
+  - **UART Serial Console:** HAL-routed auxiliary `UART1` (`GP8`/`GP9`, zero conflict with `UART0` `COM4` or PSRAM) with baud presets (`9600` to `921600`), `8N1`, ASCII/Hex toggle, SD session logging, and programmable F-key macros.
+- [x] **3.4 System Monitor, Settings, Screenshots & Hierarchical Mosaic Launcher (`tools/sysmon.py`, `ui/menu.py`, `main.py`, `picocalc.ps1`):**
+  - Live primitive-drawn SRAM sparkline, GC cycle counter, RP2350 internal temperature & CPU frequency readout, 1 KB streamed SD read/write benchmark, backlight brightness sliders, and live UI/theme switcher.
+  - Evolved the Dual-UI launcher to the 3×2 icon-tile **Mosaic** (GUI) / 1–6 numbered list (TUI) backed by an Android-style hierarchical drill-down menu & Settings tree (`Terminal & Toolkit`, `Files & Editor`, dynamic `Apps & Studio`, `System & Diagnostics`, `Settings`, `Wi-Fi & Network`), dynamic `StatusBar` right-side width reservation, standardized `config.snap.json` snapshots, global `[CTRL+P]` 4-bit BMP screenshot capture with confirmation toast across all menus/tools, `picocalc.ps1 com` & `screenshot` host utilities, and **10/10 PASS verified on PicoCalc hardware**.
+
+---
+
+### Phase 3.1: Android-Style Desktop Home Screen & Settings Overhaul (`v1.0.0-alpha.4`)
+- [ ] **3.1.1 Desktop Home Workspace & App Drawer Navigation (`ui/desktop.py` & `main.py`):**
+  - Implement a self-contained `DesktopHome` workspace matching `docs/mockups/` as the primary **Home Screen**, featuring a top quick-category strip (`[1] TOOLKIT`–`[6] NET`) and split cards (`SYS TELEMETRY` live SRAM sparkline/CPU/temp/battery/WLAN + `QUICK NOTES` persistent scratchpad backed by `/sd/pinhos/notes.txt` with `<= 1 KB` streaming R/W).
+  - Provide Android-style two-layer navigation: `ENTER` / `HOME` opens the customizable **App Drawer** (`GRID` 3×2 Mosaic or `LIST` view toggled via `CTRL+V`), while `ESC` returns cleanly to Desktop Home (`boot_screen` configurable between `"desktop"` and `"drawer"` in `config.json`, `< 2 KB` SRAM delta).
+- [ ] **3.1.2 Reorganized 5-Category Settings Architecture (`ui/menu.py`):**
+  - Restructure `MENU_TREE["settings"]` into 5 intuitive, intent-grouped categories with live right-aligned state badges:
+    1. **Connectivity & Time** (`[LAN >]` — Wi-Fi Status/Scan/Saved/Auto-Connect/Off, NTP Sync/Auto-NTP/Timezone, GitHub Version/Theme/App Sync)
+    2. **Display & Appearance** (`[SCR >]` — Theme, UI Mode `GUI`/`TUI`, App Drawer Style `GRID`/`LIST`, Boot Screen `Home`/`Drawer`, LCD & KB Backlights)
+    3. **Status Bar & Sound** (`[UI >]` — Wi-Fi Indicator style, Battery Indicator style, Key Sound/Beep)
+    4. **System, Power & Backup** (`[SYS >]` — CPU Clock profile, Auto-Sleep Timer, Sleep Now, Config Snapshot Save/Restore, Battery & RTC Info, Reboot, COM4 Serial Link `LNK`)
+    5. **About PinhOS** (`[INF >]` — OS & UF2 Version, Board & SRAM Summary)
 
 ---
 
@@ -140,15 +154,17 @@ def main(ctx):
 
 ---
 
-### Phase 5: Wi-Fi Manager, GitHub OTA & App/Theme Store (`net/`)
-- [ ] **5.1 Wi-Fi Manager (`net/wifi.py`):**
-  - Multi-network credential store (`wifi.json`), signal strength scanner, non-blocking auto-reconnect, and automatic SoftAP hotspot fallback (`PinhOS-Setup`) for headless field configuration via WebPortal.
+### Phase 5: Wi-Fi SoftAP Fallback, GitHub OTA & App/Theme Store (`net/`)
+- [ ] **5.1 Wi-Fi STA Manager, Async Background Radio & SoftAP Captive Fallback (`net/wifi.py`):**
+  - [x] Multi-network credential store (`wifi.json`), signal strength scanner, 3-attempt auto-retry connect with hard CYW43 radio bounce, and literal-IPv4 UDP NTP + non-blocking HTTP Date fallback.
+  - [ ] Move Wi-Fi association, DHCP polling, and NTP sync to a fully asynchronous `uasyncio` background task (with RP2350 Core 1 LCD DMA / CYW43439 concurrency tuning so networking never impacts UI responsiveness or drops UDP packets).
+  - [ ] Automatic SoftAP hotspot fallback (`PinhOS-Setup`) for headless field configuration via WebPortal when no saved STA network is reachable.
 - [ ] **5.2 GitHub OTA Updater (`net/ota.py`):**
   - Fetch remote `version.json` and file manifest from configured GitHub release/branch.
   - Download changed files into `/sd/pinhos/.ota_staging/`, verify SHA-256 digests, atomically swap into place, and leverage Phase 1's 3-strike Boot Guard for automatic recovery if an update fails to boot.
 - [ ] **5.3 GitHub App & Theme Store (`net/store.py`):**
-  - Fetch curated catalog index (`store_index.json`) of community applets and JSON themes.
-  - Display category filters, version tags, `min_sram` compatibility badges, and one-click install/update/remove into `/sd/pinhos/apps/` and `/sd/pinhos/themes/`.
+  - [x] Direct GitHub theme/app sync and remote version check (`net/sync.py`).
+  - [ ] Curated catalog browser (`store_index.json`) with category filters, version tags, `min_sram` compatibility badges, and one-click install/update/remove into `/sd/pinhos/apps/` and `/sd/pinhos/themes/`.
 
 ---
 
@@ -156,7 +172,7 @@ def main(ctx):
 - [ ] **6.1 BLE Central & Device Pairing:**
   - Utilize CYW43439 `ubluetooth` (NimBLE) to scan, pair, bond, and auto-reconnect with standard BLE HID peripherals (full-size keyboards, mini trackballs/mice, wireless barcode/RFID scanners).
 - [ ] **6.2 Unified Input Multiplexer:**
-  - Merge incoming BLE HID keycodes and relative pointer events into the `boards/` input queue so external wireless peripherals work transparently across Native Mode, LVGL Desktop Mode, and all sandboxed apps.
+  - Merge incoming BLE HID keycodes and relative pointer events into the `boards/` input queue so external wireless peripherals work transparently across GUI Mode, TUI Mode, Desktop Home, and all sandboxed apps.
 
 ---
 

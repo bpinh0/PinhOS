@@ -296,13 +296,61 @@ def parse_app_meta(source):
 
 
 def inspect_app(app_path):
-    """Read an app file from disk and statically validate its APP_META contract."""
+    """
+    Stream-read only the header of an app file (<= 1.5 KB) to statically validate
+    APP_META, then scan line-by-line for the entry function — never slurps large files.
+    """
     try:
         with open(app_path, "r") as f:
-            src = f.read()
+            head = f.read(1536)
     except Exception as e:
         raise SandboxMetaError("Cannot read app file '{}': {}".format(app_path, e))
-    return parse_app_meta(src)
+
+    if not isinstance(head, str) or not head.strip():
+        raise SandboxMetaError("App source is empty")
+
+    raw_block = _extract_dict_block(head, "APP_META")
+    json_str = _py_dict_literal_to_json(raw_block)
+    try:
+        meta = json.loads(json_str)
+    except Exception as e:
+        raise SandboxMetaError("Malformed APP_META literal: {}".format(e))
+
+    if not isinstance(meta, dict):
+        raise SandboxMetaError("APP_META must be a dictionary")
+    for req_key in REQUIRED_META_KEYS:
+        if req_key not in meta:
+            raise SandboxMetaError("APP_META missing required key: '{}'".format(req_key))
+    for str_key in ("id", "name", "version", "category", "entry"):
+        val = meta.get(str_key)
+        if not isinstance(val, str) or not val.strip():
+            raise SandboxMetaError("APP_META['{}'] must be a non-empty string".format(str_key))
+    min_sram = meta.get("min_sram")
+    if not isinstance(min_sram, int) or isinstance(min_sram, bool) or min_sram < 0:
+        raise SandboxMetaError("APP_META['min_sram'] must be a non-negative integer")
+    ui_modes = meta.get("ui_modes")
+    if not isinstance(ui_modes, list) or not ui_modes:
+        raise SandboxMetaError("APP_META['ui_modes'] must be a non-empty list")
+
+    entry_name = meta["entry"]
+    found_entry = _has_entry_function(head, entry_name)
+    if not found_entry:
+        t1 = "def " + str(entry_name) + "("
+        t2 = "def " + str(entry_name) + " ("
+        try:
+            with open(app_path, "r") as f:
+                for line in f:
+                    s = line.strip()
+                    if s.startswith(t1) or s.startswith(t2):
+                        found_entry = True
+                        break
+        except Exception as e:
+            raise SandboxMetaError("Cannot scan app file '{}': {}".format(app_path, e))
+    if not found_entry:
+        raise SandboxMetaError(
+            "App does not define declared entry function 'def {}(ctx):'".format(entry_name)
+        )
+    return meta
 
 
 class _TrackedHandle:
@@ -463,6 +511,11 @@ class SandboxRunner:
             return None
         try:
             b = self.board
+            if hasattr(b, "init_uart_bridge"):
+                try:
+                    b.init_uart_bridge(rebind=True)
+                except Exception:
+                    pass
             b.recover_refresh()
             b.fill(0)
             b.rect(4, 4, 312, 312, 9)
@@ -647,9 +700,109 @@ class SandboxRunner:
         }
 
     def run_file(self, app_path, args=None, wait_on_error=False):
+        """
+        Execute an app file inside the sandbox. When app_path lives under /sd/pinhos/
+        (e.g. tools/*.py or apps/*.py), streams compilation via MicroPython's native
+        file-backed import instead of slurping the full source string into SRAM.
+        """
+        gc.collect()
+        meta = inspect_app(app_path)
+        app_id = meta["id"]
+        min_sram = int(meta["min_sram"])
+        entry_name = meta["entry"]
+
+        mod_name = None
+        if isinstance(app_path, str) and app_path.startswith("/sd/pinhos/") and app_path.endswith(".py"):
+            rel = app_path[len("/sd/pinhos/"):-3]
+            if rel and "/" in rel:
+                mod_name = rel.replace("/", ".")
+
+        if mod_name is None:
+            try:
+                with open(app_path, "r") as f:
+                    source = f.read()
+            except Exception as e:
+                raise SandboxError("Cannot read app '{}': {}".format(app_path, e))
+            return self.run_source(source, app_path=app_path, args=args, wait_on_error=wait_on_error)
+
+        gc.collect()
+        free_before = get_free_sram()
+        if free_before < min_sram:
+            raise SandboxMemoryError(
+                "App '{}' requires {} bytes free SRAM, only {} bytes available".format(
+                    app_id, min_sram, free_before
+                )
+            )
+
+        modules_before = set(sys.modules.keys())
+        if mod_name in sys.modules:
+            sys.modules.pop(mod_name, None)
+            modules_before.discard(mod_name)
+        real_open = open
+        tracker = ResourceTracker(real_open)
+        ctx = AppContext(
+            meta=meta, board=self.board, config=self.config, swap=self.swap,
+            logger=self.logger, tracker=tracker, args=args, theme=self.theme, ui=self.ui,
+        )
+
+        hooked_builtins = False
+        if builtins is not None and hasattr(builtins, "open"):
+            try:
+                setattr(builtins, "open", tracker.open)
+                hooked_builtins = True
+            except Exception:
+                hooked_builtins = False
+
+        ret_val, err_str, ok = None, None, False
+        leaked_closed = 0
+        purged_modules = []
         try:
-            with open(app_path, "r") as f:
-                source = f.read()
-        except Exception as e:
-            raise SandboxError("Cannot read app '{}': {}".format(app_path, e))
-        return self.run_source(source, app_path=app_path, args=args, wait_on_error=wait_on_error)
+            mod = __import__(mod_name, None, None, ("*",))
+            entry_fn = getattr(mod, entry_name, None)
+            if not callable(entry_fn):
+                raise SandboxMetaError("Entry '{}' in '{}' not callable".format(entry_name, app_id))
+            ret_val = entry_fn(ctx)
+            entry_fn = None
+            mod = None
+            ok = True
+        except Exception as exc:
+            err_str = repr(exc)
+            if self.logger is not None:
+                self.logger.exception("SANDBOX({})".format(app_id), exc)
+            exc = None
+        finally:
+            if hooked_builtins and builtins is not None:
+                try:
+                    setattr(builtins, "open", real_open)
+                except Exception:
+                    pass
+            leaked_closed = tracker.close_all()
+            for mn in list(sys.modules.keys()):
+                if mn not in modules_before:
+                    purged_modules.append(mn)
+                    try:
+                        mo = sys.modules.pop(mn, None)
+                        if mo is not None and hasattr(mo, "__dict__"):
+                            mo.__dict__.clear()
+                    except Exception:
+                        pass
+            ctx._tracker = ctx.board = ctx.config = ctx.swap = ctx.logger = ctx.theme = ctx.ui = None
+            ctx = tracker = None
+            if self.board is not None:
+                try:
+                    self.board.restore_state()
+                except Exception:
+                    pass
+            gc.collect()
+            gc.collect()
+
+        free_after = get_free_sram()
+        sram_delta = max(0, free_before - free_after)
+        if not ok and wait_on_error:
+            self.show_recovery_screen(app_id, err_str, sram_delta=sram_delta, wait_key=True)
+        return {
+            "ok": ok, "app_id": app_id, "meta": meta, "return_value": ret_val,
+            "error": err_str, "leaked_handles_closed": leaked_closed,
+            "purged_modules": purged_modules, "sram_before": free_before,
+            "sram_after": free_after, "sram_delta": sram_delta,
+        }
