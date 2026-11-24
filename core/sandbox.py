@@ -561,7 +561,7 @@ class SandboxRunner:
         min_sram = int(meta["min_sram"])
         entry_name = meta["entry"]
 
-        # 2. Verify free SRAM before launch
+        # 2. Verify free SRAM & contiguous block before launch
         gc.collect()
         free_before = get_free_sram()
         if free_before < min_sram:
@@ -570,6 +570,19 @@ class SandboxRunner:
                     app_id, min_sram, free_before
                 )
             )
+        min_block = int(meta.get("min_block", 16384))
+        if min_block > 0:
+            try:
+                from core.memutil import largest_free
+                blk = largest_free(cap=max(min_block, 16384))
+                if blk < min_block:
+                    raise SandboxMemoryError(
+                        "App '{}' needs {}B contig SRAM, largest block {}B".format(
+                            app_id, min_block, blk
+                        )
+                    )
+            except ImportError:
+                pass
 
         # 3. Snapshot sys.modules and initialize resource tracker
         modules_before = set(sys.modules.keys())
@@ -733,6 +746,19 @@ class SandboxRunner:
                     app_id, min_sram, free_before
                 )
             )
+        min_block = int(meta.get("min_block", 16384))
+        if min_block > 0:
+            try:
+                from core.memutil import largest_free
+                blk = largest_free(cap=max(min_block, 16384))
+                if blk < min_block:
+                    raise SandboxMemoryError(
+                        "App '{}' needs {}B contig SRAM, largest block {}B".format(
+                            app_id, min_block, blk
+                        )
+                    )
+            except ImportError:
+                pass
 
         modules_before = set(sys.modules.keys())
         if mod_name in sys.modules:

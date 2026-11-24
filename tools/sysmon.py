@@ -120,6 +120,12 @@ def main(ctx):
         free_b = gc.mem_free() if hasattr(gc, "mem_free") else 262144
         used_b = gc.mem_alloc() if hasattr(gc, "mem_alloc") else 65536
         fk, uk = free_b // 1024, used_b // 1024
+        bk = 0
+        try:
+            from core.memutil import largest_free
+            bk = largest_free() // 1024
+        except Exception:
+            pass
         samples.append(fk)
         if len(samples) > 48:
             samples.pop(0)
@@ -131,7 +137,7 @@ def main(ctx):
         bat = board.get_battery()
         devs = board.i2c_scan() if hasattr(board, "i2c_scan") else []
         rows = [
-            ("SRAM FREE:", "{}KB (used {}KB)".format(fk, uk), "ok" if fk > 64 else "warn"),
+            ("SRAM FREE:", "{}K (u:{}K blk:{}K)".format(fk, uk, bk), "ok" if (fk > 64 and bk >= 16) else "warn"),
             ("GC CYCLES:", "{} runs".format(gc_cycles), "info"),
             ("CPU / DIE:", "{}MHz | {}C".format(mhz, board.get_cpu_temp_c()), "text"),
             ("BATTERY  :", "{}% ({}mV{})".format(bat["percent"], bat["voltage_mv"], " CHG" if bat["charging"] else ""), "text"),

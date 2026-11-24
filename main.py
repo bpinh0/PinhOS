@@ -964,7 +964,13 @@ def ui_loop(sel_action=0):
             smsg = "{} OK (d={}B)".format(label[:16], res.get("sram_delta", 0))
             skind = "ok" if res.get("ok") else "err"
             if logger:
-                logger.info("TOOL {}: ok={} delta={}B".format(label, res.get("ok"), res.get("sram_delta", 0)))
+                blk = 0
+                try:
+                    from core.memutil import largest_free
+                    blk = largest_free()
+                except Exception:
+                    pass
+                logger.info("TOOL {}: ok={} delta={}B blk={}B".format(label, res.get("ok"), res.get("sram_delta", 0), blk))
             if wait_after and res.get("ok"):
                 board.clear_input()
                 while True:
@@ -1458,6 +1464,11 @@ _boot_splash_active = False
 def _boot_progress(pct, msg, pause_ms=0, clear_splash=False):
     """Advance the frozen pinhos_boot splash progress bar in-place during cold boot."""
     global _boot_splash_active
+    try:
+        from core.memutil import largest_free
+        bp("[BOOT {}%] {} (free={}B blk={}B)".format(pct, msg, gc.mem_free() if hasattr(gc, "mem_free") else 0, largest_free()))
+    except Exception:
+        pass
     if not _boot_splash_active:
         return
     try:

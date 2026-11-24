@@ -187,6 +187,14 @@ class SwapManager:
         except Exception:
             return False
 
+    def is_under_pressure(self, cfg=None, min_block=16384):
+        """Return True when total free SRAM < swap_low_sram OR largest contiguous block < min_block."""
+        try:
+            from core.memutil import heap_pressure
+            return heap_pressure(cfg=cfg, min_block=min_block)
+        except Exception:
+            return False
+
     def delete(self, app_id):
         target_path = self._file_path(app_id)
         try:
