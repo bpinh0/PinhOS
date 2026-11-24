@@ -246,12 +246,21 @@ class WebServer:
         self._active = 0
         self.pending_run = None
         self.pending_reboot = False
-        self._wlog("START {}:{} max_conns={} free={}B".format(
-            self.host, self.port, self.max_conns, gc.mem_free() if hasattr(gc, "mem_free") else 0
+        gc.collect()
+        free_b = gc.mem_free() if hasattr(gc, "mem_free") else 0
+        blk_b = 0
+        try:
+            from core.memutil import largest_free
+            blk_b = largest_free(cap=98304)
+        except Exception:
+            pass
+        self._wlog("START {}:{} max_conns={} free={}B blk={}B".format(
+            self.host, self.port, self.max_conns, free_b, blk_b
         ))
         if self.logger:
             try:
-                self.logger.info("WEB: Started {}:{}".format(self.host, self.port))
+                self.logger.info("WEB: Started {}:{} (free={}B blk={}B)".format(self.host, self.port, free_b, blk_b))
+                self.logger.info("HEAP[WEB_START]: free={}B blk={}B".format(free_b, blk_b))
             except Exception:
                 pass
         return True
@@ -323,7 +332,7 @@ class WebServer:
             st["sram_after"] = int(res.get("sram_after", 0))
             try:
                 from core.memutil import largest_free
-                st["largest_free"] = int(largest_free())
+                st["largest_free"] = int(largest_free(cap=98304))
             except Exception:
                 st["largest_free"] = 0
 
@@ -630,7 +639,7 @@ class WebServer:
         blk = 0
         try:
             from core.memutil import largest_free
-            blk = largest_free()
+            blk = largest_free(cap=98304)
         except Exception:
             pass
         await self._json(w, 200, {

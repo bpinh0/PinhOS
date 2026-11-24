@@ -1007,10 +1007,13 @@ def ui_loop(sel_action=0):
                     blk = 0
                     try:
                         from core.memutil import largest_free
-                        blk = largest_free()
+                        blk = largest_free(cap=98304)
                     except Exception:
                         pass
                     logger.info("TOOL {}: ok={} delta={}B blk={}B".format(label, res.get("ok"), res.get("sram_delta", 0), blk))
+                    if not runtime_state.get("_heap_first_tool_logged"):
+                        runtime_state["_heap_first_tool_logged"] = True
+                        _log_heap_stage(logger, "FIRST_TOOL:" + str(label)[:14])
                 if wait_after and res.get("ok"):
                     board.clear_input()
                     while True:
@@ -1135,6 +1138,9 @@ def ui_loop(sel_action=0):
     board.set_lut(theme_mgr.active.lut)
     view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
     view.render(force=True)
+    if not runtime_state.get("_heap_idle_logged"):
+        runtime_state["_heap_idle_logged"] = True
+        _log_heap_stage(logger, "IDLE_DESKTOP")
 
     idle_ticks = 0
     anim_ticks = 0
@@ -1584,12 +1590,32 @@ def ui_loop(sel_action=0):
 _boot_splash_active = False
 
 
+def _log_heap_stage(logger, stage):
+    """Log post-GC free SRAM and largest contiguous block (96 KB cap) for boot/runtime timeline (#26)."""
+    gc.collect()
+    free_b = gc.mem_free() if hasattr(gc, "mem_free") else 0
+    blk_b = 0
+    try:
+        from core.memutil import largest_free
+        blk_b = largest_free(cap=98304)
+    except Exception:
+        pass
+    msg = "HEAP[{}]: free={}B blk={}B".format(stage, free_b, blk_b)
+    if logger:
+        try:
+            logger.info(msg)
+        except Exception:
+            pass
+    bp("[HEAP]", msg)
+    return free_b, blk_b
+
+
 def _boot_progress(pct, msg, pause_ms=0, clear_splash=False):
     """Advance the frozen pinhos_boot splash progress bar in-place during cold boot."""
     global _boot_splash_active
     try:
         from core.memutil import largest_free
-        bp("[BOOT {}%] {} (free={}B blk={}B)".format(pct, msg, gc.mem_free() if hasattr(gc, "mem_free") else 0, largest_free()))
+        bp("[BOOT {}%] {} (free={}B blk={}B)".format(pct, msg, gc.mem_free() if hasattr(gc, "mem_free") else 0, largest_free(cap=98304)))
     except Exception:
         pass
     if not _boot_splash_active:
@@ -1789,9 +1815,9 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
             enable_wdt(int(cfg.get("wdt_timeout_ms", 8000)))
         if interactive and cfg.get("webportal_autostart", False):
             start_webportal(board=board, cfg=cfg, logger=logger)
-        free_b = gc.mem_free() if hasattr(gc, "mem_free") else 262144
+        free_b, _ = _log_heap_stage(logger, "BOOT_OK")
         bp("<<PINHOS:BOOT_OK:v{}:FREE_RAM={}>>".format(
-            manifest.get("version", "1.0.0-alpha.3.1"), free_b
+            manifest.get("version", "1.0.0-alpha.4.1"), free_b
         ))
         if interactive:
             ui_loop()
