@@ -30,12 +30,14 @@ class GUIBackend:
         wl = getattr(bar, "wifi_level", None)
         bi = getattr(bar, "bat_info", None)
         lnk = bool(getattr(bar, "serial_link", False))
+        web_on = bool(getattr(bar, "web_active", False))
         bat_w = 20 if bi is not None else 0
         wf_w = 17 if wl is not None else 0
         lnk_w = 24 if lnk else 0
+        web_w = 24 if web_on else 0
 
         title_x = bar.x + 19
-        avail_title_px = max(0, (bar.x + bar.w - right_w - bat_w - wf_w - lnk_w - 8) - title_x)
+        avail_title_px = max(0, (bar.x + bar.w - right_w - bat_w - wf_w - lnk_w - web_w - 8) - title_x)
         max_title_ch = avail_title_px // 6
         if max_title_ch > 0:
             b.text(bar.title[:max_title_ch], title_x, bar.y + 6, c_afg)
@@ -59,6 +61,12 @@ class GUIBackend:
             by = bar.y + max(2, (bar.h - 12) // 2)
             b.fill_rect(cur_x, by, 20, 12, c_afg)
             b.text("LNK", cur_x + 1, by + 2, c_acc)
+            cur_x -= 4
+        if web_on:
+            cur_x -= 20
+            by = bar.y + max(2, (bar.h - 12) // 2)
+            b.fill_rect(cur_x, by, 20, 12, c_afg)
+            b.text("WEB", cur_x + 1, by + 2, c_acc)
             cur_x -= 4
 
     def draw_footer_bar(self, bar, theme):

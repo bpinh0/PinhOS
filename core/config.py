@@ -12,6 +12,7 @@ CANONICAL_SUBDIRS = (
     "ui",
     "net",
     "web",
+    "web/static",
     "tools",
     "apps",
     "themes",
@@ -23,11 +24,11 @@ CANONICAL_SUBDIRS = (
 
 DEFAULT_VERSION_MANIFEST = {
     "name": "PinhOS",
-    "version": "1.0.0-alpha.3.1",
-    "phase": "3.1",
-    "codename": "Desktop Home",
-    "build_timestamp": "2026-11-23T13:05:00Z",
-    "build_id": "20261123.2",
+    "version": "1.0.0-alpha.4",
+    "phase": "4",
+    "codename": "WebPortal IDE",
+    "build_timestamp": "2026-11-23T14:30:00Z",
+    "build_id": "20261123.3",
     "arch": "armv7emsp",
     "mcu": "RP2350",
     "sram_kb": 520,
@@ -57,9 +58,12 @@ DEFAULT_CONFIG = {
     "ntp_server": "162.159.200.1",
     "cpu_freq_mhz": 150,
     "swap_enabled": True,
+    "swap_max_kb": 512,
     "swap_low_sram": 65536,
     "boot_strike_limit": 3,
     "boot_stable_ms": 5000,
+    "webportal_autostart": False,
+    "webportal_port": 8080,
     "ota_channel": "alpha",
     "ota_repo": "bpinh0/PinhOS",
     "ota_branch": "main",
@@ -67,6 +71,40 @@ DEFAULT_CONFIG = {
 
 SNAPSHOT_PATH = PINHOS_ROOT + "/config.snap.json"
 LEGACY_SNAPSHOT_PATH = PINHOS_ROOT + "/config_snapshot.json"
+RTC_STATE_PATH = PINHOS_ROOT + "/rtc_state.json"
+
+
+def save_rtc_state(board, path=RTC_STATE_PATH):
+    """Persist current RTC datetime tuple to SD so manual/synced time survives power-off."""
+    if board is None or not hasattr(board, "get_rtc_datetime"):
+        return False
+    try:
+        dt = board.get_rtc_datetime()
+        if dt and len(dt) >= 7 and int(dt[0]) >= 2024:
+            return atomic_write_json(path, {"dt": [int(x) for x in dt[:8]]})
+    except Exception:
+        pass
+    return False
+
+
+def restore_rtc_state(board, path=RTC_STATE_PATH):
+    """Restore persisted RTC datetime from SD on boot when hardware RTC reset to < 2024."""
+    if board is None or not hasattr(board, "get_rtc_datetime") or not hasattr(board, "set_rtc_datetime"):
+        return False
+    try:
+        cur = board.get_rtc_datetime()
+        if cur and int(cur[0]) >= 2024:
+            return False
+        with open(path, "r") as f:
+            data = json.load(f)
+        dt = data.get("dt") if isinstance(data, dict) else None
+        if isinstance(dt, list) and len(dt) >= 7 and int(dt[0]) >= 2024:
+            if len(dt) == 7:
+                dt.append(0)
+            return bool(board.set_rtc_datetime(tuple(int(x) for x in dt[:8])))
+    except Exception:
+        pass
+    return False
 
 
 def _dir_exists(path):

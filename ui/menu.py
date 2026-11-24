@@ -35,28 +35,35 @@ MENU_TREE = {
     )),
     "system": ("System & Diag", (
         {"id": "tool:sysmon", "label": "System Monitor", "badge": "[S]"},
-        {"id": "act:logs", "label": "System & Crash Logs", "badge": "[L]"},
+        {"id": "act:logs", "label": "System & Web Logs", "badge": "[L]"},
         {"id": "act:selftest", "label": "Run Self-Test", "badge": "[F2]"},
     )),
     "settings": ("Settings", (
-        {"id": "cat:set_conn", "label": "Connectivity & Time", "dyn": "conn_badge"},
+        {"id": "cat:set_conn", "label": "Wi-Fi & Connectivity", "dyn": "conn_badge"},
+        {"id": "cat:set_time", "label": "Date, Time & NTP", "dyn": "time_badge"},
         {"id": "cat:set_display", "label": "Display & Appearance", "dyn": "ui_summary"},
         {"id": "cat:set_bar_snd", "label": "Status Bar & Sound", "dyn": "bar_snd_badge"},
         {"id": "cat:set_power", "label": "System, Power & Backup", "dyn": "power_badge"},
         {"id": "cat:set_about", "label": "About PinhOS", "dyn": "os_ver"},
     )),
-    "set_conn": ("Connectivity & Time", (
+    "set_conn": ("Wi-Fi & Connectivity", (
         {"id": "wifi:status", "label": "Wi-Fi Status", "dyn": "wifi_st"},
         {"id": "wifi:scan", "label": "Scan & Connect", "badge": "[SCAN]"},
         {"id": "wifi:saved", "label": "Saved Networks", "badge": "[LIST]"},
         {"id": "wifi:auto", "label": "Auto-Connect Boot", "dyn": "wifi_auto"},
         {"id": "wifi:off", "label": "Disconnect Wi-Fi", "badge": "[OFF]"},
-        {"id": "ntp:sync", "label": "Sync NTP Clock Now", "badge": "[NTP]"},
-        {"id": "ntp:auto", "label": "Auto-NTP on Wi-Fi", "dyn": "ntp_auto"},
-        {"id": "ntp:tz", "label": "Timezone Offset", "dyn": "tz_off"},
+        {"id": "web:toggle", "label": "WebPortal IDE", "dyn": "web_st"},
+        {"id": "web:auto", "label": "Auto-Start WebPortal", "dyn": "web_auto"},
         {"id": "sync:check", "label": "GitHub: Check OS Version", "badge": "[VER]"},
         {"id": "sync:themes", "label": "GitHub: Sync Themes", "badge": "[JSON]"},
         {"id": "sync:apps", "label": "GitHub: Sync Apps", "badge": "[PY]"},
+    )),
+    "set_time": ("Date, Time & NTP", (
+        {"id": "ntp:sync", "label": "Sync NTP Clock Now", "badge": "[NTP]"},
+        {"id": "ntp:auto", "label": "Auto-NTP on Wi-Fi", "dyn": "ntp_auto"},
+        {"id": "ntp:tz", "label": "Timezone Offset", "dyn": "tz_off"},
+        {"id": "rtc:date", "label": "Set Date (Manual)", "dyn": "rtc_date"},
+        {"id": "rtc:time", "label": "Set Time (Manual)", "dyn": "rtc_time"},
     )),
     "set_display": ("Display & Appearance", (
         {"id": "cat:set_theme", "label": "Theme", "dyn": "theme_name"},
@@ -73,6 +80,8 @@ MENU_TREE = {
     )),
     "set_power": ("System, Power & Backup", (
         {"id": "set:cpu_mhz", "label": "CPU Clock Profile", "dyn": "cpu_mhz"},
+        {"id": "set:swap_kb", "label": "SD Swap Quota", "dyn": "swap_kb"},
+        {"id": "act:swap_clr", "label": "Clear Swap Cache", "dyn": "swap_used"},
         {"id": "set:sleep_to", "label": "Auto-Sleep Timer", "dyn": "sleep_to"},
         {"id": "act:sleep", "label": "Sleep Now (5s)", "badge": "[^Z]"},
         {"id": "cfg:save_snap", "label": "Save Config Snapshot", "badge": "[SD]"},
@@ -97,6 +106,18 @@ TOOL_MAP = {
 }
 
 
+def _idle_wait(ms=30):
+    try:
+        import sys
+        m = sys.modules.get("main")
+        if m and getattr(m, "runtime_state", {}).get("web_active") and hasattr(m, "step_webportal"):
+            m.step_webportal(20)
+            return
+    except Exception:
+        pass
+    _sleep_ms(ms)
+
+
 def confirm_dialog(board, ui, title, lines, footer="[Y/ENTER] Yes  [N/ESC] No", kind="warn"):
     """Lightweight modal confirmation Dialog. Polls board.poll_key() only."""
     from ui.widgets import Dialog
@@ -115,7 +136,7 @@ def confirm_dialog(board, ui, title, lines, footer="[Y/ENTER] Yes  [N/ESC] No", 
                     ans = True; break
                 if ku in ("N", "ESC", "Q", "BACK", "BACKSPACE"):
                     break
-            _sleep_ms(30)
+            _idle_wait(30)
     except KeyboardInterrupt:
         ans = False
     ui.remove_widget(dlg)
@@ -137,7 +158,7 @@ def show_info_dialog(board, ui, title, lines, kind="info"):
             k = poll_fn() if poll_fn else None
             if k and str(k).upper() in ("ENTER", "ESC", "SPACE", " ", "BACK", "BACKSPACE"):
                 board.beep(1000, 10); break
-            _sleep_ms(30)
+            _idle_wait(30)
     except KeyboardInterrupt:
         pass
     ui.remove_widget(dlg)
@@ -191,97 +212,48 @@ def show_screenshot_toast(board, ui, fb=None, path=None, timeout_ticks=30):
 
 
 def open_log_viewer(board, ui, logger, kind="system"):
-    """On-device scrollable System & Crash Log Viewer built on Dual-UI TextView."""
-    from ui.widgets import StatusBar, TextView, FooterBar
-    cur_kind = "crash" if kind == "crash" else "system"
-    sb = StatusBar(0, 0, 320, 20, title="PinhOS Logs", mode_label=ui.mode_badge)
-    tv = TextView(4, 23, 312, 250, title="SYSTEM.LOG", lines=[])
-    fb = FooterBar(0, 276, 320, 44, status="", status_kind="info",
-                   hints="UP/DN:Scr S:Sys/Crsh C:Clr ESC:Back")
-
-    def _log_color(line_str):
-        u = line_str.upper()
-        if any(k in u for k in ("[ERR", "ERROR", "CRASH", "FAIL", "EXCEPTION", "TRACEBACK")):
-            return "err"
-        if any(k in u for k in ("[WARN", "WARN", "BSOD", "TIMEOUT", "STRIKE")):
-            return "warn"
-        if any(k in u for k in ("OK", "PASS", "STABILIZED", "CONNECTED", "READY")):
-            return "ok"
-        if any(k in u for k in ("[INFO", "BOOT", "WIFI", "NTP", "UI:")):
-            return "info"
-        return "text"
-
-    def _load():
-        raw = logger.read_tail(kind=cur_kind, max_lines=60) if logger else []
-        if not raw:
-            raw = ["(No entries in {}.log)".format(cur_kind)]
-        wrapped = []
-        for ln in raw:
-            s = str(ln).strip()
-            tok = _log_color(s)
-            for i in range(0, max(1, len(s)), 49):
-                wrapped.append((s[i:i + 49], tok))
-        tv.title = "{}.LOG ({} ln)".format(cur_kind.upper(), len(wrapped))
-        tv.set_lines(wrapped, reset_scroll=False)
-        tv.scroll_offset = max(0, len(wrapped) - tv.visible_lines())
-        sb.update(title="Logs: {}.log".format(cur_kind), mode_label=ui.mode_badge, right_text=ui.theme.name.split()[0][:10])
-        fb.update(status="Tail: /sd/pinhos/logs/{}.log".format(cur_kind), status_kind="warn" if cur_kind == "crash" else "ok")
-
-    ui.clear_widgets(); ui.add_widget(sb); ui.add_widget(tv); ui.add_widget(fb); ui.set_focus(tv)
-    _load(); ui.render(force=True); board.clear_input()
-    poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
-    try:
-        while True:
-            k = poll_fn() if poll_fn else None
-            if k:
-                ku = str(k).upper()
-                try:
-                    from boards.base import MOD_CTRL
-                    ctrl = bool(board.get_modifiers() & MOD_CTRL)
-                except Exception:
-                    ctrl = False
-                if (ctrl and ku == "P") or getattr(board, "pending_screenshot", None):
-                    show_screenshot_toast(board, ui, fb)
-                    continue
-                if ku in ("ESC", "Q", "BACK", "BACKSPACE"):
-                    board.beep(900, 10); break
-                elif ku in ("UP", "LEFT") and tv.scroll(-2):
-                    ui.render(force=False)
-                elif ku in ("DOWN", "RIGHT") and tv.scroll(2):
-                    ui.render(force=False)
-                elif ku in ("S", "TAB"):
-                    cur_kind = "crash" if cur_kind == "system" else "system"
-                    board.beep(1300, 10); _load(); ui.render(force=True)
-                elif ku == "R":
-                    board.beep(1400, 10); _load(); ui.render(force=True)
-                elif ku == "C":
-                    if logger:
-                        logger.clear_logs(kind=cur_kind)
-                    board.beep(1000, 15); _load()
-                    fb.update(status="Cleared {}.log".format(cur_kind), status_kind="warn"); ui.render(force=True)
-            _sleep_ms(30)
-    except KeyboardInterrupt:
-        pass
+    import sys
     gc.collect()
+    import ui._log_view as _lv
+    try:
+        return _lv.open_log_viewer(board, ui, logger, kind=kind)
+    finally:
+        _lv = None
+        sys.modules.pop("ui._log_view", None)
+        gc.collect()
 
 
 def _scan_apps(sandbox, apps_dir="/sd/pinhos/apps"):
+    import sys
     items = []
     try:
         names = sorted([f for f in os.listdir(apps_dir) if f.endswith(".py") and not f.startswith("_")])
     except OSError:
         names = []
+    inspect_fn = sandbox.inspect if sandbox is not None else None
+    loaded_sbx = False
+    if inspect_fn is None and names:
+        try:
+            from core.sandbox import inspect_app
+            inspect_fn = inspect_app
+            loaded_sbx = True
+        except Exception:
+            inspect_fn = None
     for fname in names:
         fpath = apps_dir.rstrip("/") + "/" + fname
         label, badge = fname[:-3], "[APP]"
-        if sandbox is not None:
+        if inspect_fn is not None:
             try:
-                meta = sandbox.inspect(fpath)
+                meta = inspect_fn(fpath)
                 label = str(meta.get("name", label))[:26]
                 badge = "v" + str(meta.get("version", "1.0"))[:6]
             except Exception:
                 badge = "[RAW]"
         items.append({"id": "app:" + fpath, "label": label, "badge": badge})
+    if loaded_sbx:
+        inspect_fn = None
+        sys.modules.pop("core.sandbox", None)
+        gc.collect()
     return items or [{"id": "", "label": "(No apps in /sd/pinhos/apps)", "badge": ""}]
 
 
@@ -365,213 +337,82 @@ def _dyn_badge(tag, board, ui, manifest, cfg=None):
             return "LNK ON" if rs.get("serial_link") else "OFF"
         except Exception:
             return "OFF"
+    if tag == "web_st":
+        try:
+            import sys
+            m = sys.modules.get("main")
+            rs = getattr(m, "runtime_state", {}) if m else {}
+            if rs.get("web_active"):
+                ws = rs.get("web_server")
+                return "ON :{}".format(getattr(ws, "port", 8080))
+            return "OFF"
+        except Exception:
+            return "OFF"
+    if tag == "web_auto":
+        return "ON" if (cfg.get("webportal_autostart", False) if cfg else False) else "OFF"
+    if tag == "time_badge":
+        return board.get_timestamp_str(True)[:5] + " >"
+    if tag == "rtc_date":
+        return board.get_timestamp_str()[:10]
+    if tag == "rtc_time":
+        return board.get_timestamp_str(True)[:8]
+    if tag == "swap_kb":
+        kb = int(cfg.get("swap_max_kb", 512) if cfg else 512)
+        return "OFF" if kb <= 0 else ("{}MB".format(kb // 1024) if kb >= 1024 else "{}KB".format(kb))
+    if tag == "swap_used":
+        try:
+            from core.swap import get_swap_manager
+            st = get_swap_manager().stats()
+            return "{}K ({})".format(st.get("used_kb", 0), st.get("files", 0))
+        except Exception:
+            return "0K"
     return ""
 
 
-def _wifi_prompt_password(board, ui, fb, ssid, initial=""):
-    """Inline password prompt on FooterBar (TAB toggles mask, ENTER submits, ESC cancels)."""
+def _prompt_line(board, ui, fb, label, initial="", allowed=None, max_len=16):
     buf = str(initial)
-    masked = True
     board.clear_input()
     poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
     while True:
-        shown = ("*" * len(buf)) if masked else buf
-        fb.update(
-            status="PW[{}]: {}_".format(ssid[:12], shown[-24:]),
-            status_kind="info",
-            hints="ENT:Connect TAB:Show/Hide ESC:Cancel",
-        )
+        fb.update(status="{}: {}_".format(label, buf), status_kind="info", hints="ENT:Save  BKSP:Del  ESC:Cancel")
         ui.render(force=False)
         k = poll_fn() if poll_fn else None
         if k is None:
-            _sleep_ms(30); continue
-        if k == "ESC":
+            _idle_wait(30); continue
+        ku = str(k).upper()
+        if ku in ("ESC", "BACK"):
             return None
-        if k == "ENTER":
-            return buf
-        if k == "TAB":
-            masked = not masked
-        elif k == "BACKSPACE":
+        if ku in ("ENTER", "RETURN"):
+            return buf.strip()
+        if ku == "BACKSPACE":
             buf = buf[:-1]
-        elif k == "SPACE":
-            buf += " "
-        elif len(k) == 1 and " " <= k <= "~":
-            buf += k
-
-
-def _wifi_connect_dialog(board, ui, wm, ssid, pw, save=True, cfg=None):
-    """Android-style modal Wi-Fi progress Dialog with live phase & timeout counter."""
-    from ui.widgets import Dialog
-    from net.wifi import sync_ntp
-
-    dlg = Dialog(
-        18, 76, 284, 152,
-        title="WI-FI CONNECT",
-        lines=[
-            "Network : " + str(ssid)[:24],
-            "Phase   : Initializing...",
-            "Timeout : 00s / 24s",
-            "Status  : Please wait...",
-        ],
-        footer="[ESC/BS] Cancel",
-        kind="info",
-    )
-    ui.add_widget(dlg)
-    ui.render(force=False)
-    board.clear_input()
-    poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
-
-    def _is_cancel():
-        if not poll_fn:
-            return False
-        k = poll_fn()
-        return k is not None and str(k).upper() in ("ESC", "Q", "BACK", "BACKSPACE")
-
-    def _on_phase(phase, el_s, lim_s, st_code):
-        dlg.set_content(
-            lines=[
-                "Network : " + str(ssid)[:24],
-                "Phase   : " + str(phase)[:24],
-                "Timeout : {:02d}s / {:02d}s (st={})".format(int(el_s), int(lim_s), st_code),
-                "Status  : Connecting...",
-            ],
-            kind="warn" if el_s >= 10 else "info",
-        )
-        ui.render(force=False)
-
-    def _on_ntp_phase(nphase):
-        dlg.set_content(
-            lines=[
-                "Network : " + str(ssid)[:24],
-                "Phase   : " + str(nphase)[:24],
-                "Timeout : Connected!",
-                "Status  : " + str(msg)[:24],
-            ],
-            footer="[ESC/BS] Skip NTP",
-            kind="ok",
-        )
-        ui.render(force=False)
-
-    ok, msg = False, "Connect failed"
-    try:
-        ok, msg = wm.connect(
-            ssid, pw, timeout_s=24,
-            cancel_cb=_is_cancel,
-            save=save,
-            status_cb=_on_phase,
-            max_attempts=3,
-        )
-        if ok and (cfg.get("ntp_auto", True) if cfg else True):
-            _on_ntp_phase("Syncing NTP clock...")
-            nok, _ = sync_ntp(
-                board=board,
-                tz_offset_h=(cfg.get("tz_offset_h", 0) if cfg else 0),
-                host=(cfg.get("ntp_server", "162.159.200.1") if cfg else "162.159.200.1"),
-                timeout_s=5,
-                cancel_cb=_is_cancel,
-                status_cb=_on_ntp_phase,
-            )
-            if nok:
-                msg = msg + " +NTP"
-
-        dlg.set_content(
-            lines=[
-                "Network : " + str(ssid)[:24],
-                "Phase   : " + ("Connected!" if ok else "Failed"),
-                "Status  : " + str(msg)[:24],
-                "",
-            ],
-            footer="Returning...",
-            kind="ok" if ok else "err",
-        )
-        ui.render(force=False)
-        board.beep(1500 if ok else 700, 15)
-        _sleep_ms(700)
-    except Exception as e:
-        msg = "Wi-Fi err: " + str(e)[:20]
-        ok = False
-    finally:
-        ui.remove_widget(dlg)
-        ui.mark_all_dirty(True)
-        board.clear_input()
-        ui.render(force=True)
-    return msg, ("ok" if ok else "err")
+        elif len(k) == 1 and len(buf) < max_len:
+            if allowed is None or k in allowed:
+                buf += k
 
 
 def _wifi_scan_and_connect(board, ui, sb, lm, fb, cfg=None):
-    from net.wifi import get_wifi_manager
-    wm = get_wifi_manager()
-    fb.update(status="Scanning 2.4 GHz Wi-Fi...", status_kind="warn", hints="Please wait...")
-    ui.render(force=False)
-    aps = wm.scan()
-    if not aps:
-        return "No Wi-Fi networks found", "warn"
-    items = [
-        {"id": ap["ssid"], "label": ap["ssid"][:24], "badge": "{}dB".format(ap["rssi"])}
-        for ap in aps[:16]
-    ]
-    sb.update(title="Settings > Wi-Fi > Scan", mode_label=ui.mode_badge)
-    lm.title = "SELECT NETWORK ({})".format(len(items))
-    lm.set_items(items, selected=0)
-    fb.update(status="Pick SSID and press ENTER", status_kind="info", hints="UP/DN:Sel ENT:Join ESC:Back")
-    ui.render(force=True)
-    board.clear_input()
-    poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
-    while True:
-        k = poll_fn() if poll_fn else None
-        if k is None:
-            _sleep_ms(30); continue
-        ku = str(k).upper()
-        if ku in ("ESC", "BACK", "BACKSPACE"):
-            return "Wi-Fi scan closed", "info"
-        if ku in ("UP", "DOWN"):
-            if ui.handle_key(ku, allow_hotkeys=False):
-                board.beep(1100, 8); ui.render(force=False)
-        elif ku == "ENTER":
-            it = lm.get_selected_item()
-            if not it:
-                continue
-            ssid = it["id"]
-            saved_pw = wm.get_saved_password(ssid)
-            pw = _wifi_prompt_password(board, ui, fb, ssid, initial=saved_pw)
-            if pw is None:
-                return "Cancelled", "info"
-            return _wifi_connect_dialog(board, ui, wm, ssid, pw, save=True, cfg=cfg)
+    import sys
+    gc.collect()
+    import ui._menu_net as _mn
+    try:
+        return _mn.wifi_scan_and_connect(board, ui, sb, lm, fb, cfg=cfg)
+    finally:
+        _mn = None
+        sys.modules.pop("ui._menu_net", None)
+        gc.collect()
 
 
 def _wifi_saved_menu(board, ui, sb, lm, fb, cfg=None):
-    from net.wifi import get_wifi_manager
-    wm = get_wifi_manager()
-    nets = wm.list_saved()
-    if not nets:
-        return "No saved Wi-Fi networks", "info"
-    items = [{"id": n["ssid"], "pw": n.get("password", ""), "label": n["ssid"][:26], "badge": "[SAVED]"} for n in nets]
-    sb.update(title="Settings > Wi-Fi > Saved", mode_label=ui.mode_badge)
-    lm.title = "SAVED NETWORKS"
-    lm.set_items(items, selected=0)
-    fb.update(status="ENT:Connect  D:Forget  ESC:Back", status_kind="info", hints="UP/DN:Sel ENT:Join D:Forget ESC")
-    ui.render(force=True)
-    board.clear_input()
-    poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
-    while True:
-        k = poll_fn() if poll_fn else None
-        if k is None:
-            _sleep_ms(30); continue
-        ku = str(k).upper()
-        if ku in ("ESC", "BACK", "BACKSPACE"):
-            return "Closed saved list", "info"
-        if ku in ("UP", "DOWN"):
-            if ui.handle_key(ku, allow_hotkeys=False):
-                ui.render(force=False)
-        elif ku == "D":
-            it = lm.get_selected_item()
-            if it:
-                wm.forget_network(it["id"])
-                return "Forgot " + it["id"], "warn"
-        elif ku == "ENTER":
-            it = lm.get_selected_item()
-            if it:
-                return _wifi_connect_dialog(board, ui, wm, it["id"], it["pw"], save=False, cfg=cfg)
+    import sys
+    gc.collect()
+    import ui._menu_net as _mn
+    try:
+        return _mn.wifi_saved_menu(board, ui, sb, lm, fb, cfg=cfg)
+    finally:
+        _mn = None
+        sys.modules.pop("ui._menu_net", None)
+        gc.collect()
 
 
 def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_cat, run_tool_cb):
@@ -629,14 +470,16 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
         bat_txt = "{}%".format(bat["percent"]) if bm in ("both", "pct") else ""
         right_s = " ".join([x for x in (wf_txt, bat_txt) if x])
         lnk = False
+        web_on = False
         try:
             import sys
             m = sys.modules.get("main")
             if m and isinstance(getattr(m, "runtime_state", None), dict):
                 lnk = bool(m.runtime_state.get("serial_link"))
+                web_on = bool(m.runtime_state.get("web_active"))
         except Exception:
             pass
-        sb.update(title=crumb, mode_label=ui.mode_badge, right_text=right_s, wifi_level=wf_lvl, bat_info=bat_icon, serial_link=lnk)
+        sb.update(title=crumb, mode_label=ui.mode_badge, right_text=right_s, wifi_level=wf_lvl, bat_info=bat_icon, serial_link=lnk, web_active=web_on)
         return bat
 
     def _sync(force=True):
@@ -667,6 +510,14 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                         crumb = " > ".join([_title(f[0]) for f in stack])
                         _update_sb(crumb)
                         ui.render(force=False)
+                try:
+                    import sys
+                    m = sys.modules.get("main")
+                    if m and getattr(m, "runtime_state", {}).get("web_active") and hasattr(m, "step_webportal"):
+                        m.step_webportal(20)
+                        continue
+                except Exception:
+                    pass
                 _sleep_ms(30); continue
             ku = str(k).upper()
             try:
@@ -802,6 +653,11 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                     status_kind = "ok" if res.get("ok") else "err"; _sync(force=True)
                 elif aid == "act:reboot":
                     if confirm_dialog(board, ui, "REBOOT PINHOS?", ["Write clean breadcrumb and", "perform hardware reset?"]):
+                        try:
+                            from core.config import save_rtc_state
+                            save_rtc_state(board)
+                        except Exception:
+                            pass
                         if logger:
                             logger.info("UI: Clean reboot"); logger.clear_breadcrumb("CLEAN_EXIT")
                         import machine; machine.reset()
@@ -843,6 +699,12 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                         cancel_cb=lambda: (poll_fn() if poll_fn else None) in ("ESC", "Q", "BACK", "BACKSPACE"),
                         status_cb=lambda ph: (fb.update(status=ph, status_kind="warn"), ui.render(force=False)),
                     )
+                    if ok:
+                        try:
+                            from core.config import save_rtc_state
+                            save_rtc_state(board)
+                        except Exception:
+                            pass
                     status_msg, status_kind = msg, ("ok" if ok else "err"); _sync(force=True)
                 elif aid == "ntp:auto":
                     cur = bool(cfg.get("ntp_auto", True) if cfg else True)
@@ -856,6 +718,48 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                     if cfg:
                         cfg.set("tz_offset_h", nxt, save_now=True)
                     status_msg, status_kind = "Timezone: UTC{}{}".format("+" if nxt >= 0 else "", nxt), "ok"; _sync(force=True)
+                elif aid == "rtc:date":
+                    dt = board.get_rtc_datetime()
+                    cur_s = "{:04d}-{:02d}-{:02d}".format(dt[0], dt[1], dt[2])
+                    val = _prompt_line(board, ui, fb, "DATE(Y-M-D)", cur_s, allowed="0123456789-", max_len=10)
+                    if val is not None:
+                        try:
+                            yr, mo, dy = [int(x) for x in val.split("-")]
+                            if 2020 <= yr <= 2099 and 1 <= mo <= 12 and 1 <= dy <= 31:
+                                board.set_rtc_datetime((yr, mo, dy, dt[3], dt[4], dt[5], dt[6], 0))
+                                try:
+                                    from core.config import save_rtc_state
+                                    save_rtc_state(board)
+                                except Exception:
+                                    pass
+                                status_msg, status_kind = "Date set: {:04d}-{:02d}-{:02d}".format(yr, mo, dy), "ok"
+                            else:
+                                status_msg, status_kind = "Invalid date range", "err"
+                        except Exception:
+                            status_msg, status_kind = "Use YYYY-MM-DD format", "err"
+                    _sync(force=True)
+                elif aid == "rtc:time":
+                    dt = board.get_rtc_datetime()
+                    cur_s = "{:02d}:{:02d}:{:02d}".format(dt[4], dt[5], dt[6])
+                    val = _prompt_line(board, ui, fb, "TIME(H:M:S)", cur_s, allowed="0123456789:", max_len=8)
+                    if val is not None:
+                        try:
+                            pts = [int(x) for x in val.split(":")]
+                            hh, mm = pts[0], pts[1]
+                            ss = pts[2] if len(pts) > 2 else 0
+                            if 0 <= hh <= 23 and 0 <= mm <= 59 and 0 <= ss <= 59:
+                                board.set_rtc_datetime((dt[0], dt[1], dt[2], dt[3], hh, mm, ss, 0))
+                                try:
+                                    from core.config import save_rtc_state
+                                    save_rtc_state(board)
+                                except Exception:
+                                    pass
+                                status_msg, status_kind = "Time set: {:02d}:{:02d}:{:02d}".format(hh, mm, ss), "ok"
+                            else:
+                                status_msg, status_kind = "Invalid time range", "err"
+                        except Exception:
+                            status_msg, status_kind = "Use HH:MM or HH:MM:SS", "err"
+                    _sync(force=True)
                 elif aid == "cfg:save_snap":
                     if cfg and cfg.save_snapshot():
                         try:
@@ -930,6 +834,14 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                     from net.wifi import get_wifi_manager
                     get_wifi_manager().disconnect()
                     status_msg, status_kind = "Wi-Fi disconnected", "warn"; _sync(force=True)
+                elif aid == "web:toggle":
+                    return "TOGGLE_WEBPORTAL"
+                elif aid == "web:auto":
+                    cur = bool(cfg.get("webportal_autostart", False) if cfg else False)
+                    nxt = not cur
+                    if cfg:
+                        cfg.set("webportal_autostart", nxt, save_now=True)
+                    status_msg, status_kind = "Auto-Start WebPortal: " + ("ON" if nxt else "OFF"), "ok"; _sync(force=True)
                 elif aid == "set:sleep_to":
                     opts = (0, 60, 120, 300, 600)
                     cur = int(cfg.get("sleep_timeout_s", 300) if cfg else 300)
@@ -938,6 +850,28 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                         cfg.set("sleep_timeout_s", nxt, save_now=True)
                     lbl = "OFF" if nxt <= 0 else "{} min".format(nxt // 60)
                     status_msg, status_kind = "Auto-Sleep: " + lbl, "ok"; _sync(force=True)
+                elif aid == "set:swap_kb":
+                    opts = (0, 128, 256, 512, 1024, 2048, 4096)
+                    cur = int(cfg.get("swap_max_kb", 512) if cfg else 512)
+                    nxt = opts[(opts.index(cur) + 1) % len(opts)] if cur in opts else 512
+                    if cfg:
+                        cfg.set("swap_max_kb", nxt, save_now=True)
+                        cfg.set("swap_enabled", nxt > 0, save_now=True)
+                    try:
+                        from core.swap import get_swap_manager
+                        get_swap_manager().set_max_kb(nxt)
+                    except Exception:
+                        pass
+                    lbl = "OFF" if nxt <= 0 else ("{} MB".format(nxt // 1024) if nxt >= 1024 else "{} KB".format(nxt))
+                    status_msg, status_kind = "SD Swap Quota: " + lbl, "ok"; _sync(force=True)
+                elif aid == "act:swap_clr":
+                    try:
+                        from core.swap import get_swap_manager
+                        n = get_swap_manager().clear_all()
+                        status_msg, status_kind = "Cleared {} swap file(s)".format(n), "ok"
+                    except Exception as e:
+                        status_msg, status_kind = "Swap clear err: " + str(e)[:20], "err"
+                    _sync(force=True)
                 elif aid == "set:cpu_mhz":
                     opts = (100, 150, 200, 240, 250)
                     try:
