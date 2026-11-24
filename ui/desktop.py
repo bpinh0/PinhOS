@@ -336,7 +336,19 @@ class DesktopHome(Widget):
         wf_lbl = "IP: {}".format(self.wifi_ip) if self.wifi_ok else "Offline"
         b.text(wf_lbl[:23], lx + 6, y3, c_ok if self.wifi_ok else c_mut)
         y4 = y3 + 11
-        if self.wifi_ok and self.wifi_rssi:
+        _tok = ""
+        try:
+            import sys as _sys
+            _mm = _sys.modules.get("main") or _sys.modules.get("_pinhos_main")
+            _rs = getattr(_mm, "runtime_state", {}) if _mm else {}
+            _ws = _rs.get("web_server")
+            if _ws is not None and getattr(_ws, "running", False):
+                _tok = str(getattr(_ws, "token", ""))
+        except Exception:
+            _tok = ""
+        if _tok:
+            b.text("TOK {}".format(_tok)[:23], lx + 6, y4, c_acc)
+        elif self.wifi_ok and self.wifi_rssi:
             b.text("SIG {}dBm | {}".format(self.wifi_rssi, self.ui_mode)[:23], lx + 6, y4, c_mut)
         else:
             b.text("GUARD {} | {}".format("OK" if self.stabilized else "ARM", self.ui_mode)[:23], lx + 6, y4, c_mut)
