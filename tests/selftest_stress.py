@@ -90,9 +90,10 @@ def test_stress_wifi_web_concurrent(root="/sd/pinhos"):
     ws.start()
     lp = asyncio.get_event_loop()
     nets_found = 0
+    th = {"X-PinhOS-Token": ws.token}  # /api/* requires token (Refs #23)
     try:
         # Serve HTTP request before scan
-        c1, b1 = lp.run_until_complete(_req_pipe(ws, "GET", "/api/status"))
+        c1, b1 = lp.run_until_complete(_req_pipe(ws, "GET", "/api/status", hdrs=th))
         _assert(c1 == 200 and json.loads(b1.decode("utf-8")).get("ok"), "pre-scan status failed: {}".format(c1))
 
         # Run single-pass Wi-Fi scan while WebServer is active (non-fatal if no Wi-Fi HW in sim)
@@ -105,7 +106,7 @@ def test_stress_wifi_web_concurrent(root="/sd/pinhos"):
 
         # Serve HTTP requests immediately after/concurrent with scan & step server
         ws.step(10)
-        c2, b2 = lp.run_until_complete(_req_pipe(ws, "GET", "/api/status"))
+        c2, b2 = lp.run_until_complete(_req_pipe(ws, "GET", "/api/status", hdrs=th))
         st2 = json.loads(b2.decode("utf-8"))
         _assert(c2 == 200 and st2.get("ok") and "sram_largest" in st2, "post-scan status failed: {}".format(c2))
 
@@ -114,7 +115,7 @@ def test_stress_wifi_web_concurrent(root="/sd/pinhos"):
         _assert(not ws.running, "ws still running after pause")
         _assert(ws.resume(), "ws.resume() failed")
         _assert(ws.running, "ws not running after resume")
-        c3, _ = lp.run_until_complete(_req_pipe(ws, "GET", "/api/status"))
+        c3, _ = lp.run_until_complete(_req_pipe(ws, "GET", "/api/status", hdrs=th))
         _assert(c3 == 200, "post-resume status failed: {}".format(c3))
 
         blk = largest_free(CAP_96K)

@@ -808,6 +808,7 @@ def enable_wdt(timeout_ms=8000):
             w = machine.WDT(timeout=ms)
             _WDT_OBJ = w
             runtime_state["_wdt"] = w
+            sys.modules["__pinhos_wdt__"] = w  # shared handle (builtins is read-only on RP2350)
             if builtins is not None:
                 try:
                     setattr(builtins, "_pinhos_wdt", w)
