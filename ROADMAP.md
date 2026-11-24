@@ -177,6 +177,7 @@ def main(ctx):
   - [x] Direct GitHub theme/app sync and remote version check (`net/sync.py`).
   - [ ] Curated catalog browser (`store_index.json`) with category filters, version tags, `min_sram` compatibility badges, SHA-256 verification, and one-click install/update/remove into `/sd/pinhos/apps/` and `/sd/pinhos/themes/`.
 - [ ] **5.4 Optional Bytecode & Diagnostics Polish:**
+  - [ ] Surface RP2350 Watchdog (`WDT`) diagnostics & reset-cause log entries (`wdt.log` / filtered view of `WDT` arm/reset/breadcrumb events) directly in the on-device **Logs** menu (`CTRL+L` / `ui/_log_view.py`).
   - [ ] Evaluate pre-compiling `tools/shell.py` (or splitting command parser) if low-memory launch fragmentation is observed under heavy WebPortal + TLS workloads.
   - [ ] Add on-device WebPortal QR code generator for quick phone/laptop URL + token pairing.
 
