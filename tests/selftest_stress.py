@@ -126,9 +126,51 @@ def test_stress_wifi_web_concurrent(root="/sd/pinhos"):
     return "scan({} APs)+HTTP 200+pause/resume OK (blk={}KB)".format(nets_found, blk // 1024)
 
 
-def run_stress(root="/sd/pinhos"):
+def test_stress_menu_walk(root="/sd/pinhos"):
+    """Deep Stress: Walk all 6 Settings/Launcher categories via UI menu tree + theme/mode toggles."""
+    from boards import get_board
+    from core.config import ConfigManager, load_version_manifest
+    from core.memutil import largest_free
+    from core.theme import get_theme_manager
+    from ui.engine import UIEngine
+
+    board = get_board()
+    cfg = ConfigManager()
+    manifest = load_version_manifest(root=root)
+    tm = get_theme_manager(config=cfg, board=board)
+    ui = UIEngine(board=board, theme_manager=tm, config=cfg)
+
+    orig_poll = board.poll_key
+    min_blk = CAP_96K
+    try:
+        board.poll_key = lambda: "ESC"
+        import ui.menu as um
+        for cat in ("toolkit", "files", "apps", "system", "settings", "set_conn", "set_time"):
+            um.open_menu_tree(board, ui, tm, cfg, None, None, manifest, cat, None)
+            blk = largest_free(CAP_96K)
+            if blk < min_blk:
+                min_blk = blk
+        for _ in range(4):
+            tm.cycle(step=1, persist=False)
+            ui.toggle_mode(persist=False)
+        _assert(min_blk >= 16384, "menu walk largest_free {}B < 16KB".format(min_blk))
+    finally:
+        board.poll_key = orig_poll
+        import sys
+        for _m in ("ui.menu", "ui._menu_net", "ui._log_view"):
+            sys.modules.pop(_m, None)
+        gc.collect()
+        gc.collect()
+    return "7 menus+4x theme/mode OK (min_blk={}KB)".format(min_blk // 1024)
+
+
+def run_stress(root="/sd/pinhos", deep=False):
     r13 = test_stress_sandbox_20x(root=root)
     gc.collect()
     r14 = test_stress_wifi_web_concurrent(root=root)
     gc.collect()
-    return {"gate13": r13, "gate14": r14}
+    res = {"gate13": r13, "gate14": r14}
+    if deep:
+        res["menu_walk"] = test_stress_menu_walk(root=root)
+        gc.collect()
+    return res
