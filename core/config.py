@@ -66,9 +66,6 @@ DEFAULT_CONFIG = {
     "wdt_timeout_ms": 8000,
     "webportal_autostart": False,
     "webportal_port": 8080,
-    "ota_channel": "alpha",
-    "ota_repo": "bpinh0/PinhOS",
-    "ota_branch": "main",
 }
 
 SNAPSHOT_PATH = PINHOS_ROOT + "/config.snap.json"
