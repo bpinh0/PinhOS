@@ -182,7 +182,7 @@ class WebServer:
                 pass
 
     def _wlog(self, msg):
-        """Append a compact timestamped line to /sd/pinhos/logs/web.log with 16 KB rotation."""
+        """Append a compact timestamped line with date + boot_id to /sd/pinhos/logs/web.log (#22)."""
         try:
             ex, _, sz = _stat(self.log_path)
             if ex and sz >= WEB_LOG_MAX:
@@ -195,9 +195,14 @@ class WebServer:
                     os.rename(self.log_path, bak)
                 except OSError:
                     pass
-            ts = self.board.get_timestamp_str(True) if (self.board and hasattr(self.board, "get_timestamp_str")) else "--:--:--"
+            try:
+                from core.logger import format_log_prefix
+                pfx = format_log_prefix()
+            except Exception:
+                ts = self.board.get_timestamp_str(False) if (self.board and hasattr(self.board, "get_timestamp_str")) else "~UNSYNCED"
+                pfx = "[{}]".format(ts)
             with open(self.log_path, "a") as f:
-                f.write("[{}] {}\n".format(ts, str(msg)[:160]))
+                f.write("{} {}\n".format(pfx, str(msg)[:160]))
         except Exception:
             pass
 
@@ -812,10 +817,20 @@ class WebServer:
 
     async def _api_shot(self, w):
         b = self.board
-        if b is None or not hasattr(b, "capture_screenshot"):
+        if b is None or not (hasattr(b, "screenshot_iter") or hasattr(b, "capture_screenshot")):
             await self._err(w, 500, "No screenshot HAL")
             return
-        p = b.capture_screenshot()
+        rolling = self.root + "/screenshots/last.bmp"
+        p = None
+        if hasattr(b, "screenshot_iter"):
+            for step in b.screenshot_iter(path=rolling, step_rows=32):
+                if step is False:
+                    self._pump_wifi()
+                    await asyncio.sleep(0)
+                else:
+                    p = step
+        else:
+            p = b.capture_screenshot(path=rolling)
         if not p:
             await self._err(w, 500, "Capture failed")
             return
