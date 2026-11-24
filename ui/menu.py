@@ -286,7 +286,7 @@ def _dyn_badge(tag, board, ui, manifest, cfg=None):
     if tag == "bat_pct":
         return "{}%".format(board.get_battery().get("percent", 0))
     if tag == "os_ver":
-        return "v" + str(manifest.get("version", "1.0.0-alpha.4.1"))[:11]
+        return "v" + str(manifest.get("version", "1.0.0-alpha.4.2"))[:11]
     if tag == "theme_name":
         return ui.theme.name.split()[0][:10] + " >"
     if tag == "ui_mode":
@@ -631,7 +631,7 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                     ]); _sync(force=True)
                 elif aid == "info:version":
                     show_info_dialog(board, ui, "ABOUT PINHOS", [
-                        "OS Ver  : v{}".format(manifest.get("version", "1.0.0-alpha.4.1")),
+                        "OS Ver  : v{}".format(manifest.get("version", "1.0.0-alpha.4.2")),
                         "UF2 Fw  : {}".format(manifest.get("firmware_version", "?")),
                         "Arch/MCU: {} / {}".format(manifest.get("arch", "?"), manifest.get("mcu", "RP2350")),
                         "Build   : {}".format(manifest.get("build_id", "?")),
