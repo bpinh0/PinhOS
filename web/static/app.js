@@ -38,24 +38,28 @@
     return t;
   }
 
+  async function apiFetch(url, opts = {}) {
+    const needsTok = url.startsWith("/api/") || ((opts.method || "GET").toUpperCase() !== "GET");
+    const runFetch = async (forcePrompt) => {
+      const hdrs = Object.assign({}, opts.headers || {});
+      if (needsTok) {
+        const tok = getToken(forcePrompt);
+        if (tok) hdrs["X-PinhOS-Token"] = tok;
+      }
+      return await fetch(url, Object.assign({}, opts, { headers: hdrs }));
+    };
+    let res = await runFetch(false);
+    if (res.status === 401 && needsTok) {
+      sessionStorage.removeItem("pinhos_token");
+      res = await runFetch(true);
+    }
+    return res;
+  }
+
   async function apiJson(url, opts = {}) {
     state.busy++;
     try {
-      const meth = (opts.method || "GET").toUpperCase();
-      const needsTok = meth !== "GET" || url.startsWith("/api/screenshot");
-      const runFetch = async (forcePrompt) => {
-        const hdrs = Object.assign({}, opts.headers || {});
-        if (needsTok) {
-          const tok = getToken(forcePrompt);
-          if (tok) hdrs["X-PinhOS-Token"] = tok;
-        }
-        return await fetch(url, Object.assign({}, opts, { headers: hdrs }));
-      };
-      let res = await runFetch(false);
-      if (res.status === 401 && needsTok) {
-        sessionStorage.removeItem("pinhos_token");
-        res = await runFetch(true);
-      }
+      const res = await apiFetch(url, opts);
       const data = await res.json();
       if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);
       return data;
@@ -113,24 +117,36 @@
     }
   }
 
+  async function fetchBlobUrl(url) {
+    const res = await apiFetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  }
+
   async function openFile(path, size = null) {
     if (path.toLowerCase().endsWith(".bmp")) {
-      const url = "/api/file?path=" + encodeURIComponent(path) + "&t=" + Date.now();
-      $("bmp-img").src = url;
-      $("bmp-img").classList.remove("hidden");
-      $("bmp-empty").classList.add("hidden");
-      $("bmp-name").textContent = path;
-      $("bmp-dl").href = "/api/file?path=" + encodeURIComponent(path) + "&download=1";
-      $("bmp-dl").classList.remove("hidden");
-      $("live-img").src = url;
-      $("live-empty").classList.add("hidden");
-      log("Loaded BMP: " + path, "SCREEN");
+      try {
+        const blobUrl = await fetchBlobUrl("/api/file?path=" + encodeURIComponent(path) + "&t=" + Date.now());
+        $("bmp-img").src = blobUrl;
+        $("bmp-img").classList.remove("hidden");
+        $("bmp-empty").classList.add("hidden");
+        $("bmp-name").textContent = path;
+        $("bmp-dl").href = blobUrl;
+        $("bmp-dl").download = path.split("/").pop() || "screen.bmp";
+        $("bmp-dl").classList.remove("hidden");
+        $("live-img").src = blobUrl;
+        $("live-empty").classList.add("hidden");
+        log("Loaded BMP: " + path, "SCREEN");
+      } catch (err) {
+        log("BMP load error: " + err.message, "ERR");
+      }
       return;
     }
     if (state.dirty && !confirm("Discard unsaved changes?")) return;
     try {
       state.busy++;
-      const res = await fetch("/api/file?path=" + encodeURIComponent(path));
+      const res = await apiFetch("/api/file?path=" + encodeURIComponent(path));
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const txt = await res.text();
       state.openFile = path;
@@ -194,8 +210,8 @@
     try {
       log("Capturing 320x320 PicoCalc screen...", "SCREEN");
       const d = await apiJson("/api/screenshot", { method: "POST" });
-      const url = d.url + "&t=" + Date.now();
-      $("live-img").src = url;
+      const blobUrl = await fetchBlobUrl(d.url + "&t=" + Date.now());
+      $("live-img").src = blobUrl;
       $("live-empty").classList.add("hidden");
       log("Captured " + d.filename, "OK");
     } catch (err) {
@@ -255,10 +271,21 @@
     try { await apiJson("/api/file?path=" + encodeURIComponent(tgt), { method: "DELETE" }); log("Deleted " + tgt, "WARN"); state.selected = null; await loadDir(state.cwd); }
     catch (err) { log("Delete err: " + err.message, "ERR"); }
   };
-  $("btn-dl").onclick = () => {
+  $("btn-dl").onclick = async () => {
     const tgt = (state.selected && state.selected.type === "file" && state.selected.path) || state.openFile;
     if (!tgt) return log("Select a file to download.", "WARN");
-    window.location.href = "/api/file?path=" + encodeURIComponent(tgt) + "&download=1";
+    try {
+      const blobUrl = await fetchBlobUrl("/api/file?path=" + encodeURIComponent(tgt) + "&download=1");
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = tgt.split("/").pop() || "file.bin";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+    } catch (err) {
+      log("Download err: " + err.message, "ERR");
+    }
   };
   document.querySelectorAll(".pill").forEach((b) => {
     b.onclick = () => { if (b.dataset.nav !== undefined) loadDir(b.dataset.nav); else if (b.dataset.open) openFile(b.dataset.open); };
