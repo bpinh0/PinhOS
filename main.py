@@ -1379,6 +1379,32 @@ def ui_loop(sel_action=0):
             if idle_ticks >= 40:
                 idle_ticks = 0
                 gc.collect()
+                # Non-blocking background Wi-Fi auto-connect state machine (#8)
+                if runtime_state.get("wifi_bg_pending"):
+                    runtime_state["wifi_bg_pending"] = False
+                    try:
+                        from net.wifi import get_wifi_manager
+                        _wbg = get_wifi_manager()
+                        _wbg.start_bg_connect(country=str(cfg.get("wifi_country", "XX") if cfg else "XX"), timeout_s=24)
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        _wmod = sys.modules.get("net.wifi")
+                        if _wmod is not None and hasattr(_wmod, "get_wifi_manager"):
+                            _wbg = _wmod.get_wifi_manager()
+                            if _wbg.bg_active:
+                                _bst, _bmsg = _wbg.step_bg_connect()
+                                if _bst == "connected":
+                                    if logger:
+                                        logger.info("WIFI BG: " + str(_bmsg))
+                                    if cfg and cfg.get("ntp_auto", True):
+                                        runtime_state["ntp_pending"] = True
+                                elif _bst in ("timeout", "error"):
+                                    if logger:
+                                        logger.info("WIFI BG: " + str(_bmsg))
+                    except Exception:
+                        pass
                 # Background NTP sync if queued (only when Auto-NTP is enabled; never blocks Wi-Fi connect)
                 if runtime_state.get("ntp_pending"):
                     runtime_state["ntp_pending"] = False
@@ -1608,24 +1634,9 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
 
         _boot_progress(94, "Core Services Ready...", pause_ms=80)
 
-        # Optional Wi-Fi Auto-Connect on interactive boot (NTP deferred to background ui_loop if enabled)
+        # Defer Wi-Fi Auto-Connect to non-blocking ui_loop() state machine (#8) so boot never stalls
         if interactive:
-            try:
-                from net.wifi import get_wifi_manager
-                wm = get_wifi_manager()
-                if wm.get_auto_connect() and wm.list_saved():
-                    _boot_progress(96, "Wi-Fi Auto-Connect...")
-                    wok, wmsg = wm.auto_connect_saved(
-                        timeout_s=15,
-                        max_attempts=3,
-                        status_cb=lambda ph, _e, _t, _s: _boot_progress(96, ("Wi-Fi " + str(ph))[:32]),
-                    )
-                    logger.info("WIFI BOOT: " + str(wmsg))
-                    bp("[WIFI_BOOT]", wmsg)
-                    if wok and cfg.get("ntp_auto", True):
-                        runtime_state["ntp_pending"] = True
-            except Exception as _we:
-                bp("[WIFI_BOOT_ERR]", repr(_we))
+            runtime_state["wifi_bg_pending"] = True
 
         # Show clean 100% on native monochrome boot splash, cut cleanly to black BEFORE applying theme LUT!
         _boot_progress(100, "PinhOS Ready!", pause_ms=400, clear_splash=True)
