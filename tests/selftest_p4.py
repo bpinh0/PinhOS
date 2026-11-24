@@ -166,8 +166,34 @@ def test_webportal_loopback(root="/sd/pinhos"):
         m1 = gc.mem_free() if hasattr(gc, "mem_free") else 262144
         delta = max(0, m0 - m1)
         _assert(delta < 8192, "SRAM delta {}B >= 8192B".format(delta))
+        # Regression check (#29): _init_interactive_services() honors webportal_autostart=True
+        # even when start(..., interactive=False) was used (as in picocalc.ps1 upload_and_start).
+        import main as _pm
+        _rs = _pm.runtime_state
+        _prev_done = _rs.get("_interactive_init_done", False)
+        _prev_wbg = _rs.get("wifi_bg_pending", False)
+        _prev_stab = _rs.get("stabilized", False)
+        _prev_sl = _rs.get("serial_link", False)
+        _rs["_interactive_init_done"] = False
+        _rs["wifi_bg_pending"] = False
+        _rs["stabilized"] = False  # Keep WDT unarmed during selftest
+        _rs["serial_link"] = True
+        try:
+            class _FakeCfg:
+                def get(self, k, d=None):
+                    return {"webportal_autostart": True, "webportal_port": 8080}.get(k, d)
+            ran = _pm._init_interactive_services(board, _FakeCfg(), None)
+            _assert(ran and _rs.get("wifi_bg_pending") and _rs.get("web_active"), "autostart regression (#29)")
+            _assert(not _pm._init_interactive_services(board, _FakeCfg(), None), "autostart not idempotent (#29)")
+        finally:
+            _pm.stop_webportal()
+            _rs["_interactive_init_done"] = _prev_done
+            _rs["wifi_bg_pending"] = _prev_wbg
+            _rs["stabilized"] = _prev_stab
+            _rs["serial_link"] = _prev_sl
+            gc.collect()
     finally:
         try: os.remove(full)
         except OSError: pass
         board.ensure_serial_repl()
-    return "HTTP 200 ({},/,st,401/403,R/W/D) d={}B".format(mode[0], delta)
+    return "HTTP 200 ({},/,st,401/403,R/W/D,autostart) d={}B".format(mode[0], delta)
