@@ -15,16 +15,21 @@ LEVEL_INFO  = 20
 LEVEL_WARN  = 30
 LEVEL_ERROR = 40
 
+_BOOT_ID = None
+_BOOT_T0_MS = time.ticks_ms() if hasattr(time, "ticks_ms") else int(time.time() * 1000)
 
-def _boot_id(log_dir=None):
-    """Return monotonic persisted boot_id (incremented once per boot, cached on builtins) (#22)."""
-    try:
-        import builtins as _bi
-        bid = getattr(_bi, "_pinhos_boot_id", None)
-        if bid is not None:
-            return int(bid)
-    except Exception:
-        _bi = None
+
+def _uptime_ms():
+    if hasattr(time, "ticks_ms") and hasattr(time, "ticks_diff"):
+        return max(0, int(time.ticks_diff(time.ticks_ms(), _BOOT_T0_MS)))
+    return max(0, int(time.time() * 1000) - _BOOT_T0_MS)
+
+
+def get_boot_id(log_dir=None):
+    """Return monotonic persisted boot_id (incremented once per boot, cached in module global) (#24)."""
+    global _BOOT_ID
+    if _BOOT_ID is not None:
+        return int(_BOOT_ID)
     p = (log_dir or (PINHOS_ROOT + "/logs")).rstrip("/") + "/boot_id.txt"
     bid = 1
     try:
@@ -38,12 +43,12 @@ def _boot_id(log_dir=None):
             f.write(str(bid))
     except Exception:
         pass
-    if _bi is not None:
-        try:
-            setattr(_bi, "_pinhos_boot_id", bid)
-        except Exception:
-            pass
+    _BOOT_ID = bid
     return bid
+
+
+def _boot_id(log_dir=None):
+    return get_boot_id(log_dir)
 
 
 def _now_str():
@@ -60,9 +65,8 @@ def _now_str():
 
 
 def format_log_prefix(log_dir=None):
-    """Return unambiguous forensic prefix: [b<boot_id> +<ms>ms <wall_clock>] (#22)."""
-    up = time.ticks_ms() if hasattr(time, "ticks_ms") else 0
-    return "[b{} +{}ms {}]".format(_boot_id(log_dir), up, _now_str())
+    """Return unambiguous forensic prefix: [b<boot_id> +<uptime_ms>ms <wall_clock>] (#24)."""
+    return "[b{} +{}ms {}]".format(get_boot_id(log_dir), _uptime_ms(), _now_str())
 
 
 class Logger:
