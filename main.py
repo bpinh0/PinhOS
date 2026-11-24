@@ -1,4 +1,4 @@
-# PinhOS v1.0.0-alpha.4 — Phase 1+2+3.1+4 Boot Entry, 3-Strike Crash Guard, Desktop Home, Dual-UI & WebPortal IDE (main.py)
+# PinhOS v1.0.0-alpha.4.1 — Phase 1+2+3.1+4.1 Boot Entry, 3-Strike Crash Guard, Desktop Home, Dual-UI & WebPortal IDE (main.py)
 # Zero hardcoded pin numbers outside boards/.
 
 import os

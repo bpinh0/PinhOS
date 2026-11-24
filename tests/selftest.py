@@ -88,7 +88,7 @@ def test_manifest_and_dirs(root="/sd/pinhos"):
         _assert(bool(st[0] & 0x4000), "Missing canonical directory: " + full)
 
     manifest = load_version_manifest(root=root)
-    _assert(manifest.get("version") == "1.0.0-alpha.4", "Expected version 1.0.0-alpha.4")
+    _assert(manifest.get("version") == "1.0.0-alpha.4.1", "Expected version 1.0.0-alpha.4.1")
     _assert(manifest.get("arch") == "armv7emsp", "Expected target arch armv7emsp")
     _assert(isinstance(manifest.get("ota"), dict) and "channel" in manifest["ota"], "Missing OTA channel field")
     return "v{} ({}) +{} dirs".format(
@@ -819,7 +819,7 @@ def run_all(root="/sd/pinhos", interactive_wait=False):
         ("12. WebPortal Loopback & SRAM", test_webportal_loopback),
     ]
 
-    _bp("=== PinhOS v1.0.0-alpha.4 Phase 1+2+3.1+4 Self-Test Suite ===")
+    _bp("=== PinhOS v1.0.0-alpha.4.1 Phase 1+2+3.1+4 Self-Test Suite ===")
     passed = 0
     results = []
 

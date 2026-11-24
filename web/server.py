@@ -644,7 +644,7 @@ class WebServer:
             "temp_c": b.get_cpu_temp_c() if (b and hasattr(b, "get_cpu_temp_c")) else 28.0,
             "battery": b.get_battery() if (b and hasattr(b, "get_battery")) else {"percent": 100, "voltage_mv": 4200, "charging": False},
             "wifi": wf,
-            "version": str(self.manifest.get("version", "1.0.0-alpha.4")),
+            "version": str(self.manifest.get("version", "1.0.0-alpha.4.1")),
             "firmware_version": str(self.manifest.get("firmware_version", "")),
             "board": str(b.id) if b else "unknown",
             "root": self.root,
