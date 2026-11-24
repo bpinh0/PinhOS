@@ -27,6 +27,31 @@ def _assert(cond, msg):
         raise AssertionError(msg)
 
 
+def _quiesce_web():
+    """Stop any autostarted WebPortal and close orphaned listeners so port 8080/lwIP memory is free."""
+    import sys
+    for mn in ("main", "_pinhos_main"):
+        m = sys.modules.get(mn)
+        if m is not None and hasattr(m, "stop_webportal"):
+            try:
+                m.stop_webportal()
+            except Exception:
+                pass
+    gc.collect()
+
+
+def _start_ws(ws):
+    """Start WebServer; on lwIP ENOMEM, collect and retry once."""
+    import time
+    try:
+        ws.start()
+    except OSError:
+        _quiesce_web()
+        time.sleep_ms(500) if hasattr(time, "sleep_ms") else time.sleep(0.5)
+        gc.collect()
+        ws.start()
+
+
 def test_stress_sandbox_20x(root="/sd/pinhos", iters=20):
     """Gate 13: Launch real tools via SandboxRunner.run_file() 20x with WebPortal up; assert largest_free(96KB) >= 16 KB."""
     from boards import get_board
@@ -44,7 +69,8 @@ def test_stress_sandbox_20x(root="/sd/pinhos", iters=20):
     ui = UIEngine(board=board, theme_manager=tm, config=cfg)
 
     ws = WebServer(board=board, config=cfg, manifest=manifest, root=root, host="0.0.0.0", port=8080)
-    ws.start()
+    _quiesce_web()
+    _start_ws(ws)
     orig_poll = board.poll_key
     min_blk = CAP_96K
     free0 = gc.mem_free() if hasattr(gc, "mem_free") else 0
@@ -87,7 +113,8 @@ def test_stress_wifi_web_concurrent(root="/sd/pinhos"):
     board = get_board()
     manifest = load_version_manifest(root=root)
     ws = WebServer(board=board, manifest=manifest, root=root, host="0.0.0.0", port=8080)
-    ws.start()
+    _quiesce_web()
+    _start_ws(ws)
     lp = asyncio.get_event_loop()
     nets_found = 0
     th = {"X-PinhOS-Token": ws.token}  # /api/* requires token (Refs #23)
