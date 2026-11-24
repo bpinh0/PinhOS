@@ -708,7 +708,31 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
         gc.collect()
 
 
+_REPL_KEEPALIVE = None
+
+
+def _start_repl_keepalive():
+    """After a deliberate serial Ctrl+C (dev/REPL mode), keep the un-disarmable WDT fed from a hw Timer."""
+    global _REPL_KEEPALIVE
+    w = _WDT_OBJ or runtime_state.get("_wdt")
+    if w is None or _REPL_KEEPALIVE is not None:
+        return
+    try:
+        import machine
+        _REPL_KEEPALIVE = machine.Timer(-1, period=2000, mode=machine.Timer.PERIODIC, callback=lambda t: w.feed())
+        bp("[WDT] REPL keep-alive timer active")
+    except Exception as e:
+        bp("[WDT_ERR] keepalive", repr(e))
+
+
 def _stop_repl_watcher():
+    global _REPL_KEEPALIVE
+    if _REPL_KEEPALIVE is not None:
+        try:
+            _REPL_KEEPALIVE.deinit()
+        except Exception:
+            pass
+        _REPL_KEEPALIVE = None
     if builtins is not None:
         t = getattr(builtins, "_pinhos_repl_timer", None)
         if t is not None:
@@ -1619,6 +1643,7 @@ def ui_loop(sel_action=0):
     except KeyboardInterrupt:
         _stop_repl_watcher()
         stop_webportal(logger=logger)
+        _start_repl_keepalive()
         runtime_state["serial_link"] = True
         if logger:
             try:

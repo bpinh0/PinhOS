@@ -1042,6 +1042,9 @@ except Exception as _e:
         # Exit Raw REPL cleanly (Ctrl-B) back to friendly >>> prompt with dupterm preserved
         $sp.Write([string][char]2)
         [void](Read-UntilIdle $sp 150 500)
+        $script:RelaunchUi = $true
+        Send-Paced $sp "import sys`r`nsys.path.insert(0,'/sd/pinhos')`r`nimport main as _m`r`n_m.ui_loop()`r`n"
+        Start-Sleep -Milliseconds 300
         if ($testOut -match "<<PINHOS:SELFTEST:FAIL" -or $testOut -notmatch "<<PINHOS:SELFTEST:PASS") {
             exit 1
         }
@@ -1070,6 +1073,9 @@ except Exception as _e:
         $stressOut = Stream-RawReplCommand $sp $runStressCmd "<<PINHOS:STRESS:" 120000
         $sp.Write([string][char]2)
         [void](Read-UntilIdle $sp 150 500)
+        $script:RelaunchUi = $true
+        Send-Paced $sp "import sys`r`nsys.path.insert(0,'/sd/pinhos')`r`nimport main as _m`r`n_m.ui_loop()`r`n"
+        Start-Sleep -Milliseconds 300
         if ($stressOut -match "<<PINHOS:STRESS:FAIL" -or $stressOut -notmatch "<<PINHOS:STRESS:PASS") {
             exit 1
         }
@@ -1146,7 +1152,7 @@ else:
     }
 } finally {
     if ($sp -and $sp.IsOpen) {
-        if ($Action -ne "upload_and_start") {
+        if ($Action -ne "upload_and_start" -and -not $script:RelaunchUi) {
             try {
                 $sp.Write([string][char]2)
                 Start-Sleep -Milliseconds 100
