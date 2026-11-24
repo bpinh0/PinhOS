@@ -1046,6 +1046,34 @@ except Exception as _e:
             exit 1
         }
     }
+    elseif ($Action -eq "stress") {
+        Write-Host "[PinhOS] Running Deep Stress Suite (Gates 13-14 + Menu Walk) on $ResolvedPort..." -ForegroundColor Cyan
+        Initialize-PicoRawSession $sp
+        $runStressCmd = @"
+import os, sys, io, gc
+for _m in list(sys.modules.keys()):
+ if _m not in ('picocalc','picocalcdisplay','vtterminal','os','sys','gc','io','json','time','binascii','machine','rp2','network','socket','struct','array','framebuf','builtins'):
+  del sys.modules[_m]
+gc.collect(); gc.collect()
+if '/sd/pinhos' not in sys.path: sys.path.insert(0, '/sd/pinhos')
+try:
+ from core.memutil import largest_free
+ import tests.selftest_stress as _ss
+ _bp('STRESS_BEFORE free=' + str(gc.mem_free()) + ' blk96k=' + str(largest_free(96*1024)))
+ _r = _ss.run_stress(deep=True)
+ gc.collect(); gc.collect()
+ _bp('STRESS_AFTER  free=' + str(gc.mem_free()) + ' blk96k=' + str(largest_free(96*1024)))
+ _bp('<<PINHOS:STRESS:PASS>> ' + str(_r))
+except Exception as _e:
+ _buf=io.StringIO(); sys.print_exception(_e, _buf); _bp('<<PINHOS:STRESS:FAIL>>\r\n' + _buf.getvalue())
+"@
+        $stressOut = Stream-RawReplCommand $sp $runStressCmd "<<PINHOS:STRESS:" 120000
+        $sp.Write([string][char]2)
+        [void](Read-UntilIdle $sp 150 500)
+        if ($stressOut -match "<<PINHOS:STRESS:FAIL" -or $stressOut -notmatch "<<PINHOS:STRESS:PASS") {
+            exit 1
+        }
+    }
     elseif ($Action -eq "pkt") {
         Send-Paced $sp ("<<PINHOS:" + $Arg1 + ">>")
         $res = Read-UntilIdle $sp 4200 8000
