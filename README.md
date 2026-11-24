@@ -84,13 +84,16 @@ pinhos/
 │   └── sysmon.py           # Live SRAM sparkline, GC counter, RP2350 temp/clock, SD benchmark & BL sliders
 ├── apps/                   # Community & user applets (single-entry APP_META contract)
 ├── themes/                 # Built-in & user JSON themes (cyber_amber, phosphor_green, arctic_daylight, synthwave_pulse)
-├── tests/                  # On-device hardware, SRAM leak, theme, Dual-UI, Phase 3.1 & Phase 4 self-test suite (12/12 PASS)
+├── tests/                  # On-device 12/12 self-test suite + Deep Stress Suite (Gates 13-14 + menu walk)
+├── docs/                   # Design specs (phase5_ota_security.md), runbooks (freeze/heap/WDT) & release notes
+├── scripts/                # Host release & boot helpers (stamp_release.ps1, setup_persistent_boot.py)
 ├── firmware/               # Custom RP2350 PicoCalc MicroPython UF2 builder & frozen Dual-Boot router
 │   ├── frozen/_boot.py     # Early hardware init (PicoDisplay, PicoKeyboard, PicoSD, UART0 COM4)
 │   ├── frozen/pinhos_boot.py # Cold-boot splash (5s countdown, 0-100% progress bar, version.json), [F1] Recovery, [F2] Boot Menu & [CTRL+C] REPL
 │   ├── build_uf2.sh        # Reproducible WSL2/Linux UF2 build script (RPI_PICO2_W)
 │   └── dist/               # Compiled pinhos-picocalc-pico2w.uf2 image
-├── picocalc.ps1            # Windows PowerShell deployment, sync, and test automation script
+├── picocalc.ps1            # Windows PowerShell deployment, .mpy sync, test, stress & screenshot CLI
+├── pinhos_portal_relay.ps1 # Optional local WebPortal HTTP relay helper
 ├── README.md
 └── ROADMAP.md
 ```
@@ -116,8 +119,16 @@ pinhos/
    .\picocalc.ps1 test             # 12/12 on-device Phase 1–4 self-test gate (auto-restores UI)
    .\picocalc.ps1 stress           # Deep Stress Suite (Gates 13–14 + 7-menu walk, auto-restores UI)
    .\picocalc.ps1 screenshot       # Capture & pull 320x320 4-bit BMP over COM4
-   .\scripts\stamp_release.ps1 -Version "1.0.0-alpha.4.2" # Stamp version.json & literals before tagging
+   .\picocalc.ps1 raw <script.py>  # Execute an ad-hoc MicroPython diagnostic script over COM4 Raw REPL
    ```
+
+### Host Tooling & Diagnostic Scripts
+| Script | Purpose | Example |
+| :--- | :--- | :--- |
+| **`picocalc.ps1`** | All-in-one Windows deployment, WSL2 `mpy-cross -O2` build, incremental SD sync, 12/12 self-test, deep stress suite, screenshot pull, and Raw REPL runner. | `.\picocalc.ps1 upload_and_start` |
+| **`scripts/stamp_release.ps1`** | Atomically updates `version.json` (`version`, `build_id`, UTC `build_timestamp`) and synchronized source/UI version literals before tagging (`-DryRun`, `-CreateTag`). | `.\scripts\stamp_release.ps1 -Version "1.0.0-alpha.4.3"` |
+| **`pinhos_portal_relay.ps1`** | Lightweight local HTTP relay helper for forwarding/testing WebPortal IDE traffic on Windows. | `.\pinhos_portal_relay.ps1` |
+| **`collect_audit_logs.ps1`** *(local, gitignored)* | Bundles live `/api/status`, `version.json`, `config.json`, and `system.log`/`crash.log`/`web.log` into `pinhos_audit_bundle.md` over authenticated WebPortal (`-Token`, prompts if omitted) or `COM4` (`-UseSerial` via `picocalc.ps1 raw`). | `.\collect_audit_logs.ps1 -Token <hex>` or `.\collect_audit_logs.ps1 -UseSerial` |
 4. **Cold-Boot Hotkeys (during the 5.0s PinhOS splash with live countdown & progress bar):**
    * **Default / `ENTER`:** Boots straight into `/sd/pinhos/main.py` → 5s Boot Guard → PinhOS Dashboard (`ENTER` skips the countdown immediately).
    * **`F1` or `ESC`:** Launches **PinhOS Custom Safe Recovery Mode** (diagnostics, strike reset, config/swap cleanup, `COM4` REPL).
