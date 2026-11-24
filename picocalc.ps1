@@ -98,7 +98,8 @@ $DeployManifest = @(
     @{ Local = "apps\wifi_spectrum.py"; Remote = "/sd/pinhos/apps/wifi_spectrum.py" },
     @{ Local = "tests\selftest.py";     Remote = "/sd/pinhos/tests/selftest.py";    Mpy = $true },
     @{ Local = "tests\selftest_p3.py";  Remote = "/sd/pinhos/tests/selftest_p3.py"; Mpy = $true },
-    @{ Local = "tests\selftest_p4.py";  Remote = "/sd/pinhos/tests/selftest_p4.py"; Mpy = $true }
+    @{ Local = "tests\selftest_p4.py";  Remote = "/sd/pinhos/tests/selftest_p4.py"; Mpy = $true },
+    @{ Local = "tests\selftest_stress.py"; Remote = "/sd/pinhos/tests/selftest_stress.py"; Mpy = $true }
 )
 
 $themesDir = Join-Path $ProjectRoot "themes"
