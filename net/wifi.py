@@ -12,6 +12,13 @@ WIFI_CFG_PATH = PINHOS_ROOT + "/wifi.json"
 
 
 def _sleep_ms(ms):
+    try:
+        import sys as _sy
+        _w = _sy.modules.get("__pinhos_wdt__")
+        if _w is not None:
+            _w.feed()
+    except Exception:
+        pass
     if hasattr(time, "sleep_ms"):
         time.sleep_ms(int(ms))
     else:
