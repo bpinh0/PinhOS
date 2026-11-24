@@ -548,9 +548,22 @@ def _ensure_ui_services(board, cfg=None):
     return theme_mgr, ui
 
 
+def _ensure_manifest():
+    """Return runtime manifest, loading version.json lazily (e.g. ui_loop() relaunched without start())."""
+    m = runtime_state.get("manifest")
+    if not m:
+        try:
+            from core.config import load_version_manifest
+            m = load_version_manifest()
+        except Exception:
+            m = {"version": "1.0.0-alpha.4.1", "arch": "armv7emsp"}
+        runtime_state["manifest"] = m
+    return m
+
+
 def _sync_status_bar(status_bar, ui, board, manifest, chg_phase=0):
     bat = board.get_battery()
-    ver = (manifest or {}).get("version", "1.0.0-alpha.3.1")
+    ver = (manifest or {}).get("version", "1.0.0-alpha.4.1")
     cfg = runtime_state.get("config")
     wf_mode = str(cfg.get("wifi_indicator", "bars") if cfg else "bars").lower()
     wf_lvl, wf_txt = None, ""
@@ -586,7 +599,7 @@ class _DesktopView:
 
         self.ui = ui
         self.screen = "desktop"
-        self.manifest = manifest or {"version": "1.0.0-alpha.3.1", "arch": "armv7emsp"}
+        self.manifest = manifest or {"version": "1.0.0-alpha.4.1", "arch": "armv7emsp"}
         self.status_bar = StatusBar(0, 0, 320, 20, title="PinhOS", mode_label=ui.mode_badge)
         self.desktop = DesktopHome(0, 22, 320, 252)
         self.footer_bar = FooterBar(0, 276, 320, 44, status="", status_kind="info", hints=_DESKTOP_HINTS)
@@ -625,7 +638,7 @@ class _DashboardView:
 
         self.ui = ui
         self.screen = "drawer"
-        self.manifest = manifest or {"version": "1.0.0-alpha.3.1", "arch": "armv7emsp"}
+        self.manifest = manifest or {"version": "1.0.0-alpha.4.1", "arch": "armv7emsp"}
         self.status_bar = StatusBar(0, 0, 320, 20, title="PinhOS", mode_label=ui.mode_badge)
         self.action_menu = MosaicGrid(
             4, 23, 312, 218,
@@ -1008,7 +1021,7 @@ def ui_loop(sel_action=0):
     logger = runtime_state.get("logger")
     _init_interactive_services(board, cfg, logger)
     theme_mgr, ui = _ensure_ui_services(board, cfg=cfg)
-    manifest = runtime_state.get("manifest") or {"version": "1.0.0-alpha.3.1", "arch": "armv7emsp"}
+    manifest = _ensure_manifest()
     boot_state = runtime_state.get("boot_state") or load_boot_state()
     sandbox = runtime_state.get("sandbox")
     from boards.base import MOD_ALT, MOD_CTRL
@@ -1942,7 +1955,7 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
             "mode": "NORMAL",
             "ui_mode": ui.mode,
             "theme": theme_mgr.active.id,
-            "version": manifest.get("version", "1.0.0-alpha.3.1"),
+            "version": manifest.get("version", "1.0.0-alpha.4.1"),
             "board": board.id,
             "stabilized": runtime_state["stabilized"],
             "strikes": boot_state.get("boot_strikes", 0),
