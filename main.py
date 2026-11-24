@@ -1,4 +1,4 @@
-# PinhOS v1.0.0-alpha.4.3 — Phase 1+2+3.1+4.1 Boot Entry, 3-Strike Crash Guard, Desktop Home, Dual-UI & WebPortal IDE (main.py)
+# PinhOS v1.0.0-alpha.4.4 — Phase 1+2+3.1+4.1 Boot Entry, 3-Strike Crash Guard, Desktop Home, Dual-UI & WebPortal IDE (main.py)
 # Zero hardcoded pin numbers outside boards/.
 
 import os
@@ -556,14 +556,14 @@ def _ensure_manifest():
             from core.config import load_version_manifest
             m = load_version_manifest()
         except Exception:
-            m = {"version": "1.0.0-alpha.4.3", "arch": "armv7emsp"}
+            m = {"version": "1.0.0-alpha.4.4", "arch": "armv7emsp"}
         runtime_state["manifest"] = m
     return m
 
 
 def _sync_status_bar(status_bar, ui, board, manifest, chg_phase=0):
     bat = board.get_battery()
-    ver = (manifest or {}).get("version", "1.0.0-alpha.4.3")
+    ver = (manifest or {}).get("version", "1.0.0-alpha.4.4")
     cfg = runtime_state.get("config")
     wf_mode = str(cfg.get("wifi_indicator", "bars") if cfg else "bars").lower()
     wf_lvl, wf_txt = None, ""
@@ -599,7 +599,7 @@ class _DesktopView:
 
         self.ui = ui
         self.screen = "desktop"
-        self.manifest = manifest or {"version": "1.0.0-alpha.4.3", "arch": "armv7emsp"}
+        self.manifest = manifest or {"version": "1.0.0-alpha.4.4", "arch": "armv7emsp"}
         self.status_bar = StatusBar(0, 0, 320, 20, title="PinhOS", mode_label=ui.mode_badge)
         self.desktop = DesktopHome(0, 22, 320, 252)
         self.footer_bar = FooterBar(0, 276, 320, 44, status="", status_kind="info", hints=_DESKTOP_HINTS)
@@ -638,7 +638,7 @@ class _DashboardView:
 
         self.ui = ui
         self.screen = "drawer"
-        self.manifest = manifest or {"version": "1.0.0-alpha.4.3", "arch": "armv7emsp"}
+        self.manifest = manifest or {"version": "1.0.0-alpha.4.4", "arch": "armv7emsp"}
         self.status_bar = StatusBar(0, 0, 320, 20, title="PinhOS", mode_label=ui.mode_badge)
         self.action_menu = MosaicGrid(
             4, 23, 312, 218,
@@ -855,7 +855,10 @@ def enable_wdt(timeout_ms=8000):
             lg = runtime_state.get("logger")
             if lg is not None:
                 try:
-                    lg.info("WDT: Armed ({}ms)".format(ms))
+                    if hasattr(lg, "log_wdt"):
+                        lg.log_wdt("ARMED ({}ms)".format(ms))
+                    else:
+                        lg.info("WDT: Armed ({}ms)".format(ms))
                 except Exception:
                     pass
             return True
@@ -1891,7 +1894,7 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
         except Exception:
             _bid = 0
         boot_msg = "BOOT: PinhOS v{} ({}) boot_id=b{} starting on {} [{} / {}]".format(
-            manifest.get("version", "1.0.0-alpha.4.3"),
+            manifest.get("version", "1.0.0-alpha.4.4"),
             manifest.get("arch", "armv7emsp"),
             _bid,
             board.name,
@@ -1947,15 +1950,49 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
         gc.collect()
         free_b, _ = _log_heap_stage(logger, "BOOT_OK")
         bp("<<PINHOS:BOOT_OK:v{}:FREE_RAM={}>>".format(
-            manifest.get("version", "1.0.0-alpha.4.3"), free_b
+            manifest.get("version", "1.0.0-alpha.4.4"), free_b
         ))
         if interactive:
+            if prev_crash and prev_crash.get("wdt_reset"):
+                try:
+                    from ui.widgets import Dialog
+                    _op = str(prev_crash.get("op", "IDLE"))
+                    _det = str(prev_crash.get("detail", ""))
+                    _kb = int(prev_crash.get("free_kb", 0))
+                    _dlg = Dialog(
+                        16, 68, 288, 168,
+                        title="WATCHDOG RESET RECOVERED",
+                        lines=[
+                            "Previous session timed out (>8s)",
+                            "and was safely restarted by WDT.",
+                            "Last Op: {} {}".format(_op, ("(" + _det + ")") if _det else "")[:38],
+                            "SRAM before reset: {} KB".format(_kb),
+                            "See [CTRL+L] -> wdt.log for details.",
+                        ],
+                        footer="[ANY KEY] Continue to Desktop",
+                        kind="warn",
+                    )
+                    ui.add_widget(_dlg)
+                    ui.render(force=False)
+                    board.clear_input()
+                    _pf = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
+                    while True:
+                        feed_wdt()
+                        if _pf and _pf() is not None:
+                            board.beep(1200, 12)
+                            break
+                        _sleep_ms(30)
+                    ui.remove_widget(_dlg)
+                    ui.mark_all_dirty(True)
+                    board.clear_input()
+                except Exception:
+                    pass
             ui_loop()
         return {
             "mode": "NORMAL",
             "ui_mode": ui.mode,
             "theme": theme_mgr.active.id,
-            "version": manifest.get("version", "1.0.0-alpha.4.3"),
+            "version": manifest.get("version", "1.0.0-alpha.4.4"),
             "board": board.id,
             "stabilized": runtime_state["stabilized"],
             "strikes": boot_state.get("boot_strikes", 0),
