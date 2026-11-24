@@ -919,6 +919,27 @@ def _repl_standby_popup(board, ui, logger):
     return False
 
 
+def _init_interactive_services(board, cfg, logger):
+    """
+    Idempotent interactive-session startup hooks (#29):
+    Runs once when entering ui_loop(), so BOTH cold boots (start(interactive=True))
+    AND deploy boots (picocalc.ps1: start(interactive=False) -> ui_loop()) arm WDT,
+    queue non-blocking Wi-Fi auto-connect, and honor webportal_autostart=True.
+    """
+    if runtime_state.get("_interactive_init_done"):
+        return False
+    runtime_state["_interactive_init_done"] = True
+    runtime_state["wifi_bg_pending"] = True
+    if runtime_state.get("stabilized") and not runtime_state.get("serial_link"):
+        try:
+            enable_wdt(int(cfg.get("wdt_timeout_ms", 8000)) if cfg else 8000)
+        except Exception:
+            pass
+    if cfg and cfg.get("webportal_autostart", False) and not runtime_state.get("web_active"):
+        start_webportal(board=board, cfg=cfg, logger=logger)
+    return True
+
+
 def ui_loop(sel_action=0):
     """
     Interactive Phase 2 Dual-UI keyboard event loop.
@@ -945,6 +966,7 @@ def ui_loop(sel_action=0):
 
     cfg = runtime_state.get("config")
     logger = runtime_state.get("logger")
+    _init_interactive_services(board, cfg, logger)
     theme_mgr, ui = _ensure_ui_services(board, cfg=cfg)
     manifest = runtime_state.get("manifest") or {"version": "1.0.0-alpha.3.1", "arch": "armv7emsp"}
     boot_state = runtime_state.get("boot_state") or load_boot_state()
@@ -1783,9 +1805,9 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
 
         _boot_progress(94, "Core Services Ready...", pause_ms=80)
 
-        # Defer Wi-Fi Auto-Connect to non-blocking ui_loop() state machine (#8) so boot never stalls
-        if interactive:
-            runtime_state["wifi_bg_pending"] = True
+        # Interactive-session hooks (wifi_bg_pending, enable_wdt, webportal_autostart)
+        # are initialized idempotently on ui_loop() entry via _init_interactive_services() (#29).
+        runtime_state["_interactive_init_done"] = False
 
         # Show clean 100% on native monochrome boot splash, cut cleanly to black BEFORE applying theme LUT!
         _boot_progress(100, "PinhOS Ready!", pause_ms=400, clear_splash=True)
@@ -1868,10 +1890,6 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
             view.render(force=False)
 
         gc.collect()
-        if interactive and runtime_state.get("stabilized") and not runtime_state.get("serial_link"):
-            enable_wdt(int(cfg.get("wdt_timeout_ms", 8000)))
-        if interactive and cfg.get("webportal_autostart", False):
-            start_webportal(board=board, cfg=cfg, logger=logger)
         free_b, _ = _log_heap_stage(logger, "BOOT_OK")
         bp("<<PINHOS:BOOT_OK:v{}:FREE_RAM={}>>".format(
             manifest.get("version", "1.0.0-alpha.4.1"), free_b
