@@ -95,6 +95,7 @@ $DeployManifest = @(
     @{ Local = "apps\hello_world.py";   Remote = "/sd/pinhos/apps/hello_world.py" },
     @{ Local = "apps\matrix_deck.py";   Remote = "/sd/pinhos/apps/matrix_deck.py" },
     @{ Local = "apps\doom_deck.py";     Remote = "/sd/pinhos/apps/doom_deck.py" },
+    @{ Local = "apps\wifi_spectrum.py"; Remote = "/sd/pinhos/apps/wifi_spectrum.py" },
     @{ Local = "tests\selftest.py";     Remote = "/sd/pinhos/tests/selftest.py";    Mpy = $true },
     @{ Local = "tests\selftest_p3.py";  Remote = "/sd/pinhos/tests/selftest_p3.py"; Mpy = $true },
     @{ Local = "tests\selftest_p4.py";  Remote = "/sd/pinhos/tests/selftest_p4.py"; Mpy = $true }
@@ -1087,16 +1088,18 @@ else:
     _bp('SHOT_PATH:' + _p)
     with open(_p, 'rb') as _f:
         while True:
-            _c = _f.read(60)
+            _c = _f.read(240)
             if not _c: break
             _bp('B64:' + binascii.b2a_base64(_c).decode().strip())
-            time.sleep_ms(8)
+            time.sleep_ms(2)
     time.sleep_ms(40)
     _bp('SHOT_DONE')
 "@
         $shotOut = Invoke-RawRepl $sp $shotCode 60000 16 12 -RequiredMarker "SHOT_DONE"
         $sp.Write([string][char]2)
         [void](Read-UntilIdle $sp 150 500)
+        Send-Paced $sp "if '_pm' in globals(): _pm.ui_loop()`r`n"
+        Start-Sleep -Milliseconds 150
         if ($shotOut -match "SHOT_DONE") {
             $ms = New-Object System.IO.MemoryStream
             foreach ($ln in ($shotOut -split "`r?`n")) {
