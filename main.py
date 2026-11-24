@@ -801,6 +801,12 @@ def enable_wdt(timeout_ms=8000):
             if builtins is not None:
                 setattr(builtins, "_pinhos_wdt", w)
             bp("[WDT] Enabled hardware watchdog ({}ms)".format(ms))
+            lg = runtime_state.get("logger")
+            if lg is not None:
+                try:
+                    lg.info("WDT: Armed ({}ms)".format(ms))
+                except Exception:
+                    pass
             return True
     except Exception as e:
         bp("[WDT_ERR]", repr(e))

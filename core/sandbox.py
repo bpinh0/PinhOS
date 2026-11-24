@@ -393,6 +393,33 @@ class _TrackedHandle:
             return iter(())
         return iter(self._raw)
 
+    def _feed_wdt(self):
+        if builtins is not None:
+            _w = getattr(builtins, "_pinhos_wdt", None)
+            if _w is not None:
+                try:
+                    _w.feed()
+                except Exception:
+                    pass
+
+    def read(self, *args, **kwargs):
+        if self.closed or self._raw is None:
+            raise ValueError("I/O operation on closed handle")
+        self._feed_wdt()
+        return self._raw.read(*args, **kwargs)
+
+    def readline(self, *args, **kwargs):
+        if self.closed or self._raw is None:
+            raise ValueError("I/O operation on closed handle")
+        self._feed_wdt()
+        return self._raw.readline(*args, **kwargs)
+
+    def write(self, *args, **kwargs):
+        if self.closed or self._raw is None:
+            raise ValueError("I/O operation on closed handle")
+        self._feed_wdt()
+        return self._raw.write(*args, **kwargs)
+
     def __getattr__(self, name):
         if self.closed or self._raw is None:
             raise ValueError("I/O operation on closed handle")
