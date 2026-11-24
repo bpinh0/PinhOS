@@ -72,7 +72,7 @@
     if (!force && state.busy > 0) return;
     try {
       const d = await apiJson("/api/status");
-      $("ver-badge").textContent = "v" + (d.version || "1.0.0-alpha.4.2");
+      $("ver-badge").textContent = "v" + (d.version || "1.0.0-alpha.4.3");
       const fk = Math.round((d.sram_free || 0) / 1024);
       const tk = Math.round((d.sram_total || 532480) / 1024);
       const usedPct = Math.max(0, Math.min(100, Math.round(((tk - fk) / tk) * 100)));
