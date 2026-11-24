@@ -35,6 +35,99 @@ class WifiManager:
         self._ssid = ""
         self._st_cache = None
         self._st_ms = 0
+        self._bg = None
+
+    @property
+    def bg_active(self):
+        return self._bg is not None
+
+    def _apply_region_and_host(self, country="XX", hostname="pinhos"):
+        try:
+            import network
+            cc = str(country or "XX").strip().upper()
+            if len(cc) == 2 and hasattr(network, "country"):
+                network.country(cc)
+            if hostname and hasattr(network, "hostname"):
+                network.hostname(str(hostname))
+        except Exception:
+            pass
+
+    def start_bg_connect(self, country="XX", timeout_s=24):
+        """Start a non-blocking Wi-Fi STA association to the top saved network (0ms boot stall)."""
+        self._bg = None
+        st = self.load_store()
+        if not st.get("auto_connect", True):
+            return False, "Auto-connect disabled"
+        nets = st.get("networks", [])
+        if not nets:
+            return False, "No saved networks"
+        w = self._get_wlan()
+        if w is None:
+            return False, "No Wi-Fi hardware"
+        top = nets[0]
+        ssid = str(top.get("ssid", ""))
+        pw = str(top.get("password", ""))
+        if not ssid:
+            return False, "Empty SSID"
+        ok_ip, ip = self._has_valid_ip(w)
+        if ok_ip:
+            self._ssid = ssid
+            return True, "Connected: " + ip
+        self._apply_region_and_host(country=country)
+        try:
+            if not w.active():
+                w.active(True)
+            try:
+                w.config(pm=getattr(w, "PM_NONE", 16))
+            except Exception:
+                pass
+            w.connect(ssid, pw)
+            self._bg = {
+                "ssid": ssid,
+                "pw": pw,
+                "t0": _ticks_ms(),
+                "limit_ms": max(15000, int(timeout_s) * 1000),
+                "retried": False,
+            }
+            return True, "Associating " + ssid
+        except Exception as e:
+            return False, "BG err: " + str(e)[:24]
+
+    def step_bg_connect(self):
+        """Poll non-blocking Wi-Fi association from ui_loop(). Never bounces while st==1 (JOINING)."""
+        bg = self._bg
+        if bg is None:
+            return None, ""
+        w = self._get_wlan()
+        if w is None:
+            self._bg = None
+            return "error", "No Wi-Fi hardware"
+        ok_ip, ip = self._has_valid_ip(w)
+        if ok_ip:
+            self._ssid = bg["ssid"]
+            self._st_cache = None
+            self._bg = None
+            return "connected", "Connected: " + ip
+        now = _ticks_ms()
+        el = _ticks_diff(now, bg["t0"])
+        st = 0
+        try:
+            st = w.status()
+        except Exception:
+            st = 0
+        # Only retry/bounce on definite failure codes (-1/-2/-3), NEVER while JOINING (st=1) or NOIP (st=2)
+        if el >= 4000 and st in (-1, -2, -3) and not bg["retried"]:
+            bg["retried"] = True
+            try:
+                w.disconnect()
+                w.connect(bg["ssid"], bg["pw"])
+            except Exception:
+                pass
+            return "connecting", "Retry (st={})".format(st)
+        if el >= bg["limit_ms"]:
+            self._bg = None
+            return "timeout", "Timeout (st={})".format(st)
+        return "connecting", "st={}".format(st)
 
     def _get_wlan(self):
         if self._wlan is None:
@@ -172,7 +265,14 @@ class WifiManager:
         except Exception:
             return []
         seen = {}
-        for attempt in range(2):
+        passes = 1
+        try:
+            import builtins as _bi
+            if getattr(_bi, "_pinhos_web_srv", None) is None:
+                passes = 2
+        except Exception:
+            passes = 2
+        for attempt in range(passes):
             try:
                 raw = w.scan()
             except Exception:
@@ -190,6 +290,13 @@ class WifiManager:
                 except Exception:
                     pass
             if attempt == 0:
+                try:
+                    import builtins as _bi
+                    _wd = getattr(_bi, "_pinhos_wdt", None)
+                    if _wd is not None:
+                        _wd.feed()
+                except Exception:
+                    pass
                 _sleep_ms(250)
         res = sorted(seen.values(), key=lambda x: x["rssi"], reverse=True)
         gc.collect()
@@ -388,8 +495,8 @@ class WifiManager:
     def get_auto_connect(self):
         return bool(self.load_store().get("auto_connect", True))
 
-    def auto_connect_saved(self, timeout_s=15, max_attempts=3, status_cb=None):
-        """Try connecting to the most-recent saved network (up to 3 attempts) if auto_connect is enabled."""
+    def auto_connect_saved(self, timeout_s=24, max_attempts=1, status_cb=None):
+        """Try connecting to the most-recent saved network (1 attempt by default on boot) if auto_connect is enabled."""
         st = self.load_store()
         if not st.get("auto_connect", True):
             return False, "Auto-connect disabled"
@@ -516,9 +623,11 @@ def _sntp_query(target, timeout_ms=1800, cancel_cb=None):
         s.sendto(pkt, addr)
         t0 = _ticks_ms()
         resends = 0
+        wm = get_wifi_manager()
         while _ticks_diff(_ticks_ms(), t0) < timeout_ms:
             if cancel_cb is not None and cancel_cb():
                 return None, "cancelled"
+            wm.poll_rx()
             el = _ticks_diff(_ticks_ms(), t0)
             # Re-transmit UDP packet after initial ARP resolution window on fresh DHCP link
             if (resends == 0 and el >= 550) or (resends == 1 and el >= 1150):
@@ -567,9 +676,11 @@ def _http_date_fallback(timeout_s=2, cancel_cb=None):
         limit_ms = max(1200, int(timeout_s * 1000))
         sent = False
         buf = b""
+        wm = get_wifi_manager()
         while _ticks_diff(_ticks_ms(), t0) < limit_ms and len(buf) < 512:
             if cancel_cb is not None and cancel_cb():
                 return None
+            wm.poll_rx()
             if not sent:
                 try:
                     s.send(b"HEAD / HTTP/1.0\r\nHost: 1.1.1.1\r\n\r\n")

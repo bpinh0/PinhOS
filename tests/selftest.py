@@ -823,8 +823,28 @@ def run_all(root="/sd/pinhos", interactive_wait=False):
     passed = 0
     results = []
 
+    def _draw_progress(idx, total_n, cur_lbl, done_rows):
+        try:
+            board.fill(0)
+            board.fill_rect(0, 0, 320, 22, 3)
+            board.text("PINHOS SELF-TEST [{}/{}]".format(idx, total_n), 12, 7, 0)
+            board.text("Running: " + str(cur_lbl)[:38], 8, 28, 14)
+            board.rect(8, 42, 304, 12, 7)
+            fw = (300 * max(0, idx - 1)) // max(1, total_n)
+            if fw > 0:
+                board.fill_rect(10, 44, fw, 8, 10)
+            ry = 62
+            for r_lbl, r_ok, _r_det in done_rows[-12:]:
+                board.text(("PASS " if r_ok else "FAIL ") + str(r_lbl)[:42], 8, ry, 10 if r_ok else 9)
+                ry += 18
+            board.show()
+        except Exception:
+            pass
+
     try:
-        for label, fn in suites:
+        total_n = len(suites)
+        for idx, (label, fn) in enumerate(suites, 1):
+            _draw_progress(idx, total_n, label, results)
             gc.collect()
             try:
                 detail = fn(root=root)

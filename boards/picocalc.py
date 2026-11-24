@@ -623,7 +623,14 @@ class PicoCalcBoard(BoardBase):
         return count
 
     def poll_key(self):
-        """Non-blocking key poll returning the next key string or None."""
+        """Non-blocking key poll returning the next key string or None (also feeds WDT if active)."""
+        try:
+            import builtins as _bi
+            _w = getattr(_bi, "_pinhos_wdt", None)
+            if _w is not None:
+                _w.feed()
+        except Exception:
+            pass
         return self.read_key()
 
     # --- Screenshot (4bpp indexed BMP streamed to SD, zero extra SRAM) ---
@@ -664,22 +671,49 @@ class PicoCalcBoard(BoardBase):
             path = "{}_{}.bmp".format(base, n)
             n += 1
 
-    def screenshot(self, path=None):
+    def prune_screenshots(self, keep=5):
+        """Keep only the newest `keep` shot_*.bmp files on SD (preserves last.bmp) (#19)."""
+        try:
+            names = [n for n in os.listdir(self.SCREENSHOT_DIR) if n.startswith("shot_") and n.endswith(".bmp")]
+            if len(names) <= int(keep):
+                return 0
+            names.sort()
+            removed = 0
+            for old in names[:-int(keep)]:
+                try:
+                    os.remove(self.SCREENSHOT_DIR + "/" + old)
+                    removed += 1
+                except OSError:
+                    pass
+            return removed
+        except Exception:
+            return 0
+
+    def screenshot_iter(self, path=None, step_rows=32):
         """
-        Save the current screen as a 320x320 4-bit indexed BMP (palette = live theme LUT).
-        Streams row-by-row from the framebuffer (bottom-up), so SRAM cost is ~200 bytes.
-        Returns the saved path, or None on failure.
+        Cooperative generator yielding every `step_rows` rows while streaming a 320x320
+        4-bit indexed BMP to SD (~200 B SRAM). Final yielded value is saved path or None (#19).
         """
         import struct
         mv = self.get_framebuffer()
         if mv is None:
-            return None
+            yield None
+            return
         w, h = self.display_width, self.display_height
         row = w // 2
         if len(mv) < row * h:
-            return None
+            yield None
+            return
         if path is None:
             path = self._screenshot_path()
+        try:
+            os.mkdir("/sd/pinhos")
+        except Exception:
+            pass
+        try:
+            os.mkdir(self.SCREENSHOT_DIR)
+        except Exception:
+            pass
         try:
             data_sz = row * h
             f = open(path, "wb")
@@ -689,7 +723,7 @@ class PicoCalcBoard(BoardBase):
                 pal = bytearray(64)
                 for i in range(16):
                     e = self._lut[i]
-                    v = ((e & 0xFF) << 8) | (e >> 8)  # undo byte-swapped LUT entry
+                    v = ((e & 0xFF) << 8) | (e >> 8)
                     r5 = (v >> 11) & 31
                     g6 = (v >> 5) & 63
                     b5 = v & 31
@@ -697,21 +731,41 @@ class PicoCalcBoard(BoardBase):
                     pal[i * 4 + 1] = (g6 << 2) | (g6 >> 4)
                     pal[i * 4 + 2] = (r5 << 3) | (r5 >> 2)
                 f.write(pal)
+                cnt = 0
+                sr = max(8, int(step_rows))
                 for y in range(h - 1, -1, -1):
                     f.write(mv[y * row:(y + 1) * row])
+                    cnt += 1
+                    if cnt >= sr:
+                        cnt = 0
+                        yield False
             finally:
                 f.close()
         except Exception:
-            return None
+            yield None
+            return
         self.last_screenshot = path
         self.pending_screenshot = path
+        if path.rpartition("/")[2].startswith("shot_"):
+            self.prune_screenshots(keep=5)
         self.beep(1800, 25)
         self.beep(2400, 25)
         try:
             self.serial_print("[SCREENSHOT]", path)
         except Exception:
             pass
-        return path
+        yield path
+
+    def screenshot(self, path=None):
+        """
+        Save the current screen as a 320x320 4-bit indexed BMP (palette = live theme LUT).
+        Streams row-by-row from the framebuffer (bottom-up), so SRAM cost is ~200 bytes.
+        Returns the saved path, or None on failure.
+        """
+        res = None
+        for step in self.screenshot_iter(path=path, step_rows=64):
+            res = step
+        return res if isinstance(res, str) else None
 
     def pop_pending_screenshot(self):
         p = self.pending_screenshot

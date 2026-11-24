@@ -11,6 +11,7 @@ APP_META = {
     "description": "DNS resolver, TCP RTT ping, port scanner, subnet sweep & Wake-on-LAN",
     "entry": "main",
     "min_sram": 40960,
+    "needs_radio": True,
     "ui_modes": ["gui", "tui", "native"],
     "native_libs": []
 }
@@ -245,6 +246,8 @@ def main(ctx):
                         common = (22, 53, 80, 443, 8080, 1883, 3389)
                         out = []
                         for p in common:
+                            if hasattr(ctx, "yield_"):
+                                ctx.yield_()
                             ok, dt, _e = tcp_probe(host, p, 0.35)
                             out.append("port {:>4}: {}".format(p, "OPEN ({}ms)".format(dt) if ok else "closed"))
                             tv.set_lines(out); ui.render(force=False)
@@ -258,6 +261,8 @@ def main(ctx):
                         base = ".".join(st["ip"].split(".")[:3]) + "."
                         out = ["Scanning {}1..16 (port 80/22)...".format(base)]
                         for last in range(1, 17):
+                            if hasattr(ctx, "yield_"):
+                                ctx.yield_()
                             ip = base + str(last)
                             ok, dt, _e = tcp_probe(ip, 80, 0.15)
                             if ok:

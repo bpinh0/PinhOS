@@ -50,6 +50,18 @@ def _clean(s):
     return s
 
 
+def _decode_safe(raw):
+    try:
+        return raw.decode()
+    except Exception:
+        buf = bytearray(raw)
+        for i in range(len(buf)):
+            c = buf[i]
+            if c < 32 or c >= 127:
+                buf[i] = 46
+        return buf.decode("ascii")
+
+
 def _iter_lines(path, limit=None):
     f = open(path, "rb")
     try:
@@ -68,20 +80,14 @@ def _iter_lines(path, limit=None):
             for p in parts:
                 if p[-1:] == b"\r":
                     p = p[:-1]
-                try:
-                    yield p.decode()
-                except Exception:
-                    yield "".join([chr(c) if 32 <= c < 127 else "." for c in p])
+                yield _decode_safe(p)
             if len(carry) >= CHUNK:
-                yield carry.decode("utf-8", "ignore") if hasattr(carry, "decode") else ""
+                yield _decode_safe(carry)
                 carry = b""
         if carry:
             if carry[-1:] == b"\r":
                 carry = carry[:-1]
-            try:
-                yield carry.decode()
-            except Exception:
-                yield "".join([chr(c) if 32 <= c < 127 else "." for c in carry])
+            yield _decode_safe(carry)
     finally:
         f.close()
 
@@ -118,18 +124,31 @@ class Editor:
             return
         size = st[6]
         limit = MAX_EDIT_BYTES if size > MAX_EDIT_BYTES else None
+        ro_reason = None
         if limit is not None:
             self.readonly = True
+            ro_reason = "READ-ONLY: {}B > 16KB cap".format(size)
+        else:
+            try:
+                from core.memutil import largest_free
+                need = max(16384, min(MAX_EDIT_BYTES, size) + 4096)
+                blk = largest_free(cap=max(need, 16384))
+                if blk < need:
+                    self.readonly = True
+                    limit = min(size, max(2048, blk // 2))
+                    ro_reason = "READ-ONLY: low contig RAM ({}KB)".format(blk // 1024)
+            except Exception:
+                pass
         lines = []
         for ln in _iter_lines(self.path, limit=limit):
             if "\t" in ln:
                 ln = ln.replace("\t", " " * TAB_WIDTH)
             lines.append(ln)
-        if self.readonly and lines:
+        if self.readonly and lines and limit is not None and size > limit:
             lines.pop()
         self.lines = lines or [""]
         if self.readonly:
-            self._set("READ-ONLY: {}B > 16KB cap".format(size), "warn")
+            self._set(ro_reason or "READ-ONLY", "warn")
         else:
             self._set("Loaded {} lines".format(len(self.lines)), "info")
 

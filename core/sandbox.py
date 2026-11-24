@@ -177,7 +177,7 @@ def _py_dict_literal_to_json(raw_block):
         # Handle Python keywords True, False, None and numeric underscores
         if ch.isalpha() or ch == "_":
             j = i
-            while j < n and (raw_block[j].isalnum() or raw_block[j] == "_"):
+            while j < n and (raw_block[j].isalpha() or raw_block[j].isdigit() or raw_block[j] == "_"):
                 j += 1
             word = raw_block[i:j]
             if word == "True":
@@ -481,6 +481,23 @@ class AppContext:
             return self.swap.load(self.app_id, default=default)
         return default
 
+    def yield_(self, step_web=True):
+        """Cooperative yield for long-running tools: feeds hardware WDT and steps WebPortal/CYW43."""
+        if builtins is not None:
+            _w = getattr(builtins, "_pinhos_wdt", None)
+            if _w is not None:
+                try:
+                    _w.feed()
+                except Exception:
+                    pass
+        if step_web:
+            m = sys.modules.get("main") or sys.modules.get("_pinhos_main")
+            if m is not None and hasattr(m, "step_webportal"):
+                try:
+                    m.step_webportal(0)
+                except Exception:
+                    pass
+
 
 class SandboxRunner:
     """
@@ -554,188 +571,44 @@ class SandboxRunner:
             pass
         return None
 
-    def run_source(self, source, app_path="<sandbox_app>", args=None, wait_on_error=False):
-        # 1. Static APP_META inspection (no code executed)
-        meta = parse_app_meta(source)
+    def _should_purge_mod(self, mod_name):
+        """Purge only applet/tool modules — never clear core/net/ui/boards/web singletons (#16)."""
+        for keep_pre in ("core", "net", "ui", "boards", "web", "tests", "asyncio", "uasyncio"):
+            if mod_name == keep_pre or mod_name.startswith(keep_pre + "."):
+                return False
+        return True
+
+    def _exec_sandboxed(self, meta, invoke_cb, app_path="<sandbox_app>", args=None, wait_on_error=False, mod_name=None):
+        """Unified sandbox lifecycle for run_source() and run_file() (#6, #12, #16)."""
         app_id = meta["id"]
         min_sram = int(meta["min_sram"])
-        entry_name = meta["entry"]
+        web_up = bool(builtins is not None and getattr(builtins, "_pinhos_web_srv", None) is not None)
+        sram_floor = max(min_sram, 49152 if web_up else 32768)
 
-        # 2. Verify free SRAM before launch
         gc.collect()
         free_before = get_free_sram()
-        if free_before < min_sram:
+        if free_before < sram_floor:
             raise SandboxMemoryError(
-                "App '{}' requires {} bytes free SRAM, only {} bytes available".format(
-                    app_id, min_sram, free_before
+                "App '{}' requires {}B free SRAM (OS reserve), only {}B available".format(
+                    app_id, sram_floor, free_before
                 )
             )
-
-        # 3. Snapshot sys.modules and initialize resource tracker
-        modules_before = set(sys.modules.keys())
-        real_open = open
-        tracker = ResourceTracker(real_open)
-
-        ctx = AppContext(
-            meta=meta,
-            board=self.board,
-            config=self.config,
-            swap=self.swap,
-            logger=self.logger,
-            tracker=tracker,
-            args=args,
-            theme=self.theme,
-            ui=self.ui,
-        )
-
-        app_globals = {
-            "__name__": "__sandbox_{}__".format(app_id),
-            "__file__": app_path,
-            "open": tracker.open,
-        }
-
-        hooked_builtins = False
-        if builtins is not None and hasattr(builtins, "open"):
+        min_block = int(meta.get("min_block", 16384))
+        if min_block > 0:
             try:
-                setattr(builtins, "open", tracker.open)
-                hooked_builtins = True
-            except Exception:
-                hooked_builtins = False
-
-        ret_val = None
-        err_str = None
-        ok = False
-        leaked_closed = 0
-        purged_modules = []
-
-        try:
-            code_obj = compile(source, app_path, "exec")
-            exec(code_obj, app_globals)
-            code_obj = None
-
-            entry_fn = app_globals.get(entry_name)
-            if not callable(entry_fn):
-                raise SandboxMetaError(
-                    "Entry point '{}' in '{}' is not callable".format(entry_name, app_id)
-                )
-
-            ret_val = entry_fn(ctx)
-            entry_fn = None
-            ok = True
-        except Exception as exc:
-            err_str = repr(exc)
-            if self.logger is not None:
-                self.logger.exception("SANDBOX({})".format(app_id), exc)
-            exc = None
-        finally:
-            # 4a. Restore builtins.open if hooked
-            if hooked_builtins and builtins is not None:
-                try:
-                    setattr(builtins, "open", real_open)
-                except Exception:
-                    pass
-
-            # 4b. Close all leaked file/socket/peripheral handles
-            leaked_closed = tracker.close_all()
-
-            # 4c. Purge all newly imported modules from sys.modules
-            current_mods = list(sys.modules.keys())
-            for mod_name in current_mods:
-                if mod_name not in modules_before:
-                    purged_modules.append(mod_name)
-                    try:
-                        mod_obj = sys.modules.pop(mod_name, None)
-                        if mod_obj is not None and hasattr(mod_obj, "__dict__"):
-                            try:
-                                mod_obj.__dict__.clear()
-                            except Exception:
-                                pass
-                        mod_obj = None
-                    except Exception:
-                        pass
-
-            # 4d. Tear down app namespace & context references
-            try:
-                app_globals.clear()
-            except Exception:
+                from core.memutil import largest_free
+                blk = largest_free(cap=max(min_block, 16384))
+                if blk < min_block:
+                    raise SandboxMemoryError(
+                        "App '{}' needs {}B contig SRAM, largest block {}B".format(
+                            app_id, min_block, blk
+                        )
+                    )
+            except ImportError:
                 pass
-            ctx._tracker = None
-            ctx.board = None
-            ctx.config = None
-            ctx.swap = None
-            ctx.logger = None
-            ctx.theme = None
-            ctx.ui = None
-            ctx = None
-            tracker = None
-
-            # 4e. Restore display & input state on board HAL
-            if self.board is not None:
-                try:
-                    self.board.restore_state()
-                except Exception:
-                    pass
-
-            # 4f. Force garbage collection to reclaim heap
-            gc.collect()
-            gc.collect()
-
-        free_after = get_free_sram()
-        sram_delta = max(0, free_before - free_after)
-
-        if not ok and wait_on_error:
-            self.show_recovery_screen(app_id, err_str, sram_delta=sram_delta, wait_key=True)
-
-        return {
-            "ok": ok,
-            "app_id": app_id,
-            "meta": meta,
-            "return_value": ret_val,
-            "error": err_str,
-            "leaked_handles_closed": leaked_closed,
-            "purged_modules": purged_modules,
-            "sram_before": free_before,
-            "sram_after": free_after,
-            "sram_delta": sram_delta,
-        }
-
-    def run_file(self, app_path, args=None, wait_on_error=False):
-        """
-        Execute an app file inside the sandbox. When app_path lives under /sd/pinhos/
-        (e.g. tools/*.py or apps/*.py), streams compilation via MicroPython's native
-        file-backed import instead of slurping the full source string into SRAM.
-        """
-        gc.collect()
-        meta = inspect_app(app_path)
-        app_id = meta["id"]
-        min_sram = int(meta["min_sram"])
-        entry_name = meta["entry"]
-
-        mod_name = None
-        if isinstance(app_path, str) and app_path.startswith("/sd/pinhos/") and app_path.endswith(".py"):
-            rel = app_path[len("/sd/pinhos/"):-3]
-            if rel and "/" in rel:
-                mod_name = rel.replace("/", ".")
-
-        if mod_name is None:
-            try:
-                with open(app_path, "r") as f:
-                    source = f.read()
-            except Exception as e:
-                raise SandboxError("Cannot read app '{}': {}".format(app_path, e))
-            return self.run_source(source, app_path=app_path, args=args, wait_on_error=wait_on_error)
-
-        gc.collect()
-        free_before = get_free_sram()
-        if free_before < min_sram:
-            raise SandboxMemoryError(
-                "App '{}' requires {} bytes free SRAM, only {} bytes available".format(
-                    app_id, min_sram, free_before
-                )
-            )
 
         modules_before = set(sys.modules.keys())
-        if mod_name in sys.modules:
+        if mod_name and mod_name in sys.modules:
             sys.modules.pop(mod_name, None)
             modules_before.discard(mod_name)
         real_open = open
@@ -757,18 +630,18 @@ class SandboxRunner:
         leaked_closed = 0
         purged_modules = []
         try:
-            mod = __import__(mod_name, None, None, ("*",))
-            entry_fn = getattr(mod, entry_name, None)
-            if not callable(entry_fn):
-                raise SandboxMetaError("Entry '{}' in '{}' not callable".format(entry_name, app_id))
-            ret_val = entry_fn(ctx)
-            entry_fn = None
-            mod = None
+            ret_val = invoke_cb(ctx, tracker)
             ok = True
-        except Exception as exc:
+        except KeyboardInterrupt:
+            err_str = "Interrupted (Ctrl-C)"
+            ok = False
+        except (Exception, MemoryError) as exc:
             err_str = repr(exc)
             if self.logger is not None:
-                self.logger.exception("SANDBOX({})".format(app_id), exc)
+                try:
+                    self.logger.exception("SANDBOX({})".format(app_id), exc)
+                except Exception:
+                    pass
             exc = None
         finally:
             if hooked_builtins and builtins is not None:
@@ -778,7 +651,7 @@ class SandboxRunner:
                     pass
             leaked_closed = tracker.close_all()
             for mn in list(sys.modules.keys()):
-                if mn not in modules_before:
+                if mn not in modules_before and self._should_purge_mod(mn):
                     purged_modules.append(mn)
                     try:
                         mo = sys.modules.pop(mn, None)
@@ -806,3 +679,64 @@ class SandboxRunner:
             "purged_modules": purged_modules, "sram_before": free_before,
             "sram_after": free_after, "sram_delta": sram_delta,
         }
+
+    def run_source(self, source, app_path="<sandbox_app>", args=None, wait_on_error=False):
+        meta = parse_app_meta(source)
+        app_id = meta["id"]
+        entry_name = meta["entry"]
+
+        def _invoke(ctx, tracker):
+            app_globals = {
+                "__name__": "__sandbox_{}__".format(app_id),
+                "__file__": app_path,
+                "open": tracker.open,
+            }
+            try:
+                code_obj = compile(source, app_path, "exec")
+                exec(code_obj, app_globals)
+                code_obj = None
+                entry_fn = app_globals.get(entry_name)
+                if not callable(entry_fn):
+                    raise SandboxMetaError("Entry point '{}' in '{}' is not callable".format(entry_name, app_id))
+                return entry_fn(ctx)
+            finally:
+                try:
+                    app_globals.clear()
+                except Exception:
+                    pass
+
+        return self._exec_sandboxed(meta, _invoke, app_path=app_path, args=args, wait_on_error=wait_on_error)
+
+    def run_file(self, app_path, args=None, wait_on_error=False):
+        """
+        Execute an app file inside the sandbox. When app_path lives under /sd/pinhos/
+        (e.g. tools/*.py or apps/*.py), streams compilation via MicroPython's native
+        file-backed import instead of slurping the full source string into SRAM.
+        """
+        gc.collect()
+        meta = inspect_app(app_path)
+        app_id = meta["id"]
+        entry_name = meta["entry"]
+
+        mod_name = None
+        if isinstance(app_path, str) and app_path.startswith("/sd/pinhos/") and app_path.endswith(".py"):
+            rel = app_path[len("/sd/pinhos/"):-3]
+            if rel and "/" in rel:
+                mod_name = rel.replace("/", ".")
+
+        if mod_name is None:
+            try:
+                with open(app_path, "r") as f:
+                    source = f.read()
+            except Exception as e:
+                raise SandboxError("Cannot read app '{}': {}".format(app_path, e))
+            return self.run_source(source, app_path=app_path, args=args, wait_on_error=wait_on_error)
+
+        def _invoke(ctx, _tracker):
+            mod = __import__(mod_name, None, None, ("*",))
+            entry_fn = getattr(mod, entry_name, None)
+            if not callable(entry_fn):
+                raise SandboxMetaError("Entry '{}' in '{}' not callable".format(entry_name, app_id))
+            return entry_fn(ctx)
+
+        return self._exec_sandboxed(meta, _invoke, app_path=app_path, args=args, wait_on_error=wait_on_error, mod_name=mod_name)
