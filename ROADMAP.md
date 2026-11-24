@@ -178,6 +178,7 @@ def main(ctx):
   - [ ] Curated catalog browser (`store_index.json`) with category filters, version tags, `min_sram` compatibility badges, SHA-256 verification, and one-click install/update/remove into `/sd/pinhos/apps/` and `/sd/pinhos/themes/`.
 - [ ] **5.4 Optional Bytecode & Diagnostics Polish:**
   - [x] Surface RP2350 Watchdog (`WDT`) diagnostics & reset-cause log entries (`wdt.log` + friendly `WATCHDOG RESET RECOVERED` notice) directly in the on-device **Logs** menu (`CTRL+L` / `ui/_log_view.py`, `v1.0.0-alpha.4.4`).
+  - [ ] Implement **Two-Stage Soft + Hard Watchdog**: 2s `machine.Timer` supervisor keeping the 8s silicon WDT fed for true deadlocks while enforcing a configurable soft timeout (`15s`/`30s`/`60s`/`OFF`) with a Windows-style **"Not Responding"** dialog (`[W] Wait`, `[ESC] Abort`, `[R] Reboot`).
   - [ ] Evaluate pre-compiling `tools/shell.py` (or splitting command parser) if low-memory launch fragmentation is observed under heavy WebPortal + TLS workloads.
   - [ ] Add on-device WebPortal QR code generator for quick phone/laptop URL + token pairing.
 
