@@ -219,10 +219,16 @@ def main(ctx):
 
     view_mode = 0
     _draw_spectrum(board, theme, [], view_mode, True, None)
+    if hasattr(ctx, "yield_"):
+        ctx.yield_(step_web=False)
     aps, err = _scan_wifi()
+    if hasattr(ctx, "yield_"):
+        ctx.yield_(step_web=False)
     _draw_spectrum(board, theme, aps, view_mode, False, err)
 
     while True:
+        if hasattr(ctx, "yield_"):
+            ctx.yield_(step_web=False)
         ev = board.poll_input()
         k_low = _extract_key(ev)
         if k_low is None:
@@ -233,7 +239,11 @@ def main(ctx):
             break
         elif k_low in ("r", " ", "enter", "key_enter", "\r", "\n"):
             _draw_spectrum(board, theme, aps, view_mode, True, None)
+            if hasattr(ctx, "yield_"):
+                ctx.yield_(step_web=False)
             aps, err = _scan_wifi()
+            if hasattr(ctx, "yield_"):
+                ctx.yield_(step_web=False)
             _draw_spectrum(board, theme, aps, view_mode, False, err)
         elif k_low in ("\t", "tab", "key_tab"):
             view_mode = 1 - view_mode
