@@ -623,7 +623,14 @@ class PicoCalcBoard(BoardBase):
         return count
 
     def poll_key(self):
-        """Non-blocking key poll returning the next key string or None."""
+        """Non-blocking key poll returning the next key string or None (also feeds WDT if active)."""
+        try:
+            import builtins as _bi
+            _w = getattr(_bi, "_pinhos_wdt", None)
+            if _w is not None:
+                _w.feed()
+        except Exception:
+            pass
         return self.read_key()
 
     # --- Screenshot (4bpp indexed BMP streamed to SD, zero extra SRAM) ---

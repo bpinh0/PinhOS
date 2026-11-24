@@ -774,7 +774,41 @@ def toggle_webportal(board=None, cfg=None, logger=None):
     return ok, msg
 
 
+def feed_wdt():
+    """Feed RP2350 hardware watchdog if enabled."""
+    if builtins is not None:
+        w = getattr(builtins, "_pinhos_wdt", None)
+        if w is not None:
+            try:
+                w.feed()
+            except Exception:
+                pass
+
+
+def enable_wdt(timeout_ms=8000):
+    """Enable RP2350 machine.WDT once after boot stabilization (max ~8388 ms; 0 disables)."""
+    ms = int(timeout_ms or 0)
+    if ms <= 0:
+        return False
+    ms = min(8388, max(1000, ms))
+    try:
+        if builtins is not None and getattr(builtins, "_pinhos_wdt", None) is not None:
+            getattr(builtins, "_pinhos_wdt").feed()
+            return True
+        import machine
+        if hasattr(machine, "WDT"):
+            w = machine.WDT(timeout=ms)
+            if builtins is not None:
+                setattr(builtins, "_pinhos_wdt", w)
+            bp("[WDT] Enabled hardware watchdog ({}ms)".format(ms))
+            return True
+    except Exception as e:
+        bp("[WDT_ERR]", repr(e))
+    return False
+
+
 def step_webportal(slice_ms=15):
+    feed_wdt()
     ws = runtime_state.get("web_server")
     if ws is not None and ws.running:
         try:
@@ -852,6 +886,7 @@ def _enter_sleep_mode(board, ui, logger, countdown_s=5):
     try:
         ticks = 0
         while True:
+            feed_wdt()
             if poll_fn and poll_fn() is not None:
                 break
             ticks += 1
@@ -1404,6 +1439,7 @@ def ui_loop(sel_action=0):
                         view.render(force=True)
                         last_act_ms = _ticks_ms()
             else:
+                feed_wdt()
                 if (idle_ticks & 1) == 0:
                     _w = runtime_state.get("_sta_wlan")
                     if _w is None:
@@ -1666,6 +1702,8 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
             view.render(force=False)
 
         gc.collect()
+        if interactive and runtime_state.get("stabilized") and not runtime_state.get("serial_link"):
+            enable_wdt(int(cfg.get("wdt_timeout_ms", 8000)))
         if interactive and cfg.get("webportal_autostart", False):
             start_webportal(board=board, cfg=cfg, logger=logger)
         free_b = gc.mem_free() if hasattr(gc, "mem_free") else 262144
