@@ -845,8 +845,8 @@ def run_all(root="/sd/pinhos", interactive_wait=False):
         total_n = len(suites)
         for idx, (label, fn) in enumerate(suites, 1):
             try:
-                import main as _pm_w
-                if hasattr(_pm_w, "feed_wdt"):
+                _pm_w = sys.modules.get("main") or sys.modules.get("_pinhos_main")
+                if _pm_w is not None and hasattr(_pm_w, "feed_wdt"):
                     _pm_w.feed_wdt()
             except Exception:
                 pass

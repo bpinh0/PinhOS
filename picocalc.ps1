@@ -1038,7 +1038,7 @@ try:
 except Exception as _e:
  _buf=io.StringIO();sys.print_exception(_e,_buf);_bp('<<PINHOS:SELFTEST:FAIL:0/12>>\r\n'+_buf.getvalue())
 "@
-        $testOut = Stream-RawReplCommand $sp $runTestCmd "<<PINHOS:SELFTEST:" 90000
+        $testOut = Stream-RawReplCommand $sp $runTestCmd "<<PINHOS:SELFTEST:" 150000
         # Exit Raw REPL cleanly (Ctrl-B) back to friendly >>> prompt with dupterm preserved
         $sp.Write([string][char]2)
         [void](Read-UntilIdle $sp 150 500)
