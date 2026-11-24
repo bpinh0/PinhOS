@@ -79,6 +79,7 @@ class Logger:
         self.log_dir = log_dir or (PINHOS_ROOT + "/logs")
         self.sys_log_path = self.log_dir.rstrip("/") + "/system.log"
         self.crash_log_path = self.log_dir.rstrip("/") + "/crash.log"
+        self.wdt_log_path = self.log_dir.rstrip("/") + "/wdt.log"
         self.breadcrumb_path = self.log_dir.rstrip("/") + "/breadcrumb.json"
         self.max_ring = max(8, int(max_ring))
         self.max_file_bytes = max(4096, int(max_file_bytes))
@@ -127,6 +128,12 @@ class Logger:
 
     def warn(self, msg, persist=True):
         return self.log("WARN", msg, persist=persist)
+
+    def log_wdt(self, msg, persist=True):
+        entry = self.log("WDT", msg, persist=persist)
+        if persist:
+            self._append_file(self.wdt_log_path, entry + "\n")
+        return entry
 
     def error(self, msg, persist=True):
         entry = self.log("ERROR", msg, persist=persist)
@@ -184,9 +191,11 @@ class Logger:
         in crash.log and return the forensic dict; otherwise return None.
         """
         rc_str = "BOOT"
+        is_wdt = False
         try:
             import machine
             rc = machine.reset_cause()
+            is_wdt = (rc == getattr(machine, "WDT_RESET", 3))
             rc_names = {1: "PWRON", 2: "HARD_RST", 3: "WDT_TIMEOUT", 4: "WAKE", 5: "SOFT_RST"}
             rc_str = rc_names.get(rc, "RST_" + str(rc))
         except Exception:
@@ -200,11 +209,12 @@ class Logger:
             prev = None
 
         if not isinstance(prev, dict):
-            self.clear_breadcrumb("IDLE")
-            return None
+            prev = {}
 
         prev_op = str(prev.get("op", "IDLE"))
-        if prev_op in ("IDLE", "CLEAN_EXIT", ""):
+        if (not is_wdt) and prev_op in ("IDLE", "CLEAN_EXIT", ""):
+            if not prev:
+                self.clear_breadcrumb("IDLE")
             return None
 
         prev_detail = str(prev.get("detail", ""))
@@ -216,17 +226,26 @@ class Logger:
             "time": prev_time,
             "free_kb": prev_kb,
             "reset_cause": rc_str,
+            "wdt_reset": is_wdt,
         }
-        msg = "UNCLEAN SHUTDOWN in {} ({}) @ {} [{} | {}KB]".format(
+        msg = "{} in {} ({}) @ {} [{} | {}KB]".format(
+            "WDT RESET" if is_wdt else "UNCLEAN SHUTDOWN",
             prev_op, prev_detail or "n/a", prev_time, rc_str, prev_kb
         )
         self.log("CRASH", msg, persist=True)
+        if is_wdt:
+            self._append_file(
+                self.wdt_log_path,
+                "{} [WDT_RESET] last_op={} ({}) prev_time={} free={}KB\n".format(
+                    format_log_prefix(self.log_dir), prev_op, prev_detail or "n/a", prev_time, prev_kb
+                ),
+            )
         block = (
-            "=== PINHOS UNCLEAN SHUTDOWN / FREEZE [{}] ===\n"
+            "=== PINHOS {} [{}] ===\n"
             "Last Op : {} ({})\n"
             "Op Time : {}\n"
             "Cause   : {} | Free SRAM: {} KB\n\n"
-        ).format(_now_str(), prev_op, prev_detail or "n/a", prev_time, rc_str, prev_kb)
+        ).format("WATCHDOG RESET" if is_wdt else "UNCLEAN SHUTDOWN / FREEZE", _now_str(), prev_op, prev_detail or "n/a", prev_time, rc_str, prev_kb)
         self._append_file(self.crash_log_path, block)
         self.clear_breadcrumb("IDLE")
         return report

@@ -20,7 +20,7 @@ def _fmt_sz(n):
 
 
 def _list_logs(log_dir):
-    known = ["system.log", "crash.log", "web.log"]
+    known = ["system.log", "crash.log", "wdt.log", "web.log"]
     extra = []
     try:
         for fn in sorted(os.listdir(log_dir)):
@@ -57,7 +57,7 @@ def _log_color(s):
     u = s.upper()
     if any(k in u for k in ("[ERR", "ERROR", "CRASH", "FAIL", "EXCEPTION", "TRACEBACK", "ERR ")):
         return "err"
-    if any(k in u for k in ("[WARN", "WARN", "BSOD", "TIMEOUT", "STRIKE")):
+    if any(k in u for k in ("[WARN", "WARN", "BSOD", "TIMEOUT", "STRIKE", "WDT")):
         return "warn"
     if any(k in u for k in ("OK", "PASS", "STABILIZED", "CONNECTED", "READY", "START")):
         return "ok"
