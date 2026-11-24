@@ -2,6 +2,7 @@
 # Encapsulates all PicoCalc (RP2350 Pico 2W + STM32 Southbridge + 320x320 SPI LCD + SPI SD) pins & buses.
 
 import os
+import sys
 import time
 import array
 
@@ -625,8 +626,7 @@ class PicoCalcBoard(BoardBase):
     def poll_key(self):
         """Non-blocking key poll returning the next key string or None (also feeds WDT if active)."""
         try:
-            import builtins as _bi
-            _w = getattr(_bi, "_pinhos_wdt", None)
+            _w = sys.modules.get("__pinhos_wdt__")
             if _w is not None:
                 _w.feed()
         except Exception:
