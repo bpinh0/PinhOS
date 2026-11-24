@@ -130,6 +130,15 @@ def test_webportal_loopback(root="/sd/pinhos"):
             _assert(c5 == 200 and json.loads(b5.decode("utf-8")).get("ok"), "DEL fail")
             c6, _ = await _req_pipe(ws, "GET", "/api/file?path=../../boot.py")
             _assert(c6 == 403, "traversal guard fail: {}".format(c6))
+            # /api/run 409 guard & /api/run/status (#7)
+            c7, _ = await _req_pipe(ws, "POST", "/api/run?path=apps/hello_world.py", hdrs=tok_h)
+            _assert(c7 == 200, "run queue fail: {}".format(c7))
+            c8, _ = await _req_pipe(ws, "POST", "/api/run?path=apps/hello_world.py", hdrs=tok_h)
+            _assert(c8 == 409, "duplicate run should 409, got {}".format(c8))
+            c9, b9 = await _req_pipe(ws, "GET", "/api/run/status")
+            _assert(c9 == 200 and json.loads(b9.decode("utf-8")).get("state") == "queued", "run status fail")
+            ws.pending_run = None
+            ws.set_run_state("idle")
         finally:
             await ws.stop_async()
 

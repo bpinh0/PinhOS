@@ -265,7 +265,14 @@ class WifiManager:
         except Exception:
             return []
         seen = {}
-        for attempt in range(2):
+        passes = 1
+        try:
+            import builtins as _bi
+            if getattr(_bi, "_pinhos_web_srv", None) is None:
+                passes = 2
+        except Exception:
+            passes = 2
+        for attempt in range(passes):
             try:
                 raw = w.scan()
             except Exception:

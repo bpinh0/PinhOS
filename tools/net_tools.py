@@ -11,6 +11,7 @@ APP_META = {
     "description": "DNS resolver, TCP RTT ping, port scanner, subnet sweep & Wake-on-LAN",
     "entry": "main",
     "min_sram": 40960,
+    "needs_radio": True,
     "ui_modes": ["gui", "tui", "native"],
     "native_libs": []
 }

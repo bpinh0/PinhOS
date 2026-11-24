@@ -158,8 +158,11 @@ class WebServer:
         self._srv = None
         self._loop = None
         self._running = False
+        self._paused = False
         self._active = 0
         self.pending_run = None
+        self._run_state = {"state": "idle", "ok": True, "error": None, "sram_before": 0, "sram_after": 0, "largest_free": 0}
+        self._run_queued_ms = 0
         self.pending_reboot = False
         self.log_path = self.root + "/logs/web.log"
         self._wlan = None
@@ -283,7 +286,41 @@ class WebServer:
     def stop(self):
         if not self._running and self._srv is None:
             return True
+        self._paused = False
         return bool(self._loop_obj().run_until_complete(self.stop_async()))
+
+    def pause(self):
+        """Close listening socket while keeping WLAN up for radio-heavy tools (#17)."""
+        if not self._running or self._paused:
+            return False
+        self._paused = True
+        self.stop()
+        self._paused = True
+        return True
+
+    def resume(self):
+        """Rebind listening socket after radio-heavy tool completes (#17)."""
+        if not self._paused:
+            return False
+        self._paused = False
+        try:
+            return self.start()
+        except Exception:
+            return False
+
+    def set_run_state(self, state, res=None):
+        st = self._run_state
+        st["state"] = str(state)
+        if isinstance(res, dict):
+            st["ok"] = bool(res.get("ok"))
+            st["error"] = res.get("error")
+            st["sram_before"] = int(res.get("sram_before", 0))
+            st["sram_after"] = int(res.get("sram_after", 0))
+            try:
+                from core.memutil import largest_free
+                st["largest_free"] = int(largest_free())
+            except Exception:
+                st["largest_free"] = 0
 
     def step(self, ms=15):
         if not self._running:
@@ -485,7 +522,11 @@ class WebServer:
                 self._wlog("OK {} {}".format(meth, rt))
         except Exception as e:
             ename = type(e).__name__
-            if ename == "TimeoutError":
+            eno = e.args[0] if (isinstance(e, OSError) and e.args) else None
+            if eno in (104, 32):
+                # Silently ignore client disconnect (ECONNRESET / EPIPE) (#7)
+                pass
+            elif ename == "TimeoutError":
                 if meth != "?":
                     self._wlog("TIMEOUT {} {}".format(meth, rt))
             else:
@@ -520,6 +561,9 @@ class WebServer:
                 await self._err(w, 403, "Forbidden")
                 return
             await self._stream_file(w, full, cc="public, max-age=3600")
+            return
+        if m == "GET" and rt == "/api/run/status":
+            await self._json(w, 200, dict(self._run_state))
             return
         if m == "GET" and rt == "/api/status":
             await self._api_status(w)
@@ -740,6 +784,9 @@ class WebServer:
 
     async def _api_run(self, r, w, q, clen, extra=b""):
         b = await self._read_json(r, clen, extra)
+        if self.pending_run is not None or self._run_state.get("state") in ("queued", "running"):
+            await self._err(w, 409, "Run already queued or active")
+            return
         full, rel = self.resolve_path(q.get("path") or (b.get("path") if isinstance(b, dict) else ""))
         if not full or not rel or not rel.endswith(".py"):
             await self._err(w, 400, "Need .py path")
@@ -754,8 +801,14 @@ class WebServer:
         except Exception as e:
             await self._err(w, 400, "APP_META: " + str(e))
             return
-        self.pending_run = (full, str(meta.get("name", rel))[:24])
-        await self._json(w, 200, {"ok": True, "queued": True, "path": rel, "app_id": meta.get("id", ""), "name": meta.get("name", rel)})
+        try:
+            import time as _tm
+            self._run_queued_ms = _tm.ticks_ms() if hasattr(_tm, "ticks_ms") else int(_tm.time() * 1000)
+        except Exception:
+            self._run_queued_ms = 0
+        self._run_state = {"state": "queued", "ok": True, "error": None, "sram_before": 0, "sram_after": 0, "largest_free": 0}
+        self.pending_run = (full, str(meta.get("name", rel))[:24], bool(meta.get("needs_radio") or meta.get("suspend_web")))
+        await self._json(w, 200, {"ok": True, "status": "queued", "queued": True, "path": rel, "app_id": meta.get("id", ""), "name": meta.get("name", rel)})
 
     async def _api_shot(self, w):
         b = self.board
