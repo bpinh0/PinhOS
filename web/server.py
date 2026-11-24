@@ -179,6 +179,7 @@ class WebServer:
         self._running = False
         self._paused = False
         self._active = 0
+        self._last_status = 0
         self.pending_run = None
         self._run_state = {"state": "idle", "ok": True, "error": None, "sram_before": 0, "sram_after": 0, "largest_free": 0}
         self._run_queued_ms = 0
@@ -263,6 +264,7 @@ class WebServer:
             pass
         self._running = True
         self._active = 0
+        self._last_status = 0
         self.pending_run = None
         self.pending_reboot = False
         self._wlog("START {}:{} max_conns={} free={}B".format(
@@ -382,7 +384,19 @@ class WebServer:
             return None, None
         return full, clean
 
+    def _peer_ip(self, w):
+        try:
+            p = w.get_extra_info("peername")
+            if isinstance(p, (tuple, list)) and p:
+                return str(p[0])
+            if p:
+                return str(p)
+        except Exception:
+            pass
+        return "-"
+
     async def _hdr(self, w, code, ct, clen=None, extra=None):
+        self._last_status = int(code)
         h = ["HTTP/1.1 {} {}".format(code, _STAT.get(code, "OK")), "Content-Type: " + ct, "Connection: close"]
         if clen is not None:
             h.append("Content-Length: {}".format(int(clen)))
@@ -395,6 +409,7 @@ class WebServer:
         await w.drain()
 
     async def _json(self, w, code, obj):
+        self._last_status = int(code)
         b = json.dumps(obj).encode("utf-8")
         h = (
             "HTTP/1.1 {} {}\r\n"
@@ -519,9 +534,11 @@ class WebServer:
         return 0, ""
 
     async def _handle_client(self, r, w):
+        ip = self._peer_ip(w)
         if self._active >= self.max_conns:
             try:
                 await self._err(w, 503, "Busy")
+                self._wlog("503 {} - BUSY".format(ip))
             except Exception:
                 pass
             try:
@@ -533,12 +550,14 @@ class WebServer:
             return
         self._active += 1
         meth, rt = "?", "?"
+        self._last_status = 0
         try:
             meth, tgt, clen, extra, hdrs = await self._read_req_head(r)
             if meth is None:
                 return
             if not meth:
                 await self._err(w, 400, "Bad request")
+                self._wlog("400 {} ? ?".format(ip))
                 return
             if "?" in tgt:
                 rt, qs = tgt.split("?", 1)
@@ -548,15 +567,18 @@ class WebServer:
             rt = _urldec(rt)
             if meth == "OPTIONS":
                 await self._err(w, 405, "Method not allowed")
+                self._wlog("405 {} {} {}".format(ip, meth, rt))
                 return
             acode, amsg = self._check_auth(meth, rt, hdrs)
             if acode:
                 await self._drain(r, clen, extra)
                 await self._err(w, acode, amsg)
+                self._wlog("{} {} {} {} ({})".format(acode, ip, meth, rt, amsg[:32]))
                 return
             await self._dispatch(meth, rt, q, clen, r, w, extra)
-            if rt != "/api/status":
-                self._wlog("OK {} {}".format(meth, rt))
+            st = self._last_status or 200
+            if rt != "/api/status" or st >= 400:
+                self._wlog("{} {} {} {}".format(st, ip, meth, rt))
         except Exception as e:
             ename = type(e).__name__
             eno = e.args[0] if (isinstance(e, OSError) and e.args) else None
@@ -565,9 +587,9 @@ class WebServer:
                 pass
             elif ename == "TimeoutError":
                 if meth != "?":
-                    self._wlog("TIMEOUT {} {}".format(meth, rt))
+                    self._wlog("408 {} TIMEOUT {} {}".format(ip, meth, rt))
             else:
-                self._wlog("ERR {} {} -> {}".format(meth, rt, repr(e)))
+                self._wlog("500 {} {} {} -> {}".format(ip, meth, rt, repr(e)))
                 try:
                     await self._err(w, 500, "{}: {}".format(ename, str(e))[:120])
                 except Exception:

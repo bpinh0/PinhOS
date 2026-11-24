@@ -1440,15 +1440,20 @@ def ui_loop(sel_action=0):
             if idle_ticks >= 40:
                 idle_ticks = 0
                 gc.collect()
-                # Non-blocking background Wi-Fi auto-connect state machine (#8)
+                # Non-blocking background Wi-Fi auto-connect state machine (#8, #24)
                 if runtime_state.get("wifi_bg_pending"):
                     runtime_state["wifi_bg_pending"] = False
                     try:
                         from net.wifi import get_wifi_manager
                         _wbg = get_wifi_manager()
-                        _wbg.start_bg_connect(country=str(cfg.get("wifi_country", "XX") if cfg else "XX"), timeout_s=24)
-                    except Exception:
-                        pass
+                        _bok, _bmsg = _wbg.start_bg_connect(country=str(cfg.get("wifi_country", "XX") if cfg else "XX"), timeout_s=24)
+                        if logger:
+                            logger.info("WIFI BG: " + str(_bmsg))
+                        if _bok and not _wbg.bg_active and cfg and cfg.get("ntp_auto", True):
+                            runtime_state["ntp_pending"] = True
+                    except Exception as _we:
+                        if logger:
+                            logger.warn("WIFI BG: Start err: " + str(_we)[:48])
                 else:
                     try:
                         _wmod = sys.modules.get("net.wifi")
@@ -1463,9 +1468,10 @@ def ui_loop(sel_action=0):
                                         runtime_state["ntp_pending"] = True
                                 elif _bst in ("timeout", "error"):
                                     if logger:
-                                        logger.info("WIFI BG: " + str(_bmsg))
-                    except Exception:
-                        pass
+                                        logger.warn("WIFI BG: " + str(_bmsg))
+                    except Exception as _we:
+                        if logger:
+                            logger.warn("WIFI BG: Step err: " + str(_we)[:48])
                 # Background NTP sync if queued (only when Auto-NTP is enabled; never blocks Wi-Fi connect)
                 if runtime_state.get("ntp_pending"):
                     runtime_state["ntp_pending"] = False
@@ -1482,9 +1488,12 @@ def ui_loop(sel_action=0):
                             if nok:
                                 save_rtc_state(board)
                                 if logger:
-                                    logger.info("NTP BG: " + str(nmsg))
-                        except Exception:
-                            pass
+                                    logger.info("NTP BG: OK " + str(nmsg))
+                            elif logger:
+                                logger.warn("NTP BG: FAIL " + str(nmsg))
+                        except Exception as _ne:
+                            if logger:
+                                logger.warn("NTP BG: ERR " + str(_ne)[:48])
                 # Periodically persist RTC to SD (~every 4 minutes) so manual/synced clock survives power-off
                 rtc_save_ticks += 1
                 if rtc_save_ticks >= 200:
@@ -1773,9 +1782,15 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
         runtime_state["sandbox"] = None
         _register_recovery_helpers()
 
-        boot_msg = "BOOT: PinhOS v{} ({}) starting on {} [{} / {}]".format(
-            manifest.get("version", "1.0.0-alpha.3.1"),
+        try:
+            from core.logger import get_boot_id
+            _bid = get_boot_id()
+        except Exception:
+            _bid = 0
+        boot_msg = "BOOT: PinhOS v{} ({}) boot_id=b{} starting on {} [{} / {}]".format(
+            manifest.get("version", "1.0.0-alpha.4.1"),
             manifest.get("arch", "armv7emsp"),
+            _bid,
             board.name,
             ui.mode_badge,
             theme_mgr.active.id,
