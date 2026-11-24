@@ -72,7 +72,7 @@ class WifiManager:
         ok_ip, ip = self._has_valid_ip(w)
         if ok_ip:
             self._ssid = ssid
-            return True, "Connected: " + ip
+            return True, "Connected: {} (0ms)".format(ip)
         self._apply_region_and_host(country=country)
         try:
             if not w.active():
@@ -102,14 +102,14 @@ class WifiManager:
         if w is None:
             self._bg = None
             return "error", "No Wi-Fi hardware"
+        now = _ticks_ms()
+        el = _ticks_diff(now, bg["t0"])
         ok_ip, ip = self._has_valid_ip(w)
         if ok_ip:
             self._ssid = bg["ssid"]
             self._st_cache = None
             self._bg = None
-            return "connected", "Connected: " + ip
-        now = _ticks_ms()
-        el = _ticks_diff(now, bg["t0"])
+            return "connected", "Connected: {} ({}ms)".format(ip, el)
         st = 0
         try:
             st = w.status()
@@ -123,10 +123,10 @@ class WifiManager:
                 w.connect(bg["ssid"], bg["pw"])
             except Exception:
                 pass
-            return "connecting", "Retry (st={})".format(st)
+            return "connecting", "Retry (st={}, {}ms)".format(st, el)
         if el >= bg["limit_ms"]:
             self._bg = None
-            return "timeout", "Timeout (st={})".format(st)
+            return "timeout", "Timeout (st={}, {}ms)".format(st, el)
         return "connecting", "st={}".format(st)
 
     def _get_wlan(self):
