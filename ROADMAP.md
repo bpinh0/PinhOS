@@ -1,7 +1,7 @@
 # 🌲 PinhOS — Architectural Specification & Engineering Roadmap
 
 > **Target Platform:** ClockworkPi PicoCalc (Raspberry Pi Pico 2W / RP2350 — Dual ARM Cortex-M33 @ 150 MHz, 520 KB SRAM, 4 MB Flash, CYW43439 Wi-Fi 4 + BLE 5.2, 320×320 SPI LCD, I2C STM32 Southbridge, SPI microSD).  
-> **Current Status:** Active Development — `v1.0.0-alpha.4` (**Phase 1 + Phase 2 + Phase 3 + Phase 3.1 + Phase 4 Complete & Verified 12/12 on Hardware** — Android-Style Desktop Home Screen with live SRAM/CPU sparklines, SWAP & Battery bars, `IP`/`Offline` status & `<= 1 KB` Quick Notes, App Drawer `GRID`/`LIST`, 6-Category Settings Tree with dedicated Date/Time/NTP & SD Swap Quota, Built-In BusyBox CLI, On-Device Editor, File Commander, Net Probes, HAL UART1 Console, System Monitor, BMP Screenshots, Non-Blocking `uasyncio` **WebPortal Browser IDE** with CYW43439 RX pump, and `.mpy` Core OS Bytecode Deployment; **Phase 5 Async Wi-Fi/SoftAP, SHA-256 OTA & App Store next**).
+> **Current Status:** Active Development — `v1.0.0-alpha.4.1` (**Phase 1 + Phase 2 + Phase 3 + Phase 3.1 + Phase 4 + Stability/Security Hardening Complete & Verified 12/12 + Stress Gates 13–14 on Hardware** — Android-Style Desktop Home Screen with live SRAM/CPU sparklines, SWAP & Battery bars, `IP`/`Offline` status & `<= 1 KB` Quick Notes, App Drawer `GRID`/`LIST`, 6-Category Settings Tree with dedicated Date/Time/NTP & SD Swap Quota, Built-In BusyBox CLI, On-Device Editor, File Commander, Net Probes, HAL UART1 Console, System Monitor, BMP Screenshots, Non-Blocking `uasyncio` **WebPortal Browser IDE** with CYW43439 RX pump, and `.mpy` Core OS Bytecode Deployment; **Phase 5 Async Wi-Fi/SoftAP, SHA-256 OTA & App Store next**).
 
 ---
 

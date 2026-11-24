@@ -24,11 +24,11 @@ CANONICAL_SUBDIRS = (
 
 DEFAULT_VERSION_MANIFEST = {
     "name": "PinhOS",
-    "version": "1.0.0-alpha.4",
-    "phase": "4",
-    "codename": "WebPortal IDE",
-    "build_timestamp": "2026-11-23T14:30:00Z",
-    "build_id": "20261123.3",
+    "version": "1.0.0-alpha.4.1",
+    "phase": "4.1",
+    "codename": "WebPortal IDE & Stability",
+    "build_timestamp": "2026-11-24T11:55:00Z",
+    "build_id": "20261124.1",
     "arch": "armv7emsp",
     "mcu": "RP2350",
     "sram_kb": 520,
