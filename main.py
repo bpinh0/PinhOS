@@ -923,14 +923,16 @@ def _init_interactive_services(board, cfg, logger):
     """
     Idempotent interactive-session startup hooks (#29):
     Runs once when entering ui_loop(), so BOTH cold boots (start(interactive=True))
-    AND deploy boots (picocalc.ps1: start(interactive=False) -> ui_loop()) arm WDT,
-    queue non-blocking Wi-Fi auto-connect, and honor webportal_autostart=True.
+    AND deploy boots (picocalc.ps1: start(interactive=False) -> ui_loop()) queue
+    non-blocking Wi-Fi auto-connect and honor webportal_autostart=True.
+    Hardware WDT is armed only on standalone boots (_standalone_boot=True) so
+    COM4 upload/test Raw REPL sessions are never reset mid-command.
     """
     if runtime_state.get("_interactive_init_done"):
         return False
     runtime_state["_interactive_init_done"] = True
     runtime_state["wifi_bg_pending"] = True
-    if runtime_state.get("stabilized") and not runtime_state.get("serial_link"):
+    if runtime_state.get("_standalone_boot") and runtime_state.get("stabilized") and not runtime_state.get("serial_link"):
         try:
             enable_wdt(int(cfg.get("wdt_timeout_ms", 8000)) if cfg else 8000)
         except Exception:
@@ -1543,6 +1545,7 @@ def ui_loop(sel_action=0):
                     last_act_ms = _ticks_ms()
                     view.sync(board, boot_state, BOOT_STABLE_MS, True, "Woke from Sleep" if slept else "Sleep Cancelled", "ok", chg_phase=chg_phase)
                     view.render(force=True)
+            feed_wdt()
             if runtime_state.get("web_active"):
                 step_webportal(20)
                 _ws = runtime_state.get("web_server")
@@ -1582,7 +1585,6 @@ def ui_loop(sel_action=0):
                         view.render(force=True)
                         last_act_ms = _ticks_ms()
             else:
-                feed_wdt()
                 if (idle_ticks & 1) == 0:
                     _w = runtime_state.get("_sta_wlan")
                     if _w is None:
@@ -1808,6 +1810,7 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
         # Interactive-session hooks (wifi_bg_pending, enable_wdt, webportal_autostart)
         # are initialized idempotently on ui_loop() entry via _init_interactive_services() (#29).
         runtime_state["_interactive_init_done"] = False
+        runtime_state["_standalone_boot"] = bool(interactive)
 
         # Show clean 100% on native monochrome boot splash, cut cleanly to black BEFORE applying theme LUT!
         _boot_progress(100, "PinhOS Ready!", pause_ms=400, clear_splash=True)
