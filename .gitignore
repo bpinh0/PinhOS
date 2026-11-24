@@ -12,6 +12,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.mpy
+.mpy_build/
 .pytest_cache/
 .venv/
 venv/
@@ -37,3 +38,10 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 .DS_Store
+
+# --- Audit stuff ---
+pinhos_audit_bundle.md
+pinhos_code_audit.md
+collect_audit_logs.ps1
+collect_audit_code.ps1
+

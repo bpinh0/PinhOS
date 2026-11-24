@@ -31,6 +31,46 @@ def _bp(*args):
     print(" ".join(str(a) for a in args))
 
 
+def _clear_main_refs():
+    try:
+        import builtins as _bi
+    except Exception:
+        _bi = None
+    if _bi is not None:
+        for _k in (
+            "recovery_status", "recovery_reset_strikes", "recovery_reset_config",
+            "recovery_clear_swap", "recovery_reboot", "ui",
+        ):
+            try:
+                if hasattr(_bi, _k):
+                    delattr(_bi, _k)
+            except Exception:
+                pass
+    for _mk in ("main", "_pinhos_main"):
+        m = sys.modules.pop(_mk, None)
+        if m is not None and hasattr(m, "runtime_state") and isinstance(m.runtime_state, dict):
+            m.runtime_state.clear()
+
+
+_KEEP_MODS = (
+    "boards", "boards.base", "boards.picocalc", "core", "core.config",
+    "tests", "tests.selftest", "picocalc", "picocalcdisplay", "vtterminal",
+)
+
+
+def _purge_noncore():
+    _clear_main_refs()
+    for _m in list(sys.modules.keys()):
+        if _m not in _KEEP_MODS and (
+            _m.startswith("ui.") or _m.startswith("tools.") or _m.startswith("core.")
+            or _m.startswith("net.") or _m.startswith("web") or _m.startswith("tests.selftest_")
+            or _m in ("ui", "tools", "net", "uasyncio", "asyncio", "asyncio.core", "asyncio.stream", "asyncio.funcs", "asyncio.event", "asyncio.lock")
+        ):
+            sys.modules.pop(_m, None)
+    gc.collect()
+    gc.collect()
+
+
 def _assert(cond, msg):
     if not cond:
         raise AssertionError(msg)
@@ -48,7 +88,7 @@ def test_manifest_and_dirs(root="/sd/pinhos"):
         _assert(bool(st[0] & 0x4000), "Missing canonical directory: " + full)
 
     manifest = load_version_manifest(root=root)
-    _assert(manifest.get("version") == "1.0.0-alpha.3.1", "Expected version 1.0.0-alpha.3.1")
+    _assert(manifest.get("version") == "1.0.0-alpha.4", "Expected version 1.0.0-alpha.4")
     _assert(manifest.get("arch") == "armv7emsp", "Expected target arch armv7emsp")
     _assert(isinstance(manifest.get("ota"), dict) and "channel" in manifest["ota"], "Missing OTA channel field")
     return "v{} ({}) +{} dirs".format(
@@ -150,6 +190,7 @@ def test_hal_init(root="/sd/pinhos"):
         "tools/net_tools.py",
         "tools/uart_term.py",
         "tools/sysmon.py",
+        "web/server.py",
         "boards/base.py",
     ):
         p = root.rstrip("/") + "/" + mod_rel
@@ -428,8 +469,9 @@ def test_boot_guard(root="/sd/pinhos"):
             pass
         # Ensure real device boot_state is clean (0 strikes) and serial REPL stays bound
         pinhos_main.clear_boot_strikes()
+        pinhos_main = None
         if not had_main:
-            sys.modules.pop("main", None)
+            _clear_main_refs()
         gc.collect()
         try:
             from boards import get_board
@@ -717,45 +759,43 @@ def test_dual_ui_engine(root="/sd/pinhos"):
 
 
 def test_busybox_shell(root="/sd/pinhos"):
-    gc.collect()
+    _purge_noncore()
     import tests.selftest_p3 as _p3
     try:
         return _p3.test_busybox_shell(root=root)
     finally:
         _p3 = None
-        sys.modules.pop("tests.selftest_p3", None)
-        gc.collect()
+        _purge_noncore()
 
 
 def test_phase3_field_tools(root="/sd/pinhos"):
-    for _m in ("main", "ui.desktop"):
-        sys.modules.pop(_m, None)
-    gc.collect()
+    _purge_noncore()
     import tests.selftest_p3 as _p3
     try:
         return _p3.test_phase3_field_tools(root=root)
     finally:
         _p3 = None
-        for _m in ("tests.selftest_p3", "main", "ui.desktop"):
-            sys.modules.pop(_m, None)
-        gc.collect()
+        _purge_noncore()
 
 
 def test_desktop_home(root="/sd/pinhos"):
-    for _m in (
-        "main", "ui.desktop", "core.sandbox", "core.swap", "core.logger", "net.wifi", "net.sync",
-        "tools.shell", "tools._shell_cmds",
-    ):
-        sys.modules.pop(_m, None)
-    gc.collect(); gc.collect()
+    _purge_noncore()
     import tests.selftest_p3 as _p3
     try:
         return _p3.test_desktop_home(root=root)
     finally:
         _p3 = None
-        for _m in ("tests.selftest_p3", "ui.menu", "ui.desktop"):
-            sys.modules.pop(_m, None)
-        gc.collect()
+        _purge_noncore()
+
+
+def test_webportal_loopback(root="/sd/pinhos"):
+    _purge_noncore()
+    import tests.selftest_p4 as _p4
+    try:
+        return _p4.test_webportal_loopback(root=root)
+    finally:
+        _p4 = None
+        _purge_noncore()
 
 
 def run_all(root="/sd/pinhos", interactive_wait=False):
@@ -776,9 +816,10 @@ def run_all(root="/sd/pinhos", interactive_wait=False):
         ("9. BusyBox Shell & Streaming FS", test_busybox_shell),
         ("10. Field Tools & Sandbox Meta", test_phase3_field_tools),
         ("11. Desktop Home & Quick Notes", test_desktop_home),
+        ("12. WebPortal Loopback & SRAM", test_webportal_loopback),
     ]
 
-    _bp("=== PinhOS v1.0.0-alpha.3.1 Phase 1+2+3.1 Self-Test Suite ===")
+    _bp("=== PinhOS v1.0.0-alpha.4 Phase 1+2+3.1+4 Self-Test Suite ===")
     passed = 0
     results = []
 
@@ -818,7 +859,7 @@ def run_all(root="/sd/pinhos", interactive_wait=False):
                 col = 10 if ok else 9
                 board.text("{} {}".format(tag, label[:44]), 4, y, col)
                 board.text(" " + str(detail)[:50], 4, y + 9, 15)
-                y += 22
+                y += 20
             free_kb = (gc.mem_free() // 1024) if hasattr(gc, "mem_free") else 256
             board.fill_rect(0, 272, 320, 22, 8)
             if interactive_wait:

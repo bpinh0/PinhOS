@@ -40,10 +40,50 @@ class SwapManager:
     and stale swap pruning.
     """
 
-    def __init__(self, swap_dir=None, logger=None):
+    def __init__(self, swap_dir=None, logger=None, max_kb=512):
         self.swap_dir = (swap_dir or DEFAULT_SWAP_DIR).rstrip("/")
         self.logger = logger
+        self.max_kb = max(0, int(max_kb))
         _mkdir_p(self.swap_dir)
+
+    def set_max_kb(self, max_kb):
+        self.max_kb = max(0, int(max_kb))
+        if self.max_kb <= 0:
+            self.clear_all()
+        else:
+            self._enforce_quota()
+
+    def _enforce_quota(self, reserve_bytes=0):
+        if self.max_kb <= 0:
+            return
+        limit = self.max_kb * 1024
+        entries = []
+        total = 0
+        try:
+            for fn in os.listdir(self.swap_dir):
+                if fn.endswith(".swap.json"):
+                    full = "{}/{}".format(self.swap_dir, fn)
+                    try:
+                        st = os.stat(full)
+                        sz = int(st[6])
+                        mt = int(st[8]) if len(st) > 8 else 0
+                        entries.append((mt, sz, full))
+                        total += sz
+                    except Exception:
+                        pass
+        except Exception:
+            return
+        if total + reserve_bytes <= limit:
+            return
+        entries.sort(key=lambda x: x[0])
+        for _, sz, full in entries:
+            if total + reserve_bytes <= limit:
+                break
+            try:
+                os.remove(full)
+                total = max(0, total - sz)
+            except Exception:
+                pass
 
     def _file_path(self, app_id):
         safe_id = _sanitize_app_id(app_id)
@@ -56,6 +96,8 @@ class SwapManager:
         """
         if not isinstance(state_dict, dict):
             raise TypeError("state_dict must be a dict")
+        if self.max_kb <= 0:
+            return False
         _mkdir_p(self.swap_dir)
         target_path = self._file_path(app_id)
         tmp_path = target_path + ".tmp"
@@ -72,6 +114,7 @@ class SwapManager:
                 "payload": payload_json,
             }
             raw_envelope = json.dumps(envelope)
+            self._enforce_quota(reserve_bytes=len(raw_envelope))
             with open(tmp_path, "w") as f:
                 f.write(raw_envelope)
                 if hasattr(f, "flush"):
@@ -233,8 +276,8 @@ class SwapManager:
             pass
         return removed
 
-    def stats(self):
-        """Return swap usage telemetry: {'files': int, 'bytes': int}."""
+    def stats(self, max_kb=None):
+        """Return swap usage telemetry: {'files', 'bytes', 'used_kb', 'max_kb', 'pct'}."""
         _mkdir_p(self.swap_dir)
         files = 0
         total_bytes = 0
@@ -249,7 +292,12 @@ class SwapManager:
                         pass
         except Exception:
             pass
-        return {"files": files, "bytes": total_bytes}
+        mk = self.max_kb if max_kb is None else max(0, int(max_kb))
+        used_kb = (total_bytes + 1023) // 1024 if total_bytes > 0 else 0
+        pct = min(100, (total_bytes * 100) // (mk * 1024)) if mk > 0 else 0
+        if total_bytes > 0 and pct == 0 and mk > 0:
+            pct = 2
+        return {"files": files, "bytes": total_bytes, "used_kb": used_kb, "max_kb": mk, "pct": pct}
 
 
 _default_swap = None

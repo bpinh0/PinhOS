@@ -212,7 +212,12 @@ def test_phase3_field_tools(root="/sd/pinhos"):
         _assert(delta < 2048, "Field tools SRAM delta {}B >= 2048B".format(delta))
 
         # Verify CTRL+P screenshot + confirmation toast and non-blocking CTRL+Q LNK mode
-        gc.collect()
+        for _um in (
+            "core.sandbox", "core.theme", "ui.widgets", "ui.gui", "ui.tui", "ui.engine",
+            "tools.files", "tools.editor", "tools.net_tools", "tools.uart_term", "tools.sysmon",
+        ):
+            sys.modules.pop(_um, None)
+        gc.collect(); gc.collect()
         import main as _pm
         _ui = _pm.runtime_state.get("ui")
         if _ui is None:
@@ -254,9 +259,9 @@ def test_desktop_home(root="/sd/pinhos"):
     set_entry = MENU_TREE.get("settings", ("", ()))
     set_items = set_entry[1] if isinstance(set_entry, tuple) and len(set_entry) >= 2 else ()
     set_ids = [it.get("id") for it in set_items if isinstance(it, dict)]
-    for req in ("cat:set_conn", "cat:set_display", "cat:set_bar_snd", "cat:set_power", "cat:set_about"):
+    for req in ("cat:set_conn", "cat:set_time", "cat:set_display", "cat:set_bar_snd", "cat:set_power", "cat:set_about"):
         _assert(req in set_ids, "Missing settings category: " + req)
-    _assert(len(set_items) == 5, "Expected 5 settings categories, got {}".format(len(set_items)))
+    _assert(len(set_items) == 6, "Expected 6 settings categories, got {}".format(len(set_items)))
     MENU_TREE = None
     set_items = None
     sys.modules.pop("ui.menu", None)

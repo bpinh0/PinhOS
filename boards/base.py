@@ -312,6 +312,28 @@ class BoardBase:
     def get_cpu_temp_c(self):
         return 28.0
 
+    def get_cpu_freq_mhz(self):
+        """Return active CPU clock frequency in MHz."""
+        try:
+            import machine
+            return int(machine.freq() // 1000000)
+        except Exception:
+            return int(self.config.get("cpu_freq_mhz", 150))
+
+    def capture_screenshot(self, path=None):
+        """Capture framebuffer screenshot via board driver and return saved path or None."""
+        if hasattr(self, "screenshot"):
+            return self.screenshot(path=path)
+        return None
+
+    def reboot(self):
+        """Perform a clean hardware reset via board HAL."""
+        try:
+            import machine
+            machine.reset()
+        except Exception:
+            pass
+
     # --- Read-only Bus Diagnostics (Phase 3 field tools: hwinfo / i2cscan) ---
 
     def i2c_scan(self):
