@@ -3,6 +3,7 @@
 # PINHOS_ROOT path-traversal guard, board.* HAL routing, gc.collect() per request.
 
 import os
+import sys
 import gc
 import json
 
@@ -450,6 +451,12 @@ class WebServer:
         f = open(path, "rb")
         try:
             while True:
+                _w = sys.modules.get("__pinhos_wdt__")
+                if _w is not None:
+                    try:
+                        _w.feed()
+                    except Exception:
+                        pass
                 n = f.readinto(buf)
                 if not n:
                     break
@@ -543,6 +550,12 @@ class WebServer:
         return 0, ""
 
     async def _handle_client(self, r, w):
+        _w = sys.modules.get("__pinhos_wdt__")
+        if _w is not None:
+            try:
+                _w.feed()
+            except Exception:
+                pass
         ip = self._peer_ip(w)
         if self._active >= self.max_conns:
             try:

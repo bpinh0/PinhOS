@@ -70,6 +70,13 @@ async def _req_tcp(host, port, m, tgt, body=None):
 
 
 async def _req_pipe(ws, m, tgt, body=None, collect_body=True, hdrs=None):
+    try:
+        import sys as _sy
+        _wd = _sy.modules.get("__pinhos_wdt__")
+        if _wd is not None:
+            _wd.feed()
+    except Exception:
+        pass
     bb = body.encode("utf-8") if isinstance(body, str) else (body or b"")
     ex = ""
     if hdrs:
