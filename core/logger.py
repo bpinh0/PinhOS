@@ -16,14 +16,53 @@ LEVEL_WARN  = 30
 LEVEL_ERROR = 40
 
 
+def _boot_id(log_dir=None):
+    """Return monotonic persisted boot_id (incremented once per boot, cached on builtins) (#22)."""
+    try:
+        import builtins as _bi
+        bid = getattr(_bi, "_pinhos_boot_id", None)
+        if bid is not None:
+            return int(bid)
+    except Exception:
+        _bi = None
+    p = (log_dir or (PINHOS_ROOT + "/logs")).rstrip("/") + "/boot_id.txt"
+    bid = 1
+    try:
+        with open(p, "r") as f:
+            bid = int(f.read().strip()) + 1
+    except Exception:
+        bid = 1
+    try:
+        _mkdir_p(log_dir or (PINHOS_ROOT + "/logs"))
+        with open(p, "w") as f:
+            f.write(str(bid))
+    except Exception:
+        pass
+    if _bi is not None:
+        try:
+            setattr(_bi, "_pinhos_boot_id", bid)
+        except Exception:
+            pass
+    return bid
+
+
 def _now_str():
+    """Format RTC wall-clock; mark unsynced (< 2024) as ~UNSYNCED instead of 2021 dates (#22)."""
     try:
         t = time.localtime()
+        if int(t[0]) < 2024:
+            return "~UNSYNCED"
         return "{:04d}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}".format(
             t[0], t[1], t[2], t[3], t[4], t[5]
         )
     except Exception:
-        return "2026-01-01 00:00:00"
+        return "~UNSYNCED"
+
+
+def format_log_prefix(log_dir=None):
+    """Return unambiguous forensic prefix: [b<boot_id> +<ms>ms <wall_clock>] (#22)."""
+    up = time.ticks_ms() if hasattr(time, "ticks_ms") else 0
+    return "[b{} +{}ms {}]".format(_boot_id(log_dir), up, _now_str())
 
 
 class Logger:
@@ -68,8 +107,7 @@ class Logger:
             return False
 
     def log(self, level_tag, msg, persist=True):
-        ts = _now_str()
-        entry = "[{}] [{}] {}".format(ts, level_tag, str(msg))
+        entry = "{} [{}] {}".format(format_log_prefix(self.log_dir), level_tag, str(msg))
         if len(self._ring) >= self.max_ring:
             self._ring.pop(0)
         self._ring.append(entry)
