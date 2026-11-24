@@ -24,8 +24,8 @@ def get_repo_info(config=None):
 
 def _feed_wdt():
     try:
-        import builtins as _bi
-        _w = getattr(_bi, "_pinhos_wdt", None)
+        import sys as _sy
+        _w = _sy.modules.get("__pinhos_wdt__")
         if _w is not None:
             _w.feed()
     except Exception:
