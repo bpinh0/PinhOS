@@ -51,6 +51,7 @@ MENU_TREE = {
         {"id": "wifi:scan", "label": "Scan & Connect", "badge": "[SCAN]"},
         {"id": "wifi:saved", "label": "Saved Networks", "badge": "[LIST]"},
         {"id": "wifi:auto", "label": "Auto-Connect Boot", "dyn": "wifi_auto"},
+        {"id": "wifi:country", "label": "Wi-Fi Country Code", "dyn": "wifi_cc"},
         {"id": "wifi:off", "label": "Disconnect Wi-Fi", "badge": "[OFF]"},
         {"id": "web:toggle", "label": "WebPortal IDE", "dyn": "web_st"},
         {"id": "web:info", "label": "WebPortal URL & Token", "badge": "[KEY]"},
@@ -296,6 +297,9 @@ def _dyn_badge(tag, board, ui, manifest, cfg=None):
             return "ON" if get_wifi_manager().get_auto_connect() else "OFF"
         except Exception:
             return "OFF"
+    if tag == "wifi_cc":
+        cc = str(cfg.get("wifi_country", "XX") if cfg else "XX").strip().upper()
+        return "XX!" if (len(cc) != 2 or cc == "XX") else cc
     if tag == "ntp_auto":
         return "ON" if (cfg.get("ntp_auto", True) if cfg else True) else "OFF"
     if tag == "tz_off":
@@ -682,6 +686,19 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                     nxt = not wm.get_auto_connect()
                     wm.set_auto_connect(nxt)
                     status_msg, status_kind = "Auto-Connect: " + ("ON" if nxt else "OFF"), "ok"; _sync(force=True)
+                elif aid == "wifi:country":
+                    import sys
+                    gc.collect()
+                    import ui._menu_net as _mn
+                    try:
+                        cc = _mn.wifi_prompt_country(board, ui, fb, cfg=cfg)
+                    finally:
+                        _mn = None
+                        sys.modules.pop("ui._menu_net", None)
+                        gc.collect()
+                    status_msg = ("Wi-Fi Country: " + cc) if cc else "Country unchanged"
+                    status_kind = "ok" if cc else "info"
+                    _sync(force=True)
                 elif aid == "ntp:sync":
                     from net.wifi import get_wifi_manager, sync_ntp
                     st_wf = get_wifi_manager().status()
