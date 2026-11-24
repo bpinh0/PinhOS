@@ -1,7 +1,7 @@
 # 🌲 PinhOS — Architectural Specification & Engineering Roadmap
 
 > **Target Platform:** ClockworkPi PicoCalc (Raspberry Pi Pico 2W / RP2350 — Dual ARM Cortex-M33 @ 150 MHz, 520 KB SRAM, 4 MB Flash, CYW43439 Wi-Fi 4 + BLE 5.2, 320×320 SPI LCD, I2C STM32 Southbridge, SPI microSD).  
-> **Current Status:** Active Development — `v1.0.0-alpha.3.1` (**Phase 1 + Phase 2 + Phase 3 + Phase 3.1 Complete & Verified 11/11 on Hardware** — Android-Style Desktop Home Screen with live Telemetry & `<= 1 KB` Quick Notes, App Drawer `GRID`/`LIST`, Reorganized 5-Category Settings Tree, Built-In BusyBox CLI, On-Device Editor, File Commander, Net Probes, HAL UART1 Console, System Monitor & BMP Screenshots; **Phase 4 WebPortal Browser IDE next**).
+> **Current Status:** Active Development — `v1.0.0-alpha.4` (**Phase 1 + Phase 2 + Phase 3 + Phase 3.1 + Phase 4 Complete & Verified 12/12 on Hardware** — Android-Style Desktop Home Screen with live SRAM/CPU sparklines, SWAP & Battery bars, `IP`/`Offline` status & `<= 1 KB` Quick Notes, App Drawer `GRID`/`LIST`, 6-Category Settings Tree with dedicated Date/Time/NTP & SD Swap Quota, Built-In BusyBox CLI, On-Device Editor, File Commander, Net Probes, HAL UART1 Console, System Monitor, BMP Screenshots, Non-Blocking `uasyncio` **WebPortal Browser IDE** with CYW43439 RX pump, and `.mpy` Core OS Bytecode Deployment; **Phase 5 Async Wi-Fi/SoftAP, SHA-256 OTA & App Store next**).
 
 ---
 
@@ -143,14 +143,18 @@ def main(ctx):
 
 ---
 
-### Phase 4: WebPortal Browser IDE (`web/`)
-- [ ] **4.1 Embedded Async Web Server (`web/server.py`):**
-  - Non-blocking `uasyncio` HTTP server running alongside the UI loop with configurable port and 6-digit PIN / session token authentication.
-- [ ] **4.2 Browser IDE & Telemetry Workspace (`web/static/`):**
-  - Zero-dependency lightweight web frontend served directly from the PicoCalc.
-  - **File Explorer:** Browse, upload, download, rename, and delete files on `/sd/` and flash.
-  - **Live Code & Theme Editor:** Edit `.py` apps or `.json` themes in the browser, save directly to SD, and trigger remote execution inside `core/sandbox.py` with live stdout/traceback streaming.
-  - **Device Dashboard:** Live SRAM/battery/Wi-Fi telemetry and on-demand framebuffer screenshot capture (`PNG`/`BMP`).
+### Phase 4: WebPortal Browser IDE, `.mpy` Core Bytecode & Field Polish (`web/`) — `v1.0.0-alpha.4`
+- [x] **4.1 Embedded Async Web Server (`web/__init__.py`, `web/server.py`):**
+  - Cooperative non-blocking `uasyncio` HTTP/REST server stepped from `main.py`'s `ui_loop()` and `ui/menu.py` modal `_idle_wait()` with configurable port (`8080`), auto-start toggle, `WEB` StatusBar badge, auto-sleep suppression, bounded concurrency (`max_conns=6`), active-request burst stepping, `5s` per-request timeout, `<= 1 KB` chunked SD streaming (`Cache-Control: public, max-age=3600`), strict `PINHOS_ROOT` path-traversal guard, `builtins._pinhos_web_srv` orphan-socket cleanup, `board.*` HAL routing, and rotating `/sd/pinhos/logs/web.log` (`16 KB` cap).
+  - CYW43439 gSPI RX FIFO pump (`WebServer._pump_wifi()` + `main.py` idle `ui_loop()` poll + `WLAN.PM_NONE` + 5s `WifiManager.status()` cache) eliminating Pico 2W RX stalls (`7ms–49ms` ping, `0%` packet loss).
+- [x] **4.2 Cyber-Amber Browser IDE & Virtual Controller (`web/static/`):**
+  - Zero-dependency offline 4-tab SPA (`index.html`, `style.css`, `app.js` — `App Studio`, `SD Files`, `Live Console`, `Settings`) served directly from `/sd/pinhos/web/static/`.
+  - **App Studio & Virtual Controller:** Line-numbered code editor with `Ctrl+S` streaming save to SD, `compile()` syntax check (`/api/syntax`), remote `SandboxRunner` app launch (`/api/run`), Live 320×320 Device Screen capture (`/api/screenshot`), and interactive Virtual Controller wired to `POST /api/key`.
+  - **SD Files, Live Console & Settings:** Browse/create/download/delete under `/sd/pinhos/`, inline BMP previewer, live telemetry bar (`/api/status` including SWAP stats), `web.log` viewer (`/api/weblog`), and remote reboot (`/api/reboot`), verified **12/12 PASS** with Gate 12 loopback & `0 B` SRAM delta.
+- [x] **4.3 Pre-Compiled `.mpy` Core OS Bytecode & Desktop/Settings Polish (`picocalc.ps1`, `ui/`, `core/`):**
+  - Automated `mpy-cross` (`v1.25.0`, mpy `v6.3`, `-O2`) build & deploy pipeline in `picocalc.ps1` for 29 core OS modules (`boards/`, `core/`, `ui/`, `net/`, `web/`, `tools/_shell_cmds.py`, `tests/`, and `main.py` → `_pinhos_main.mpy` + entry shim; `-NoMpy` fallback), reclaiming **+84 KB free SRAM (`~218 KB` free on boot)** while keeping `tools/*.py`, `apps/*.py`, `themes/*.json`, and `web/static/*` plain text on SD.
+  - Upgraded Desktop Home (`ui/desktop.py`) with live **CPU sparkline**, horizontal **SWAP bar**, and `IP: X.X.X.X` / `Offline` status; added configurable **SD Swap Quota** (`swap_max_kb`) & eviction in `core/swap.py`.
+  - Expanded Settings to **6 categories** (`ui/menu.py`, on-demand `ui/_menu_net.py`, `ui/_log_view.py`) with dedicated **Date, Time & NTP** (manual Date/Time editors, background-only NTP, persistent SD RTC retention in `/sd/pinhos/rtc_state.json`) and `ListMenu` Log File Picker (`CTRL+L`).
 
 ---
 

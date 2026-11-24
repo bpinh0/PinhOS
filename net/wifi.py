@@ -33,6 +33,8 @@ class WifiManager:
         self.cfg_path = cfg_path
         self._wlan = None
         self._ssid = ""
+        self._st_cache = None
+        self._st_ms = 0
 
     def _get_wlan(self):
         if self._wlan is None:
@@ -81,7 +83,20 @@ class WifiManager:
 
     # --- Radio Operations ---
 
-    def status(self):
+    def poll_rx(self):
+        """Pump CYW43439 gSPI RX FIFO so incoming ICMP/TCP packets don't stall on Pico 2W."""
+        w = self._get_wlan()
+        if w is not None:
+            try:
+                if w.active() and w.isconnected():
+                    w.status("rssi")
+            except Exception:
+                pass
+
+    def status(self, force=False):
+        now = _ticks_ms()
+        if (not force) and self._st_cache is not None and _ticks_diff(now, self._st_ms) < 5000:
+            return dict(self._st_cache)
         w = self._get_wlan()
         if w is None:
             return {"avail": False, "active": False, "connected": False, "ssid": "", "ip": "N/A", "gw": "N/A", "rssi": 0}
@@ -98,18 +113,24 @@ class WifiManager:
                     rssi = int(w.status("rssi"))
                 except Exception:
                     rssi = 0
-                try:
-                    s = w.config("essid")
-                    if s:
-                        ssid = s.decode() if isinstance(s, (bytes, bytearray)) else str(s)
-                except Exception:
-                    pass
-            return {"avail": True, "active": active, "connected": conn, "ssid": ssid, "ip": ip, "gw": gw, "rssi": rssi}
+                if not ssid:
+                    try:
+                        s = w.config("essid")
+                        if s:
+                            ssid = s.decode() if isinstance(s, (bytes, bytearray)) else str(s)
+                            self._ssid = ssid
+                    except Exception:
+                        pass
+            res = {"avail": True, "active": active, "connected": conn, "ssid": ssid, "ip": ip, "gw": gw, "rssi": rssi}
+            self._st_cache = res
+            self._st_ms = now
+            return dict(res)
         except Exception:
             return {"avail": False, "active": False, "connected": False, "ssid": "", "ip": "ERR", "gw": "ERR", "rssi": 0}
 
     def _radio_up(self, w, bounce=False):
-        """Bring CYW43439 STA radio up with PM_NONE (no power-save); optionally hard-bounce radio."""
+        """Bring CYW43439 STA radio up with WLAN.PM_NONE (16) so incoming TCP/ARP never sleeps."""
+        self._st_cache = None
         if bounce and w.active():
             try:
                 if w.isconnected():
@@ -126,8 +147,7 @@ class WifiManager:
             w.active(True)
             _sleep_ms(500)
         try:
-            # 0xa11140 = CYW43 PM_NONE (disables Wi-Fi sleep; fixes weak scan/connect on Pico 2W)
-            w.config(pm=0xA11140)
+            w.config(pm=getattr(w, "PM_NONE", 16))
         except Exception:
             pass
 
@@ -259,7 +279,7 @@ class WifiManager:
                         except Exception:
                             pass
                         try:
-                            w.config(pm=0xA11140)
+                            w.config(pm=getattr(w, "PM_NONE", 16))
                         except Exception:
                             pass
                     else:
@@ -306,6 +326,7 @@ class WifiManager:
                     ok_ip, ip = self._has_valid_ip(w)
                     if ok_ip:
                         self._ssid = str(ssid)
+                        self._st_cache = None
                         if save:
                             self.save_network(ssid, password)
                         _emit(tag + "Connected!", 3)
@@ -394,6 +415,7 @@ class WifiManager:
                 w.disconnect()
             w.active(False)
             self._ssid = ""
+            self._st_cache = None
             return True
         except Exception:
             return False

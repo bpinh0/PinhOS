@@ -1,4 +1,4 @@
-# PinhOS v1.0.0-alpha.3.1 — Phase 1+2+3.1 Boot Entry, 3-Strike Crash Guard, Desktop Home & Dual-UI Engine (main.py)
+# PinhOS v1.0.0-alpha.4 — Phase 1+2+3.1+4 Boot Entry, 3-Strike Crash Guard, Desktop Home, Dual-UI & WebPortal IDE (main.py)
 # Zero hardcoded pin numbers outside boards/.
 
 import os
@@ -50,6 +50,9 @@ runtime_state = {
     "stabilized": False,
     "safe_mode": False,
     "serial_link": False,
+    "web_server": None,
+    "web_active": False,
+    "ntp_pending": False,
 }
 
 def bp(*args):
@@ -570,6 +573,7 @@ def _sync_status_bar(status_bar, ui, board, manifest, chg_phase=0):
         wifi_level=wf_lvl,
         bat_info=bat_icon,
         serial_link=bool(runtime_state.get("serial_link", False)),
+        web_active=bool(runtime_state.get("web_active", False)),
     )
 
 
@@ -693,8 +697,15 @@ def _prompt_quick_note(board, ui, fb):
 
 
 def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_cat, run_tool_cb):
-    from ui.menu import open_menu_tree as _omt
-    return _omt(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_cat, run_tool_cb)
+    gc.collect()
+    import ui.menu as _um
+    try:
+        return _um.open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_cat, run_tool_cb)
+    finally:
+        _um = None
+        for _m in ("ui.menu", "ui._menu_net", "ui._log_view"):
+            sys.modules.pop(_m, None)
+        gc.collect()
 
 
 def _stop_repl_watcher():
@@ -728,7 +739,7 @@ def toggle_serial_link(board=None, logger=None, enable=None):
     runtime_state["serial_link"] = nxt
     if board is not None:
         if hasattr(board, "init_uart_bridge"):
-            board.init_uart_bridge(rebind=True)
+            board.init_uart_bridge(rebind=False)
         if hasattr(board, "ensure_serial_repl"):
             board.ensure_serial_repl()
         board.beep(1400 if nxt else 950, 12)
@@ -742,17 +753,49 @@ def toggle_serial_link(board=None, logger=None, enable=None):
     return nxt, msg
 
 
+def start_webportal(board=None, cfg=None, logger=None, host="0.0.0.0", port=None):
+    from web import start_portal
+    ok, msg = start_portal(runtime_state, board=board, cfg=cfg, logger=logger, host=host, port=port)
+    bp("[WEBPORTAL]", msg)
+    return ok, msg
+
+
+def stop_webportal(logger=None):
+    if runtime_state.get("web_server") is None and not runtime_state.get("web_active"):
+        return True, "WebPortal IDE stopped"
+    from web import stop_portal
+    return stop_portal(runtime_state)
+
+
+def toggle_webportal(board=None, cfg=None, logger=None):
+    from web import toggle_portal
+    ok, msg = toggle_portal(runtime_state, board=board, cfg=cfg, logger=logger)
+    bp("[WEBPORTAL]", msg)
+    return ok, msg
+
+
+def step_webportal(slice_ms=15):
+    ws = runtime_state.get("web_server")
+    if ws is not None and ws.running:
+        try:
+            ws.step(slice_ms)
+            return True
+        except Exception as e:
+            bp("[WEBPORTAL_STEP_ERR]", repr(e))
+    return False
+
+
 def _enter_sleep_mode(board, ui, logger, countdown_s=5):
     """
     Android-style Sleep Mode with 5-second countdown Dialog:
-    - Suppressed whenever COM4 Serial Link (LNK) is active so REPL sessions never sleep.
+    - Suppressed whenever COM4 Serial Link (LNK) or WebPortal (WEB) is active.
     - Any key during the 5s countdown cancels sleep immediately.
     - After countdown, dims LCD & KB backlights to 0% (Core 1 & COM4 stay intact).
     - Any key / Power button tap wakes instantaneously and restores backlights.
-    Returns True if slept & woke, False if cancelled or suppressed by LNK.
+    Returns True if slept & woke, False if cancelled or suppressed.
     """
-    if runtime_state.get("serial_link"):
-        bp("[POWER] Sleep suppressed while COM4 Serial Link (LNK) is active.")
+    if runtime_state.get("serial_link") or runtime_state.get("web_active"):
+        bp("[POWER] Sleep suppressed while LNK or WebPortal is active.")
         return False
     from ui.widgets import Dialog
     dlg = Dialog(
@@ -909,8 +952,15 @@ def ui_loop(sel_action=0):
         if logger:
             logger.set_breadcrumb("TOOL", label[:30])
         smsg, skind = label + " done", "ok"
-        if sandbox is not None:
-            res = sandbox.run_file(path, args=args, wait_on_error=True)
+        gc.collect()
+        sbx = sandbox
+        loaded_sbx = False
+        if sbx is None:
+            from core.sandbox import SandboxRunner
+            sbx = SandboxRunner(board=board, config=cfg, swap=runtime_state.get("swap"), logger=logger, theme=theme_mgr, ui=ui)
+            loaded_sbx = True
+        try:
+            res = sbx.run_file(path, args=args, wait_on_error=True)
             smsg = "{} OK (d={}B)".format(label[:16], res.get("sram_delta", 0))
             skind = "ok" if res.get("ok") else "err"
             if logger:
@@ -922,6 +972,11 @@ def ui_loop(sel_action=0):
                         board.beep(1100, 10)
                         break
                     _sleep_ms(30)
+        finally:
+            if loaded_sbx:
+                sbx = None
+                sys.modules.pop("core.sandbox", None)
+                gc.collect()
         if logger:
             logger.clear_breadcrumb("IDLE")
         _drain_keys(120)
@@ -945,6 +1000,12 @@ def ui_loop(sel_action=0):
                 return "EXIT_REPL"
             if res == "SLEEP_NOW":
                 return "SLEEP_NOW"
+            if res == "TOGGLE_WEBPORTAL":
+                # ui.menu has already been purged & GC'd -> ~35 KB extra contiguous SRAM for uasyncio + lwIP!
+                gc.collect(); gc.collect()
+                active, wmsg = toggle_webportal(board=board, cfg=cfg, logger=logger)
+                status_msg = ("WebPortal: " + str(wmsg)) if active else str(wmsg)
+                status_kind = "ok" if active else "info"
             board.set_lut(theme_mgr.active.lut)
             view = _mount_view()
             view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
@@ -1017,6 +1078,7 @@ def ui_loop(sel_action=0):
 
     idle_ticks = 0
     anim_ticks = 0
+    rtc_save_ticks = 0
     chg_phase = 0
     last_act_ms = _ticks_ms()
     try:
@@ -1042,8 +1104,8 @@ def ui_loop(sel_action=0):
 
                 if k == "POWER" or (ctrl and k == "Z"):
                     board.beep(900, 12)
-                    if runtime_state.get("serial_link"):
-                        status_msg = "Sleep disabled while LNK is ON (^Q)"
+                    if runtime_state.get("serial_link") or runtime_state.get("web_active"):
+                        status_msg = "Sleep disabled while LNK/WEB is ON"
                         status_kind = "warn"
                     else:
                         slept = _enter_sleep_mode(board, ui, logger, countdown_s=5)
@@ -1184,13 +1246,13 @@ def ui_loop(sel_action=0):
                     _run_action("selftest")
 
                 elif k in ("1", "2", "3", "4", "5", "6"):
-                    from ui.menu import DASHBOARD_ACTIONS
+                    _CAT_IDS = ("cat:toolkit", "cat:files", "cat:apps", "cat:system", "cat:settings", "cat:set_conn")
                     idx = int(k) - 1
-                    if 0 <= idx < len(DASHBOARD_ACTIONS):
+                    if 0 <= idx < len(_CAT_IDS):
                         drawer_sel = idx
                         if screen == "drawer" and hasattr(view, "action_menu"):
                             view.action_menu.set_selected(idx)
-                        res = _run_action(DASHBOARD_ACTIONS[idx]["id"])
+                        res = _run_action(_CAT_IDS[idx])
                         if res == "EXIT_REPL":
                             on, smsg = toggle_serial_link(board, logger)
                             status_msg, status_kind = smsg, ("ok" if on else "info")
@@ -1276,21 +1338,86 @@ def ui_loop(sel_action=0):
             if idle_ticks >= 40:
                 idle_ticks = 0
                 gc.collect()
-                        # Refresh live top-bar clock & telemetry strip (dirty-only, zero flicker)
+                # Background NTP sync if queued (only when Auto-NTP is enabled; never blocks Wi-Fi connect)
+                if runtime_state.get("ntp_pending"):
+                    runtime_state["ntp_pending"] = False
+                    if cfg and cfg.get("ntp_auto", True):
+                        try:
+                            from net.wifi import sync_ntp
+                            from core.config import save_rtc_state
+                            nok, nmsg = sync_ntp(
+                                board=board,
+                                tz_offset_h=int(cfg.get("tz_offset_h", 0)),
+                                host=str(cfg.get("ntp_server", "162.159.200.1")),
+                                timeout_s=3,
+                            )
+                            if nok:
+                                save_rtc_state(board)
+                                if logger:
+                                    logger.info("NTP BG: " + str(nmsg))
+                        except Exception:
+                            pass
+                # Periodically persist RTC to SD (~every 4 minutes) so manual/synced clock survives power-off
+                rtc_save_ticks += 1
+                if rtc_save_ticks >= 200:
+                    rtc_save_ticks = 0
+                    try:
+                        from core.config import save_rtc_state
+                        save_rtc_state(board)
+                    except Exception:
+                        pass
+                # Refresh live top-bar clock & telemetry strip (dirty-only, zero flicker)
                 view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind, chg_phase=chg_phase)
                 view.render(force=False)
-                # Check configurable auto-sleep timeout (suppressed when COM4 Serial Link LNK is active)
+                # Check configurable auto-sleep timeout (suppressed when LNK or WebPortal WEB is active)
                 st_s = int(cfg.get("sleep_timeout_s", 300) if cfg else 300)
-                if runtime_state.get("serial_link"):
+                if runtime_state.get("serial_link") or runtime_state.get("web_active"):
                     last_act_ms = _ticks_ms()
                 elif st_s > 0 and _ticks_diff(_ticks_ms(), last_act_ms) >= (st_s * 1000):
                     slept = _enter_sleep_mode(board, ui, logger, countdown_s=5)
                     last_act_ms = _ticks_ms()
                     view.sync(board, boot_state, BOOT_STABLE_MS, True, "Woke from Sleep" if slept else "Sleep Cancelled", "ok", chg_phase=chg_phase)
                     view.render(force=True)
-            _sleep_ms(30)
+            if runtime_state.get("web_active"):
+                step_webportal(20)
+                _ws = runtime_state.get("web_server")
+                if _ws is not None:
+                    if _ws.pending_reboot:
+                        _ws.pending_reboot = False
+                        if logger:
+                            logger.info("WEB: Remote reboot requested")
+                            logger.clear_breadcrumb("CLEAN_EXIT")
+                        stop_webportal(logger=logger)
+                        board.reboot()
+                    if _ws.pending_run:
+                        _rpath, _rlabel = _ws.pending_run
+                        _ws.pending_run = None
+                        status_msg, status_kind = _exec_sandbox_file(_rpath, _rlabel, wait_after=False)
+                        view = _mount_view()
+                        view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind, chg_phase=chg_phase)
+                        view.render(force=True)
+                        last_act_ms = _ticks_ms()
+            else:
+                if (idle_ticks & 1) == 0:
+                    _w = runtime_state.get("_sta_wlan")
+                    if _w is None:
+                        try:
+                            import network as _nw
+                            _w = _nw.WLAN(_nw.STA_IF)
+                            runtime_state["_sta_wlan"] = _w
+                        except Exception:
+                            _w = False
+                            runtime_state["_sta_wlan"] = False
+                    if _w:
+                        try:
+                            if _w.active() and _w.isconnected():
+                                _w.status("rssi")
+                        except Exception:
+                            pass
+                _sleep_ms(30)
     except KeyboardInterrupt:
         _stop_repl_watcher()
+        stop_webportal(logger=logger)
         runtime_state["serial_link"] = True
         if logger:
             try:
@@ -1388,14 +1515,14 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
         _boot_progress(94, "Board HAL & SD Ready...", pause_ms=60)
 
         # Step 4: Initialize canonical /sd/pinhos/ filesystem hierarchy, core services & Dual-UI
-        from core.config import ensure_canonical_dirs, load_version_manifest, ConfigManager
+        from core.config import ensure_canonical_dirs, load_version_manifest, ConfigManager, restore_rtc_state
         from core.logger import get_logger
         from core.swap import get_swap_manager
-        from core.sandbox import SandboxRunner
         from core.theme import get_theme_manager
         from ui.engine import UIEngine
 
         ensure_canonical_dirs()
+        restore_rtc_state(board)
         manifest = load_version_manifest()
         cfg = ConfigManager()
 
@@ -1429,14 +1556,15 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
         runtime_state["prev_crash"] = prev_crash
         logger.set_breadcrumb("BOOT_INIT", "services")
         swap = get_swap_manager()
+        swap.set_max_kb(int(cfg.get("swap_max_kb", 512)))
         swap.prune_stale()
 
         _boot_progress(94, "Core Services Ready...", pause_ms=80)
 
-        # Optional Wi-Fi Auto-Connect + Auto-NTP on interactive boot (bounded timeout)
+        # Optional Wi-Fi Auto-Connect on interactive boot (NTP deferred to background ui_loop if enabled)
         if interactive:
             try:
-                from net.wifi import get_wifi_manager, sync_ntp
+                from net.wifi import get_wifi_manager
                 wm = get_wifi_manager()
                 if wm.get_auto_connect() and wm.list_saved():
                     _boot_progress(96, "Wi-Fi Auto-Connect...")
@@ -1448,15 +1576,7 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
                     logger.info("WIFI BOOT: " + str(wmsg))
                     bp("[WIFI_BOOT]", wmsg)
                     if wok and cfg.get("ntp_auto", True):
-                        _boot_progress(98, "Syncing NTP Clock...")
-                        nok, nmsg = sync_ntp(
-                            board=board,
-                            tz_offset_h=int(cfg.get("tz_offset_h", 0)),
-                            host=str(cfg.get("ntp_server", "162.159.200.1")),
-                            timeout_s=8,
-                        )
-                        logger.info("NTP BOOT: " + str(nmsg))
-                        bp("[NTP_BOOT]", nmsg)
+                        runtime_state["ntp_pending"] = True
             except Exception as _we:
                 bp("[WIFI_BOOT_ERR]", repr(_we))
 
@@ -1471,7 +1591,6 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
 
         theme_mgr = get_theme_manager(config=cfg, board=board, force_new=True)
         ui = UIEngine(board=board, theme_manager=theme_mgr, config=cfg)
-        sandbox = SandboxRunner(board=board, config=cfg, swap=swap, logger=logger, theme=theme_mgr, ui=ui)
 
         runtime_state["manifest"] = manifest
         runtime_state["config"] = cfg
@@ -1479,7 +1598,7 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
         runtime_state["swap"] = swap
         runtime_state["theme"] = theme_mgr
         runtime_state["ui"] = ui
-        runtime_state["sandbox"] = sandbox
+        runtime_state["sandbox"] = None
         _register_recovery_helpers()
 
         boot_msg = "BOOT: PinhOS v{} ({}) starting on {} [{} / {}]".format(
@@ -1536,6 +1655,8 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
             view.render(force=False)
 
         gc.collect()
+        if interactive and cfg.get("webportal_autostart", False):
+            start_webportal(board=board, cfg=cfg, logger=logger)
         free_b = gc.mem_free() if hasattr(gc, "mem_free") else 262144
         bp("<<PINHOS:BOOT_OK:v{}:FREE_RAM={}>>".format(
             manifest.get("version", "1.0.0-alpha.3.1"), free_b

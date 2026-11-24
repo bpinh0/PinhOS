@@ -9,6 +9,7 @@ param(
     [int]$BaudRate = 115200,
     [switch]$NoMpremote,
     [switch]$NoSync,
+    [switch]$NoMpy,
     [switch]$Force
 )
 
@@ -50,32 +51,41 @@ function Resolve-PicoPort([string]$PreferredPort) {
 
 $ResolvedPort = Resolve-PicoPort $PortName
 
-# Canonical Phase 1+2+3 OS tree deployed EXCLUSIVELY to /sd/pinhos/
+# Canonical Phase 1+2+3+4 OS tree deployed EXCLUSIVELY to /sd/pinhos/
+# Mpy = $true entries are pre-compiled to .mpy bytecode (v6.3, -O2) via mpy-cross
+# unless -NoMpy is specified, eliminating on-device AST compiler SRAM spikes.
 $DeployManifest = @(
     @{ Local = "version.json";          Remote = "/sd/pinhos/version.json" },
-    @{ Local = "main.py";               Remote = "/sd/pinhos/main.py" },
-    @{ Local = "boards\__init__.py";    Remote = "/sd/pinhos/boards/__init__.py" },
-    @{ Local = "boards\base.py";        Remote = "/sd/pinhos/boards/base.py" },
-    @{ Local = "boards\picocalc.py";    Remote = "/sd/pinhos/boards/picocalc.py" },
-    @{ Local = "boards\generic_spi.py"; Remote = "/sd/pinhos/boards/generic_spi.py" },
-    @{ Local = "core\__init__.py";      Remote = "/sd/pinhos/core/__init__.py" },
-    @{ Local = "core\config.py";        Remote = "/sd/pinhos/core/config.py" },
-    @{ Local = "core\logger.py";        Remote = "/sd/pinhos/core/logger.py" },
-    @{ Local = "core\swap.py";          Remote = "/sd/pinhos/core/swap.py" },
-    @{ Local = "core\sandbox.py";       Remote = "/sd/pinhos/core/sandbox.py" },
-    @{ Local = "core\theme.py";         Remote = "/sd/pinhos/core/theme.py" },
-    @{ Local = "ui\__init__.py";        Remote = "/sd/pinhos/ui/__init__.py" },
-    @{ Local = "ui\widgets.py";         Remote = "/sd/pinhos/ui/widgets.py" },
-    @{ Local = "ui\gui.py";             Remote = "/sd/pinhos/ui/gui.py" },
-    @{ Local = "ui\tui.py";             Remote = "/sd/pinhos/ui/tui.py" },
-    @{ Local = "ui\engine.py";          Remote = "/sd/pinhos/ui/engine.py" },
-    @{ Local = "ui\menu.py";            Remote = "/sd/pinhos/ui/menu.py" },
-    @{ Local = "ui\desktop.py";         Remote = "/sd/pinhos/ui/desktop.py" },
-    @{ Local = "net\__init__.py";       Remote = "/sd/pinhos/net/__init__.py" },
-    @{ Local = "net\wifi.py";           Remote = "/sd/pinhos/net/wifi.py" },
-    @{ Local = "net\sync.py";           Remote = "/sd/pinhos/net/sync.py" },
+    @{ Local = "main.py";               Remote = "/sd/pinhos/main.py";              MpyMain = $true },
+    @{ Local = "boards\__init__.py";    Remote = "/sd/pinhos/boards/__init__.py";   Mpy = $true },
+    @{ Local = "boards\base.py";        Remote = "/sd/pinhos/boards/base.py";       Mpy = $true },
+    @{ Local = "boards\picocalc.py";    Remote = "/sd/pinhos/boards/picocalc.py";   Mpy = $true },
+    @{ Local = "boards\generic_spi.py"; Remote = "/sd/pinhos/boards/generic_spi.py"; Mpy = $true },
+    @{ Local = "core\__init__.py";      Remote = "/sd/pinhos/core/__init__.py";     Mpy = $true },
+    @{ Local = "core\config.py";        Remote = "/sd/pinhos/core/config.py";       Mpy = $true },
+    @{ Local = "core\logger.py";        Remote = "/sd/pinhos/core/logger.py";       Mpy = $true },
+    @{ Local = "core\swap.py";          Remote = "/sd/pinhos/core/swap.py";         Mpy = $true },
+    @{ Local = "core\sandbox.py";       Remote = "/sd/pinhos/core/sandbox.py";      Mpy = $true },
+    @{ Local = "core\theme.py";         Remote = "/sd/pinhos/core/theme.py";        Mpy = $true },
+    @{ Local = "ui\__init__.py";        Remote = "/sd/pinhos/ui/__init__.py";       Mpy = $true },
+    @{ Local = "ui\widgets.py";         Remote = "/sd/pinhos/ui/widgets.py";        Mpy = $true },
+    @{ Local = "ui\gui.py";             Remote = "/sd/pinhos/ui/gui.py";            Mpy = $true },
+    @{ Local = "ui\tui.py";             Remote = "/sd/pinhos/ui/tui.py";            Mpy = $true },
+    @{ Local = "ui\engine.py";          Remote = "/sd/pinhos/ui/engine.py";         Mpy = $true },
+    @{ Local = "ui\menu.py";            Remote = "/sd/pinhos/ui/menu.py";           Mpy = $true },
+    @{ Local = "ui\_menu_net.py";       Remote = "/sd/pinhos/ui/_menu_net.py";      Mpy = $true },
+    @{ Local = "ui\_log_view.py";       Remote = "/sd/pinhos/ui/_log_view.py";      Mpy = $true },
+    @{ Local = "ui\desktop.py";         Remote = "/sd/pinhos/ui/desktop.py";        Mpy = $true },
+    @{ Local = "net\__init__.py";       Remote = "/sd/pinhos/net/__init__.py";      Mpy = $true },
+    @{ Local = "net\wifi.py";           Remote = "/sd/pinhos/net/wifi.py";          Mpy = $true },
+    @{ Local = "net\sync.py";           Remote = "/sd/pinhos/net/sync.py";          Mpy = $true },
+    @{ Local = "web\__init__.py";       Remote = "/sd/pinhos/web/__init__.py";      Mpy = $true },
+    @{ Local = "web\server.py";         Remote = "/sd/pinhos/web/server.py";        Mpy = $true },
+    @{ Local = "web\static\index.html"; Remote = "/sd/pinhos/web/static/index.html" },
+    @{ Local = "web\static\style.css";  Remote = "/sd/pinhos/web/static/style.css" },
+    @{ Local = "web\static\app.js";     Remote = "/sd/pinhos/web/static/app.js" },
     @{ Local = "tools\shell.py";        Remote = "/sd/pinhos/tools/shell.py" },
-    @{ Local = "tools\_shell_cmds.py";  Remote = "/sd/pinhos/tools/_shell_cmds.py" },
+    @{ Local = "tools\_shell_cmds.py";  Remote = "/sd/pinhos/tools/_shell_cmds.py"; Mpy = $true },
     @{ Local = "tools\editor.py";       Remote = "/sd/pinhos/tools/editor.py" },
     @{ Local = "tools\files.py";        Remote = "/sd/pinhos/tools/files.py" },
     @{ Local = "tools\net_tools.py";    Remote = "/sd/pinhos/tools/net_tools.py" },
@@ -84,8 +94,9 @@ $DeployManifest = @(
     @{ Local = "apps\hello_world.py";   Remote = "/sd/pinhos/apps/hello_world.py" },
     @{ Local = "apps\matrix_deck.py";   Remote = "/sd/pinhos/apps/matrix_deck.py" },
     @{ Local = "apps\doom_deck.py";     Remote = "/sd/pinhos/apps/doom_deck.py" },
-    @{ Local = "tests\selftest.py";     Remote = "/sd/pinhos/tests/selftest.py" },
-    @{ Local = "tests\selftest_p3.py";  Remote = "/sd/pinhos/tests/selftest_p3.py" }
+    @{ Local = "tests\selftest.py";     Remote = "/sd/pinhos/tests/selftest.py";    Mpy = $true },
+    @{ Local = "tests\selftest_p3.py";  Remote = "/sd/pinhos/tests/selftest_p3.py"; Mpy = $true },
+    @{ Local = "tests\selftest_p4.py";  Remote = "/sd/pinhos/tests/selftest_p4.py"; Mpy = $true }
 )
 
 $themesDir = Join-Path $ProjectRoot "themes"
@@ -95,6 +106,136 @@ if (Test-Path $themesDir) {
             Local  = ("themes\" + $_.Name)
             Remote = ("/sd/pinhos/themes/" + $_.Name)
         }
+    }
+}
+
+$script:StaleRemotePyPaths = @()
+$script:MpyActive = $false
+
+function ConvertTo-WslPath([string]$winPath) {
+    $full = [System.IO.Path]::GetFullPath($winPath)
+    if ($full -match "^([A-Za-z]):\\(.*)$") {
+        $drv = $Matches[1].ToLower()
+        $rest = $Matches[2].Replace("\", "/")
+        return "/mnt/$drv/$rest"
+    }
+    return $full.Replace("\", "/")
+}
+
+function Resolve-MpyManifest($manifest) {
+    if ($NoMpy) {
+        return $manifest
+    }
+    $nativeMpy = Get-Command mpy-cross -ErrorAction SilentlyContinue
+    $useWsl = $false
+    if (-not $nativeMpy) {
+        $wslCmd = Get-Command wsl -ErrorAction SilentlyContinue
+        if ($wslCmd) {
+            $useWsl = $true
+        } else {
+            Write-Host "[PinhOS] mpy-cross not found (native or WSL2); deploying raw .py sources." -ForegroundColor Yellow
+            return $manifest
+        }
+    }
+
+    $buildDir = Join-Path $ProjectRoot ".mpy_build"
+    if (-not (Test-Path $buildDir)) {
+        New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
+    }
+
+    $toCompile = @()
+    $resolved = @()
+    $stalePy = @()
+
+    foreach ($item in $manifest) {
+        $srcFull = Join-Path $ProjectRoot $item.Local
+        if ($item.MpyMain -and (Test-Path $srcFull)) {
+            $outRel = "_pinhos_main.mpy"
+            $outFull = Join-Path $buildDir $outRel
+            $toCompile += @{ Src = $srcFull; Out = $outFull; Label = "main.py" }
+
+            $shimPath = Join-Path $buildDir "main_shim.py"
+            $shimTxt = "# PinhOS Bytecode Entry Shim (auto-generated by picocalc.ps1)`nimport _pinhos_main as _m`n_n = __name__`nglobals().update(_m.__dict__)`n__name__ = _n`nif __name__ == '__main__':`n    start(skip_strike_increment=False, interactive=True)`n"
+            [System.IO.File]::WriteAllText($shimPath, $shimTxt)
+
+            $resolved += @{ LocalFull = $outFull; Local = $outRel; Remote = "/sd/pinhos/_pinhos_main.mpy" }
+            $resolved += @{ LocalFull = $shimPath; Local = "main.py (shim)"; Remote = "/sd/pinhos/main.py" }
+        }
+        elseif ($item.Mpy -and (Test-Path $srcFull)) {
+            $mpyRel = [System.Text.RegularExpressions.Regex]::Replace($item.Local, "\.py$", ".mpy")
+            $mpyRem = [System.Text.RegularExpressions.Regex]::Replace($item.Remote, "\.py$", ".mpy")
+            $outFull = Join-Path $buildDir $mpyRel
+            $outDir = Split-Path -Parent $outFull
+            if (-not (Test-Path $outDir)) {
+                New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+            }
+            $toCompile += @{ Src = $srcFull; Out = $outFull; Label = $item.Local }
+            $resolved += @{ LocalFull = $outFull; Local = $mpyRel; Remote = $mpyRem }
+            $stalePy += $item.Remote
+        }
+        else {
+            $resolved += @{ LocalFull = $srcFull; Local = $item.Local; Remote = $item.Remote }
+        }
+    }
+
+    if ($toCompile.Count -eq 0) {
+        return $resolved
+    }
+
+    Write-Host ("[PinhOS] Compiling {0} core OS modules to .mpy bytecode (-O2)..." -f $toCompile.Count) -ForegroundColor Cyan
+    if ($nativeMpy) {
+        foreach ($job in $toCompile) {
+            & $nativeMpy.Source -O2 -o $job.Out $job.Src
+            if ($LASTEXITCODE -ne 0) {
+                throw "[ERROR] mpy-cross failed on $($job.Label)"
+            }
+        }
+    } else {
+        $sb = New-Object System.Text.StringBuilder
+        [void]$sb.AppendLine("set -e")
+        [void]$sb.AppendLine('MPY=$(command -v mpy-cross || echo "$HOME/.local/bin/mpy-cross")')
+        [void]$sb.AppendLine('if [ ! -x "$MPY" ]; then echo "MPY_MISSING"; exit 42; fi')
+        foreach ($job in $toCompile) {
+            $wSrc = ConvertTo-WslPath $job.Src
+            $wOut = ConvertTo-WslPath $job.Out
+            [void]$sb.AppendLine("`"`$MPY`" -O2 -o '$wOut' '$wSrc'")
+        }
+        $batchFile = Join-Path $buildDir "_compile_mpy.sh"
+        [System.IO.File]::WriteAllText($batchFile, ($sb.ToString() -replace "`r`n", "`n"))
+        $wBatch = ConvertTo-WslPath $batchFile
+        $wslOut = & wsl bash $wBatch 2>&1
+        if ($LASTEXITCODE -eq 42) {
+            Write-Host "[PinhOS] mpy-cross not installed in WSL2; deploying raw .py sources." -ForegroundColor Yellow
+            return $manifest
+        }
+        if ($LASTEXITCODE -ne 0) {
+            throw "[ERROR] WSL2 mpy-cross compilation failed: $wslOut"
+        }
+    }
+
+    $script:StaleRemotePyPaths = $stalePy
+    $script:MpyActive = $true
+    Write-Host ("[PinhOS] Bytecode ready ({0} .mpy modules compiled)." -f $toCompile.Count) -ForegroundColor Green
+    return $resolved
+}
+
+function Remove-StaleRemotePy($sp) {
+    if (-not $script:MpyActive -or $script:StaleRemotePyPaths.Count -eq 0) {
+        return
+    }
+    $pyList = ($script:StaleRemotePyPaths | ForEach-Object { "'$_'" }) -join ","
+    $cleanCode = @"
+_rm=0
+for _p in ($pyList,):
+ try:
+  os.remove(_p); _rm+=1
+ except Exception:
+  pass
+_bp('STALE_PY_RM:' + str(_rm))
+"@
+    $out = Invoke-RawRepl $sp $cleanCode 6000 16 12 -RequiredMarker "STALE_PY_RM:"
+    if ($out -match "STALE_PY_RM:(\d+)" -and [int]$Matches[1] -gt 0) {
+        Write-Host ("[PinhOS] Removed {0} stale .py source(s) on SD so .mpy bytecode loads cleanly." -f $Matches[1]) -ForegroundColor Cyan
     }
 }
 
@@ -187,7 +328,7 @@ if __name__ == '__main__':
 "@ -replace "`r`n", "`n"
 
 function Get-NormalBytes([string]$localPath) {
-    if ($localPath.EndsWith(".py") -or $localPath.EndsWith(".json")) {
+    if ($localPath.EndsWith(".py") -or $localPath.EndsWith(".json") -or $localPath.EndsWith(".html") -or $localPath.EndsWith(".css") -or $localPath.EndsWith(".js")) {
         $txt = ([System.IO.File]::ReadAllText($localPath) -replace "`r`n", "`n")
         return [System.Text.Encoding]::UTF8.GetBytes($txt)
     }
@@ -529,7 +670,7 @@ if ((-not $NoMpremote) -and $mpremoteCmd) {
         $tmpMain = Join-Path $env:TEMP "pinhos_main_stub.py"
         [System.IO.File]::WriteAllText($tmpBoot, $FlashBootStub)
         [System.IO.File]::WriteAllText($tmpMain, $FlashMainStub)
-        & $mp connect $ResolvedPort exec "import os; [os.mkdir(d) for d in ('/sd/pinhos','/sd/pinhos/boards','/sd/pinhos/core','/sd/pinhos/ui','/sd/pinhos/net','/sd/pinhos/web','/sd/pinhos/tools','/sd/pinhos/apps','/sd/pinhos/themes','/sd/pinhos/.swap','/sd/pinhos/logs','/sd/pinhos/screenshots','/sd/pinhos/tests') if d.split('/')[-1] not in os.listdir('/'.join(d.split('/')[:-1]) or '/')]"
+        & $mp connect $ResolvedPort exec "import os; [os.mkdir(d) for d in ('/sd/pinhos','/sd/pinhos/boards','/sd/pinhos/core','/sd/pinhos/ui','/sd/pinhos/net','/sd/pinhos/web','/sd/pinhos/web/static','/sd/pinhos/tools','/sd/pinhos/apps','/sd/pinhos/themes','/sd/pinhos/.swap','/sd/pinhos/logs','/sd/pinhos/screenshots','/sd/pinhos/tests') if d.split('/')[-1] not in os.listdir('/'.join(d.split('/')[:-1]) or '/')]"
         & $mp connect $ResolvedPort fs cp $tmpBoot ":/boot.py"
         & $mp connect $ResolvedPort fs cp $tmpMain ":/main.py"
         $totalFiles = $DeployManifest.Count
@@ -648,7 +789,7 @@ try:
     machine.RTC().datetime($rtcTuple)
 except Exception:
     pass
-for _d in ('/sd/pinhos','/sd/pinhos/boards','/sd/pinhos/core','/sd/pinhos/ui','/sd/pinhos/net','/sd/pinhos/web','/sd/pinhos/tools','/sd/pinhos/apps','/sd/pinhos/themes','/sd/pinhos/.swap','/sd/pinhos/logs','/sd/pinhos/screenshots','/sd/pinhos/tests'):
+for _d in ('/sd/pinhos','/sd/pinhos/boards','/sd/pinhos/core','/sd/pinhos/ui','/sd/pinhos/net','/sd/pinhos/web','/sd/pinhos/web/static','/sd/pinhos/tools','/sd/pinhos/apps','/sd/pinhos/themes','/sd/pinhos/.swap','/sd/pinhos/logs','/sd/pinhos/screenshots','/sd/pinhos/tests'):
     try:
         os.mkdir(_d)
     except Exception:
@@ -734,7 +875,7 @@ if picocalc and hasattr(picocalc, 'display'):
         _d.recoverRefresh()
         _d.fill(0)
         _d.rect(18, 118, 284, 64, 3)
-        _d.text('DEPLOYING PinhOS v1.0.0-alpha.3.1', 36, 134, 3)
+        _d.text('DEPLOYING PinhOS v1.0.0-alpha.4', 44, 134, 3)
         _d.rect(40, 154, 240, 12, 3)
     except Exception:
         pass
@@ -752,14 +893,16 @@ _bp('INIT_OK')
             Write-Host "[PinhOS] Uploading $Arg1 -> $Arg2 ($($bytes.Length) B)..."
             Upload-SdFile $sp $bytes $Arg2 236
         } elseif (-not $NoSync) {
-            $totalFiles = $DeployManifest.Count
+            $effectiveManifest = Resolve-MpyManifest $DeployManifest
+            Remove-StaleRemotePy $sp
+            $totalFiles = $effectiveManifest.Count
             $idx = 0
             $uploadedCount = 0
             $skippedCount = 0
 
-            foreach ($item in $DeployManifest) {
+            foreach ($item in $effectiveManifest) {
                 $idx++
-                $localFull = Join-Path $ProjectRoot $item.Local
+                $localFull = if ($item.LocalFull) { $item.LocalFull } else { Join-Path $ProjectRoot $item.Local }
                 if (Test-Path $localFull) {
                     $pct = [int](($idx / $totalFiles) * 236)
                     $bytes = Get-NormalBytes $localFull
@@ -784,9 +927,23 @@ _bp('INIT_OK')
         Write-Host "[PinhOS] Launching /sd/pinhos/main.py and streaming Boot Guard stabilization..."
         $launchCode = @"
 import os, sys, io, gc, machine
-for _m in ('main','boards','boards.base','boards.picocalc','boards.generic_spi','core','core.config','core.logger','core.swap','core.sandbox','core.theme','ui','ui.widgets','ui.gui','ui.tui','ui.engine','ui.menu','ui.desktop','net','net.wifi','net.sync','tools','tools.shell','tools._shell_cmds','tools.editor','tools.files','tools.net_tools','tools.uart_term','tools.sysmon','tests.selftest','tests.selftest_p3'):
- if _m in sys.modules:del sys.modules[_m]
-gc.collect()
+_keep = ('__name__','os','sys','gc','io','json','time','binascii','machine','_bp','_wchk','_sig','_bar','picocalc','_keep')
+for _k in list(globals().keys()):
+ if _k not in _keep:del globals()[_k]
+try:
+ import builtins as _bi
+ _osrv = getattr(_bi, '_pinhos_web_srv', None)
+ if _osrv is not None:
+  try: _osrv.close()
+  except Exception: pass
+  setattr(_bi, '_pinhos_web_srv', None)
+ for _bk in ('recovery_status','recovery_reset_strikes','recovery_reset_config','recovery_clear_swap','recovery_reboot','ui'):
+  if hasattr(_bi,_bk):delattr(_bi,_bk)
+except Exception:pass
+for _m in list(sys.modules.keys()):
+ if _m not in ('picocalc','picocalcdisplay','vtterminal','os','sys','gc','io','json','time','binascii','machine','rp2','network','socket','struct','array','framebuf','builtins'):
+  del sys.modules[_m]
+gc.collect(); gc.collect()
 if '/sd/pinhos' not in sys.path:sys.path.insert(0,'/sd/pinhos')
 try:
  import main as _pm
@@ -812,6 +969,9 @@ try:
  import picocalc
  if hasattr(picocalc,'sd'):picocalc.sd.mount()
 except Exception:pass
+for _d in ('/sd/pinhos/web','/sd/pinhos/web/static'):
+ try:os.mkdir(_d)
+ except Exception:pass
 if '/sd/pinhos' not in sys.path:sys.path.insert(0,'/sd/pinhos')
 def _sig(p):
  try:
@@ -830,11 +990,13 @@ _bp('PREP_OK')
         [void](Invoke-RawRepl $sp $prepTestCode 6000 16 12 -RequiredMarker "PREP_OK")
 
         if (-not $NoSync) {
-            $totalFiles = $DeployManifest.Count
+            $effectiveManifest = Resolve-MpyManifest $DeployManifest
+            Remove-StaleRemotePy $sp
+            $totalFiles = $effectiveManifest.Count
             $idx = 0
-            foreach ($item in $DeployManifest) {
+            foreach ($item in $effectiveManifest) {
                 $idx++
-                $localFull = Join-Path $ProjectRoot $item.Local
+                $localFull = if ($item.LocalFull) { $item.LocalFull } else { Join-Path $ProjectRoot $item.Local }
                 if (Test-Path $localFull) {
                     $bytes = Get-NormalBytes $localFull
                     $localSig = Get-QuickSig $bytes
@@ -850,14 +1012,28 @@ _bp('PREP_OK')
 
         $runTestCmd = @"
 import os, sys, io, gc
-for _m in ('tests.selftest','tests.selftest_p3','tests','main','boards','boards.base','boards.picocalc','boards.generic_spi','core','core.config','core.logger','core.swap','core.sandbox','core.theme','ui','ui.widgets','ui.gui','ui.tui','ui.engine','ui.menu','ui.desktop','net','net.wifi','net.sync','tools','tools.shell','tools._shell_cmds','tools.editor','tools.files','tools.net_tools','tools.uart_term','tools.sysmon'):
- if _m in sys.modules:del sys.modules[_m]
-gc.collect()
+_keep = ('__name__','os','sys','gc','io','json','time','binascii','machine','_bp','_wchk','_sig','_bar','picocalc','_keep')
+for _k in list(globals().keys()):
+ if _k not in _keep:del globals()[_k]
+try:
+ import builtins as _bi
+ _osrv = getattr(_bi, '_pinhos_web_srv', None)
+ if _osrv is not None:
+  try: _osrv.close()
+  except Exception: pass
+  setattr(_bi, '_pinhos_web_srv', None)
+ for _bk in ('recovery_status','recovery_reset_strikes','recovery_reset_config','recovery_clear_swap','recovery_reboot','ui'):
+  if hasattr(_bi,_bk):delattr(_bi,_bk)
+except Exception:pass
+for _m in list(sys.modules.keys()):
+ if _m not in ('picocalc','picocalcdisplay','vtterminal','os','sys','gc','io','json','time','binascii','machine','rp2','network','socket','struct','array','framebuf','builtins'):
+  del sys.modules[_m]
+gc.collect(); gc.collect()
 try:
  import tests.selftest as _st
  _st.run_all(interactive_wait=False)
 except Exception as _e:
- _buf=io.StringIO();sys.print_exception(_e,_buf);_bp('<<PINHOS:SELFTEST:FAIL:0/11>>\r\n'+_buf.getvalue())
+ _buf=io.StringIO();sys.print_exception(_e,_buf);_bp('<<PINHOS:SELFTEST:FAIL:0/12>>\r\n'+_buf.getvalue())
 "@
         $testOut = Stream-RawReplCommand $sp $runTestCmd "<<PINHOS:SELFTEST:" 90000
         # Exit Raw REPL cleanly (Ctrl-B) back to friendly >>> prompt with dupterm preserved

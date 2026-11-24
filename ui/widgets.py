@@ -129,7 +129,7 @@ class Widget:
 class StatusBar(Widget):
     """Top status bar showing OS title, UI mode badge, and right-aligned telemetry."""
 
-    def __init__(self, x=0, y=0, w=320, h=20, title="PinhOS", mode_label="GUI", right_text="", wifi_level=None, bat_info=None, serial_link=False):
+    def __init__(self, x=0, y=0, w=320, h=20, title="PinhOS", mode_label="GUI", right_text="", wifi_level=None, bat_info=None, serial_link=False, web_active=False):
         super().__init__(x, y, w, h, focusable=False)
         self.title = str(title)
         self.mode_label = str(mode_label)
@@ -137,8 +137,9 @@ class StatusBar(Widget):
         self.wifi_level = wifi_level
         self.bat_info = bat_info
         self.serial_link = bool(serial_link)
+        self.web_active = bool(web_active)
 
-    def update(self, title=None, mode_label=None, right_text=None, wifi_level="KEEP", bat_info="KEEP", serial_link="KEEP"):
+    def update(self, title=None, mode_label=None, right_text=None, wifi_level="KEEP", bat_info="KEEP", serial_link="KEEP", web_active="KEEP"):
         changed = False
         if title is not None:
             s = str(title)
@@ -163,6 +164,9 @@ class StatusBar(Widget):
             changed = True
         if serial_link != "KEEP" and bool(serial_link) != self.serial_link:
             self.serial_link = bool(serial_link)
+            changed = True
+        if web_active != "KEEP" and bool(web_active) != self.web_active:
+            self.web_active = bool(web_active)
             changed = True
         if changed:
             self.mark_dirty(full=True)

@@ -138,6 +138,7 @@ class DesktopHome(Widget):
         super().__init__(x, y, w, h, focusable=True)
         self.notes_path = notes_path or NOTES_PATH
         self.ram_hist = []
+        self.cpu_hist = []
         self.max_samples = 22
         self.free_kb = 256
         self.used_kb = 64
@@ -146,6 +147,9 @@ class DesktopHome(Widget):
         self.bat_pct = 100
         self.bat_mv = 4150
         self.bat_chg = False
+        self.swap_used_kb = 0
+        self.swap_max_kb = 512
+        self.swap_pct = 0
         self.wifi_ok = False
         self.wifi_ip = "Offline"
         self.wifi_rssi = 0
@@ -183,11 +187,24 @@ class DesktopHome(Widget):
         except Exception:
             self.cpu_mhz = 150
         self.cpu_temp = board.get_cpu_temp_c() if board else 28.0
+        cpu_pct = max(10, min(100, int((float(self.cpu_temp) - 18.0) * 2.2)))
+        self.cpu_hist.append(cpu_pct)
+        if len(self.cpu_hist) > self.max_samples:
+            self.cpu_hist.pop(0)
 
         bat = board.get_battery() if board else {"percent": 100, "voltage_mv": 4150, "charging": False}
         self.bat_pct = int(bat.get("percent", 100))
         self.bat_mv = int(bat.get("voltage_mv", 4150))
         self.bat_chg = bool(bat.get("charging", False))
+
+        try:
+            from core.swap import get_swap_manager
+            sw = get_swap_manager().stats()
+            self.swap_used_kb = int(sw.get("used_kb", 0))
+            self.swap_max_kb = int(sw.get("max_kb", 512))
+            self.swap_pct = int(sw.get("pct", 0))
+        except Exception:
+            pass
 
         if wifi_st is None:
             try:
@@ -273,9 +290,9 @@ class DesktopHome(Widget):
             b.text("SYS TELEMETRY", lx + 6, cy + 5, c_afg)
 
         # SRAM text + sparkline
-        y0 = cy + 21
+        y0 = cy + 19
         b.text("SRAM {}K/{}K".format(self.free_kb, self.used_kb), lx + 6, y0, c_inf)
-        sp_x, sp_y, sp_w, sp_h = lx + 6, y0 + 11, lw - 12, 38
+        sp_x, sp_y, sp_w, sp_h = lx + 6, y0 + 9, lw - 12, 24
         b.fill_rect(sp_x, sp_y, sp_w, sp_h, c_bg)
         b.rect(sp_x, sp_y, sp_w, sp_h, c_bdr)
         if self.ram_hist:
@@ -286,24 +303,39 @@ class DesktopHome(Widget):
                 if bx + bw <= sp_x + sp_w - 1:
                     b.fill_rect(bx, sp_y + sp_h - 2 - bh, max(1, bw - 1), bh, c_ok if self.free_kb > 64 else c_wrn)
 
-        # CPU MHz + Temp
-        y1 = sp_y + sp_h + 7
+        # CPU MHz + Temp + sparkline (same style as SRAM)
+        y1 = sp_y + sp_h + 4
         temp_i = int(round(self.cpu_temp))
         b.text("CPU {}MHz {}C".format(self.cpu_mhz, temp_i), lx + 6, y1, c_txt)
-        cpu_bar_pct = max(10, min(100, (self.cpu_mhz * 100) // 250))
-        self._draw_mini_bar(b, lx + 6, y1 + 10, lw - 12, 8, cpu_bar_pct, c_wrn if self.cpu_mhz > 150 else c_inf, c_bg, c_bdr, is_tui)
+        csp_y, csp_h = y1 + 9, 24
+        b.fill_rect(sp_x, csp_y, sp_w, csp_h, c_bg)
+        b.rect(sp_x, csp_y, sp_w, csp_h, c_bdr)
+        if self.cpu_hist:
+            bw = max(3, (sp_w - 4) // max(1, self.max_samples))
+            c_cpu = c_wrn if self.cpu_mhz > 150 else c_inf
+            for i, v in enumerate(self.cpu_hist):
+                bh = max(2, (v * (csp_h - 4)) // 100)
+                bx = sp_x + 2 + i * bw
+                if bx + bw <= sp_x + sp_w - 1:
+                    b.fill_rect(bx, csp_y + csp_h - 2 - bh, max(1, bw - 1), bh, c_cpu)
+
+        # SD Swap usage bar
+        y_sw = csp_y + csp_h + 5
+        sw_lbl = "SWAP {}K/{}K".format(self.swap_used_kb, self.swap_max_kb) if self.swap_max_kb > 0 else "SWAP OFF"
+        b.text(sw_lbl[:23], lx + 6, y_sw, c_acc if self.swap_max_kb > 0 else c_mut)
+        self._draw_mini_bar(b, lx + 6, y_sw + 9, lw - 12, 7, self.swap_pct, c_acc if self.swap_pct < 80 else c_wrn, c_bg, c_bdr, is_tui)
 
         # Battery % + Voltage
-        y2 = y1 + 24
+        y2 = y_sw + 20
         bat_lbl = "BAT {}% {}".format(self.bat_pct, "CHG" if self.bat_chg else "{:.1f}V".format(self.bat_mv / 1000.0))
         b.text(bat_lbl[:23], lx + 6, y2, c_ok if (self.bat_chg or self.bat_pct > 25) else c_wrn)
-        self._draw_mini_bar(b, lx + 6, y2 + 10, lw - 12, 8, self.bat_pct, c_ok if self.bat_pct > 25 else c_wrn, c_bg, c_bdr, is_tui)
+        self._draw_mini_bar(b, lx + 6, y2 + 9, lw - 12, 7, self.bat_pct, c_ok if self.bat_pct > 25 else c_wrn, c_bg, c_bdr, is_tui)
 
-        # Wi-Fi Status / IP
-        y3 = y2 + 24
-        wf_lbl = "WF {}".format(self.wifi_ip) if self.wifi_ok else "WF Offline"
+        # IP Address / Offline
+        y3 = y2 + 20
+        wf_lbl = "IP: {}".format(self.wifi_ip) if self.wifi_ok else "Offline"
         b.text(wf_lbl[:23], lx + 6, y3, c_ok if self.wifi_ok else c_mut)
-        y4 = y3 + 13
+        y4 = y3 + 11
         if self.wifi_ok and self.wifi_rssi:
             b.text("SIG {}dBm | {}".format(self.wifi_rssi, self.ui_mode)[:23], lx + 6, y4, c_mut)
         else:
