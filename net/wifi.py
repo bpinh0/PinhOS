@@ -623,9 +623,11 @@ def _sntp_query(target, timeout_ms=1800, cancel_cb=None):
         s.sendto(pkt, addr)
         t0 = _ticks_ms()
         resends = 0
+        wm = get_wifi_manager()
         while _ticks_diff(_ticks_ms(), t0) < timeout_ms:
             if cancel_cb is not None and cancel_cb():
                 return None, "cancelled"
+            wm.poll_rx()
             el = _ticks_diff(_ticks_ms(), t0)
             # Re-transmit UDP packet after initial ARP resolution window on fresh DHCP link
             if (resends == 0 and el >= 550) or (resends == 1 and el >= 1150):
@@ -674,9 +676,11 @@ def _http_date_fallback(timeout_s=2, cancel_cb=None):
         limit_ms = max(1200, int(timeout_s * 1000))
         sent = False
         buf = b""
+        wm = get_wifi_manager()
         while _ticks_diff(_ticks_ms(), t0) < limit_ms and len(buf) < 512:
             if cancel_cb is not None and cancel_cb():
                 return None
+            wm.poll_rx()
             if not sent:
                 try:
                     s.send(b"HEAD / HTTP/1.0\r\nHost: 1.1.1.1\r\n\r\n")
