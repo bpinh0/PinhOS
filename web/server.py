@@ -507,10 +507,17 @@ class WebServer:
             sw = get_swap_manager().stats()
         except Exception:
             pass
+        blk = 0
+        try:
+            from core.memutil import largest_free
+            blk = largest_free()
+        except Exception:
+            pass
         await self._json(w, 200, {
             "ok": True,
             "sram_free": int(gc.mem_free()) if hasattr(gc, "mem_free") else 262144,
             "sram_alloc": int(gc.mem_alloc()) if hasattr(gc, "mem_alloc") else 65536,
+            "sram_largest": int(blk),
             "sram_total": int(self.manifest.get("sram_kb", 520)) * 1024,
             "swap": sw,
             "cpu_mhz": b.get_cpu_freq_mhz() if (b and hasattr(b, "get_cpu_freq_mhz")) else 150,
