@@ -1692,6 +1692,17 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
         swap = get_swap_manager()
         swap.set_max_kb(int(cfg.get("swap_max_kb", 512)))
         swap.prune_stale()
+        if hasattr(board, "prune_screenshots"):
+            board.prune_screenshots(keep=5)
+        if hasattr(gc, "threshold"):
+            try:
+                gc.threshold(16384)
+            except Exception:
+                pass
+        try:
+            import core.memutil  # Pre-import early to pack at bottom of heap (#20)
+        except Exception:
+            pass
 
         _boot_progress(94, "Core Services Ready...", pause_ms=80)
 
