@@ -774,32 +774,45 @@ def toggle_webportal(board=None, cfg=None, logger=None):
     return ok, msg
 
 
+_WDT_OBJ = None
+
+
 def feed_wdt():
     """Feed RP2350 hardware watchdog if enabled."""
-    if builtins is not None:
+    w = _WDT_OBJ or runtime_state.get("_wdt")
+    if w is None and builtins is not None:
         w = getattr(builtins, "_pinhos_wdt", None)
-        if w is not None:
-            try:
-                w.feed()
-            except Exception:
-                pass
+    if w is not None:
+        try:
+            w.feed()
+        except Exception:
+            pass
 
 
 def enable_wdt(timeout_ms=8000):
     """Enable RP2350 machine.WDT once after boot stabilization (max ~8388 ms; 0 disables)."""
+    global _WDT_OBJ
     ms = int(timeout_ms or 0)
     if ms <= 0:
         return False
     ms = min(8388, max(1000, ms))
     try:
-        if builtins is not None and getattr(builtins, "_pinhos_wdt", None) is not None:
-            getattr(builtins, "_pinhos_wdt").feed()
+        existing = _WDT_OBJ or runtime_state.get("_wdt")
+        if existing is None and builtins is not None:
+            existing = getattr(builtins, "_pinhos_wdt", None)
+        if existing is not None:
+            existing.feed()
             return True
         import machine
         if hasattr(machine, "WDT"):
             w = machine.WDT(timeout=ms)
+            _WDT_OBJ = w
+            runtime_state["_wdt"] = w
             if builtins is not None:
-                setattr(builtins, "_pinhos_wdt", w)
+                try:
+                    setattr(builtins, "_pinhos_wdt", w)
+                except Exception:
+                    pass
             bp("[WDT] Enabled hardware watchdog ({}ms)".format(ms))
             lg = runtime_state.get("logger")
             if lg is not None:
