@@ -167,6 +167,7 @@ def main(ctx):
 - [ ] **5.1 Wi-Fi STA Manager, Async Background Radio & SoftAP Captive Fallback (`net/wifi.py`):**
   - [x] Multi-network credential store (`wifi.json`), signal strength scanner, 3-attempt auto-retry connect with hard CYW43 radio bounce, ISO-3166 `wifi_country` prompt, and literal-IPv4 UDP NTP + non-blocking HTTP Date fallback.
   - [ ] Move Wi-Fi association, DHCP polling, and NTP sync to a fully asynchronous `uasyncio` background task (with RP2350 Core 1 LCD DMA / CYW43439 concurrency tuning so networking never impacts UI responsiveness or drops UDP packets).
+  - [ ] **Configurable Boot & Periodic NTP Sync:** Automatically trigger non-blocking NTP sync immediately after boot Wi-Fi connects (when both `wifi_auto_connect` and `ntp_auto_sync` are enabled in `config.json`), persist synced RTC state to `/sd/pinhos/rtc_state.json`, and support configurable periodic background resync (e.g., hourly/on-reconnect) to keep accurate wall-clock time.
   - [ ] Automatic SoftAP hotspot fallback (`PinhOS-Setup`) for headless field configuration via WebPortal when no saved STA network is reachable.
 - [ ] **5.2 Signed Atomic GitHub OTA Updater (`net/ota.py` — per `docs/design/phase5_ota_security.md`):**
   - [x] Security & authenticity architecture design (`docs/design/phase5_ota_security.md`) + single-source-of-truth `version.json` OTA metadata (`#21`).
