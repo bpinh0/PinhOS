@@ -347,7 +347,7 @@ class DesktopHome(Widget):
         except Exception:
             _tok = ""
         if _tok:
-            b.text("TOK {}".format(_tok)[:23], lx + 6, y4, c_acc)
+            b.text("WEB ON [6:KEY]"[:23], lx + 6, y4, c_acc)
         elif self.wifi_ok and self.wifi_rssi:
             b.text("SIG {}dBm | {}".format(self.wifi_rssi, self.ui_mode)[:23], lx + 6, y4, c_mut)
         else:
