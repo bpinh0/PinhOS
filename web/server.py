@@ -33,12 +33,54 @@ _MIME = {
 }
 
 _STAT = {
-    200: "OK", 204: "No Content", 400: "Bad Request", 403: "Forbidden", 404: "Not Found",
+    200: "OK", 204: "No Content", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
     405: "Method Not Allowed", 409: "Conflict", 413: "Too Large",
     500: "Server Error", 503: "Service Unavailable",
 }
 
 WEB_LOG_MAX = 16384
+_WRITE_PREFIXES = ("apps/", "tools/", "themes/")
+_WRITE_EXACT = ("apps", "tools", "themes", "notes.txt", "config.json")
+
+
+def _gen_token():
+    try:
+        raw = os.urandom(4)
+        return "".join("{:02x}".format(b) for b in raw)
+    except Exception:
+        return "pinhos01"
+
+
+def _const_eq(a, b):
+    if not isinstance(a, str) or not isinstance(b, str) or len(a) != len(b):
+        return False
+    diff = 0
+    for i in range(len(a)):
+        diff |= ord(a[i]) ^ ord(b[i])
+    return diff == 0
+
+
+def _is_write_allowed(rel):
+    if not rel:
+        return False
+    r = str(rel).strip("/")
+    if r in _WRITE_EXACT:
+        return True
+    for pre in _WRITE_PREFIXES:
+        if r.startswith(pre):
+            return True
+    return False
+
+
+def _origin_host(origin):
+    s = str(origin or "").strip().lower()
+    if s.startswith("http://"):
+        s = s[7:]
+    elif s.startswith("https://"):
+        s = s[8:]
+    else:
+        return ""
+    return s.split("/", 1)[0]
 
 
 def _urldec(s):
@@ -102,7 +144,7 @@ async def _tick(ms):
 
 class WebServer:
     def __init__(self, board=None, config=None, manifest=None, logger=None,
-                 root=PINHOS_ROOT, host="0.0.0.0", port=8080, max_conns=6, req_timeout=5):
+                 root=PINHOS_ROOT, host="0.0.0.0", port=8080, max_conns=3, req_timeout=5, token=None):
         self.board = board
         self.config = config
         self.manifest = manifest or {}
@@ -112,6 +154,7 @@ class WebServer:
         self.port = int(port or 8080)
         self.max_conns = max(1, int(max_conns))
         self.req_timeout = max(1, int(req_timeout))
+        self.token = str(token) if token else _gen_token()
         self._srv = None
         self._loop = None
         self._running = False
@@ -358,15 +401,16 @@ class WebServer:
             rem -= len(c)
 
     async def _read_req_head(self, r):
-        """Read HTTP/1.1 request line (bounded timeout) + headers already buffered in lwIP."""
+        """Read HTTP/1.1 request line (bounded timeout) + security/length headers."""
         line = await asyncio.wait_for(r.readline(), 3)
         if not line:
-            return None, None, 0, b""
+            return None, None, 0, b"", {}
         pts = line.decode("utf-8", "ignore").strip().split()
         if len(pts) < 2:
-            return "", "", 0, b""
+            return "", "", 0, b"", {}
         meth, tgt = pts[0].upper(), pts[1]
         clen = 0
+        hdrs = {}
         for _ in range(32):
             hl = await asyncio.wait_for(r.readline(), 2)
             if not hl or hl in (b"\r\n", b"\n"):
@@ -374,12 +418,31 @@ class WebServer:
             hs = hl.decode("utf-8", "ignore")
             if ":" in hs:
                 k, v = hs.split(":", 1)
-                if k.strip().lower() == "content-length":
+                kl = k.strip().lower()
+                vs = v.strip()
+                if kl == "content-length":
                     try:
-                        clen = max(0, int(v.strip()))
+                        clen = max(0, int(vs))
                     except ValueError:
                         clen = 0
-        return meth, tgt, clen, b""
+                elif kl in ("host", "origin", "x-pinhos-token"):
+                    hdrs[kl] = vs
+        return meth, tgt, clen, b"", hdrs
+
+    def _check_auth(self, meth, rt, hdrs):
+        """Enforce same-origin check + X-PinhOS-Token on mutating/sensitive endpoints."""
+        orig = hdrs.get("origin", "")
+        if orig:
+            oh = _origin_host(orig)
+            hh = str(hdrs.get("host", "")).strip().lower()
+            if not oh or not hh or oh != hh:
+                return 403, "Cross-origin forbidden"
+        needs_tok = (meth != "GET") or (rt in ("/api/run", "/api/key", "/api/screenshot", "/api/reboot"))
+        if needs_tok:
+            tok = hdrs.get("x-pinhos-token", "")
+            if not _const_eq(tok, self.token):
+                return 401, "Unauthorized (X-PinhOS-Token required)"
+        return 0, ""
 
     async def _handle_client(self, r, w):
         if self._active >= self.max_conns:
@@ -397,7 +460,7 @@ class WebServer:
         self._active += 1
         meth, rt = "?", "?"
         try:
-            meth, tgt, clen, extra = await self._read_req_head(r)
+            meth, tgt, clen, extra, hdrs = await self._read_req_head(r)
             if meth is None:
                 return
             if not meth:
@@ -409,6 +472,14 @@ class WebServer:
             else:
                 rt, q = tgt, {}
             rt = _urldec(rt)
+            if meth == "OPTIONS":
+                await self._err(w, 405, "Method not allowed")
+                return
+            acode, amsg = self._check_auth(meth, rt, hdrs)
+            if acode:
+                await self._drain(r, clen, extra)
+                await self._err(w, acode, amsg)
+                return
             await self._dispatch(meth, rt, q, clen, r, w, extra)
             if rt != "/api/status":
                 self._wlog("OK {} {}".format(meth, rt))
@@ -559,16 +630,18 @@ class WebServer:
 
     async def _api_post(self, r, w, q, clen, extra=b""):
         full, rel = self.resolve_path(q.get("path", ""))
-        if not full or not rel:
+        if not full or not rel or not _is_write_allowed(rel):
             await self._drain(r, clen, extra)
-            await self._err(w, 403, "Forbidden")
+            await self._err(w, 403, "Write forbidden")
             return
         par = full.rpartition("/")[0]
         if par and par != self.root:
             _mkdir_p(par)
         wr, rem = 0, int(clen)
+        is_cfg = (rel == "config.json")
+        target = (full + ".webtmp") if is_cfg else full
         try:
-            f = open(full, "wb")
+            f = open(target, "wb")
             try:
                 if extra and rem > 0:
                     take = extra[:rem]
@@ -587,6 +660,24 @@ class WebServer:
                     f.flush()
             finally:
                 f.close()
+            if is_cfg:
+                try:
+                    with open(target, "r") as cf:
+                        parsed = json.load(cf)
+                    if not isinstance(parsed, dict):
+                        raise ValueError("config.json must be a JSON object")
+                except Exception as je:
+                    try:
+                        os.remove(target)
+                    except OSError:
+                        pass
+                    await self._err(w, 400, "Invalid JSON: " + str(je)[:80])
+                    return
+                try:
+                    os.remove(full)
+                except OSError:
+                    pass
+                os.rename(target, full)
         except Exception as e:
             await self._err(w, 500, str(e))
             return
@@ -594,8 +685,8 @@ class WebServer:
 
     async def _api_del(self, w, q):
         full, rel = self.resolve_path(q.get("path", ""))
-        if not full or not rel:
-            await self._err(w, 403, "Forbidden")
+        if not full or not rel or not _is_write_allowed(rel):
+            await self._err(w, 403, "Delete forbidden")
             return
         ex, isd, _ = _stat(full)
         if not ex:
@@ -611,8 +702,8 @@ class WebServer:
     async def _api_mkdir(self, r, w, q, clen, extra=b""):
         b = await self._read_json(r, clen, extra)
         full, rel = self.resolve_path(q.get("path") or (b.get("path") if isinstance(b, dict) else ""))
-        if not full or not rel:
-            await self._err(w, 403, "Forbidden")
+        if not full or not rel or not _is_write_allowed(rel):
+            await self._err(w, 403, "Mkdir forbidden")
             return
         if not _mkdir_p(full):
             await self._err(w, 500, "mkdir failed")

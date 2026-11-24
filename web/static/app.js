@@ -29,10 +29,33 @@
   }
   document.querySelectorAll(".tab").forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
 
+  function getToken(forcePrompt = false) {
+    let t = forcePrompt ? "" : (sessionStorage.getItem("pinhos_token") || "");
+    if (!t) {
+      t = (prompt("Enter PinhOS WebPortal Token (shown on PicoCalc):") || "").trim();
+      if (t) sessionStorage.setItem("pinhos_token", t);
+    }
+    return t;
+  }
+
   async function apiJson(url, opts = {}) {
     state.busy++;
     try {
-      const res = await fetch(url, opts);
+      const meth = (opts.method || "GET").toUpperCase();
+      const needsTok = meth !== "GET" || url.startsWith("/api/screenshot");
+      const runFetch = async (forcePrompt) => {
+        const hdrs = Object.assign({}, opts.headers || {});
+        if (needsTok) {
+          const tok = getToken(forcePrompt);
+          if (tok) hdrs["X-PinhOS-Token"] = tok;
+        }
+        return await fetch(url, Object.assign({}, opts, { headers: hdrs }));
+      };
+      let res = await runFetch(false);
+      if (res.status === 401 && needsTok) {
+        sessionStorage.removeItem("pinhos_token");
+        res = await runFetch(true);
+      }
       const data = await res.json();
       if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);
       return data;
