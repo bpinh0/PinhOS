@@ -1,4 +1,4 @@
-# PinhOS Phase 1 — Canonical Layout & Persistent Configuration Manager (core/config.py)
+# PinhOS Phase 1 â€” Canonical Layout & Persistent Configuration Manager (core/config.py)
 # Zero hardcoded GPIO pins or hardware bus dependencies.
 
 import os
@@ -24,7 +24,7 @@ CANONICAL_SUBDIRS = (
 
 DEFAULT_VERSION_MANIFEST = {
     "name": "PinhOS",
-    "version": "1.0.0-alpha.4.1",
+    "version": "1.0.0-alpha.4.2",
     "phase": "4.1",
     "codename": "WebPortal IDE & Stability",
     "build_timestamp": "2026-11-24T11:55:00Z",
