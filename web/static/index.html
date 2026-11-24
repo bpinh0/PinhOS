@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PinhOS WebPortal Studio</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="title">PinhOS <span id="ver-badge">v1.0.0-alpha.4</span> // WebPortal</span>
+  </div>
+  <div class="hdr-right">
+    <div class="hdr-ip">
+      <div>LAN IP: <b id="st-ip">--</b></div>
+      <div class="sub" id="st-hw">CPU -- | BAT --</div>
+    </div>
+    <div class="hdr-sram">
+      <div class="sram-lbl">SRAM: <b id="st-ram">--</b></div>
+      <div class="sram-track"><div id="sram-fill" class="sram-fill"></div></div>
+    </div>
+    <div id="conn-pill" class="conn-pill"><span class="dot"></span><span id="conn-txt">CONNECTED</span></div>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="tab active" data-tab="studio">&#x270E; App Studio</button>
+  <button class="tab" data-tab="files">&#x1F4C1; SD Files</button>
+  <button class="tab" data-tab="console">&gt;_ Live Console</button>
+  <button class="tab" data-tab="settings">&#x2699; Settings</button>
+</nav>
+
+<section id="tab-studio" class="tab-panel studio-grid">
+  <div class="card screen-card">
+    <div class="card-head">
+      <span>LIVE DEVICE SCREEN (320x320)</span>
+      <button id="btn-shot" class="btn sm amber">Capture Screen</button>
+    </div>
+    <div class="screen-stage">
+      <div class="bezel">
+        <img id="live-img" alt="Click Capture Screen" width="320" height="320">
+        <div id="live-empty" class="live-empty">Click <b>Capture Screen</b> to grab live PicoCalc display</div>
+      </div>
+    </div>
+    <div class="vpad-wrap">
+      <div class="dpad">
+        <button class="vkey up" data-key="UP">&#x25B2;</button>
+        <button class="vkey left" data-key="LEFT">&#x25C0;</button>
+        <button class="vkey enter" data-key="ENTER">ENT</button>
+        <button class="vkey right" data-key="RIGHT">&#x25B6;</button>
+        <button class="vkey down" data-key="DOWN">&#x25BC;</button>
+      </div>
+      <div class="vkeys-right">
+        <div class="vpad-title">VIRTUAL CONTROLLER</div>
+        <div class="vrow">
+          <button class="vkey" data-key="F1">F1</button>
+          <button class="vkey" data-key="F2">F2</button>
+          <button class="vkey" data-key="F3">F3</button>
+          <button class="vkey" data-key="F4">F4</button>
+          <button class="vkey" data-key="F5">F5</button>
+        </div>
+        <div class="vrow">
+          <button class="vkey" data-key="1">1</button>
+          <button class="vkey" data-key="2">2</button>
+          <button class="vkey" data-key="3">3</button>
+          <button class="vkey wide" data-key="ESC">BACK<br>ESC</button>
+          <button class="vkey wide" data-key="HOME">HOME<br>MENU</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="right-col">
+    <div class="card editor-card">
+      <div class="card-head">
+        <span>APP STUDIO // ACTIVE WORKSPACE</span>
+        <span id="file-size" class="muted"></span>
+      </div>
+      <div class="ed-toolbar">
+        <div class="file-tab">
+          <span id="active-file">apps/hello_world.py</span>
+          <span id="dirty-dot" class="dirty hidden">*</span>
+        </div>
+        <div class="ed-btns">
+          <button id="btn-save" class="btn sm ok" disabled>Save to Device</button>
+          <button id="btn-syntax" class="btn sm" disabled>Syntax</button>
+          <button id="btn-run" class="btn sm amber" disabled>Run (F5)</button>
+        </div>
+      </div>
+      <div class="editor-wrap">
+        <pre id="line-nums" class="line-nums">1</pre>
+        <textarea id="code-area" class="code-area" spellcheck="false" wrap="off" placeholder="Open any file from SD Files or click a quick-open pill..."></textarea>
+      </div>
+    </div>
+
+    <div class="card term-card">
+      <div class="card-head">
+        <span>DEVICE CONSOLE (WebPortal REST)</span>
+        <button id="btn-clr-log" class="btn sm">Clear</button>
+      </div>
+      <pre id="term-log" class="term-log">[SYSTEM] PinhOS WebPortal Studio ready.
+PinhOS&gt; _</pre>
+    </div>
+  </div>
+</section>
+
+<section id="tab-files" class="tab-panel hidden files-layout">
+  <div class="card files-card">
+    <div class="card-head">
+      <span id="cwd-label">/sd/pinhos</span>
+      <div class="ed-btns">
+        <button id="btn-up" class="btn sm">&#x2191; Up</button>
+        <button id="btn-refresh" class="btn sm">&#x21BB; Refresh</button>
+        <button id="btn-new-file" class="btn sm amber">+ File</button>
+        <button id="btn-new-dir" class="btn sm">+ Folder</button>
+        <button id="btn-dl" class="btn sm">Download</button>
+        <button id="btn-del" class="btn sm danger">Delete</button>
+      </div>
+    </div>
+    <div class="quick-nav">
+      <button class="pill" data-nav="">/sd/pinhos</button>
+      <button class="pill" data-nav="apps">apps/</button>
+      <button class="pill" data-nav="tools">tools/</button>
+      <button class="pill" data-nav="themes">themes/</button>
+      <button class="pill" data-nav="screenshots">screenshots/</button>
+      <button class="pill" data-open="notes.txt">notes.txt</button>
+      <button class="pill" data-open="config.json">config.json</button>
+    </div>
+    <ul id="file-list" class="file-list"></ul>
+  </div>
+  <div id="bmp-pane" class="card bmp-card">
+    <div class="card-head">
+      <span id="bmp-name">BMP PREVIEW</span>
+      <a id="bmp-dl" class="btn sm amber hidden" download>Download BMP</a>
+    </div>
+    <div class="bmp-stage">
+      <img id="bmp-img" class="hidden" width="320" height="320" alt="Screenshot">
+      <div id="bmp-empty" class="muted">Click any .bmp in screenshots/ to preview, or click .py/.json/.txt to edit in App Studio.</div>
+    </div>
+  </div>
+</section>
+
+<section id="tab-console" class="tab-panel hidden">
+  <div class="card full-card">
+    <div class="card-head">
+      <span>LIVE TELEMETRY &amp; WEB.LOG</span>
+      <div class="ed-btns">
+        <button id="btn-weblog" class="btn sm">Load web.log</button>
+        <button id="btn-poll-now" class="btn sm amber">Poll /api/status</button>
+      </div>
+    </div>
+    <pre id="full-log" class="term-log big"></pre>
+  </div>
+</section>
+
+<section id="tab-settings" class="tab-panel hidden">
+  <div class="card settings-card">
+    <div class="card-head"><span>DEVICE STATUS &amp; CONTROLS</span></div>
+    <pre id="sys-json" class="sys-json">Loading /api/status...</pre>
+    <div class="set-actions">
+      <button id="btn-shot2" class="btn amber">Capture Screenshot</button>
+      <button id="btn-reboot" class="btn danger">Reboot PicoCalc</button>
+    </div>
+  </div>
+</section>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

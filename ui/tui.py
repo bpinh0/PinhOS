@@ -32,10 +32,12 @@ class TUIBackend:
         wl = getattr(bar, "wifi_level", None)
         bi = getattr(bar, "bat_info", None)
         lnk = bool(getattr(bar, "serial_link", False))
+        web_on = bool(getattr(bar, "web_active", False))
         bat_w = 20 if bi is not None else 0
         wf_w = 17 if wl is not None else 0
         lnk_w = 24 if lnk else 0
-        max_left = max(1, (bar.w - left_x - right_w - bat_w - wf_w - lnk_w - 6) // 6)
+        web_w = 24 if web_on else 0
+        max_left = max(1, (bar.w - left_x - right_w - bat_w - wf_w - lnk_w - web_w - 6) // 6)
 
         b.text(bar.title[:max_left], left_x, bar.y + 4, c_acc)
         cur_x = bar.x + bar.w - 3
@@ -57,6 +59,11 @@ class TUIBackend:
             cur_x -= 20
             b.fill_rect(cur_x, bar.y + 2, 20, 11, c_acc)
             b.text("LNK", cur_x + 1, bar.y + 4, c_afg)
+            cur_x -= 4
+        if web_on:
+            cur_x -= 20
+            b.fill_rect(cur_x, bar.y + 2, 20, 11, c_acc)
+            b.text("WEB", cur_x + 1, bar.y + 4, c_afg)
             cur_x -= 4
         # Double-line terminal header rule
         b.hline(bar.x, bar.y + bar.h - 3, bar.w, c_bdr)
