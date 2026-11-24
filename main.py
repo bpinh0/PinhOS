@@ -855,7 +855,10 @@ def enable_wdt(timeout_ms=8000):
             lg = runtime_state.get("logger")
             if lg is not None:
                 try:
-                    lg.info("WDT: Armed ({}ms)".format(ms))
+                    if hasattr(lg, "log_wdt"):
+                        lg.log_wdt("ARMED ({}ms)".format(ms))
+                    else:
+                        lg.info("WDT: Armed ({}ms)".format(ms))
                 except Exception:
                     pass
             return True
@@ -1950,6 +1953,40 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
             manifest.get("version", "1.0.0-alpha.4.3"), free_b
         ))
         if interactive:
+            if prev_crash and prev_crash.get("wdt_reset"):
+                try:
+                    from ui.widgets import Dialog
+                    _op = str(prev_crash.get("op", "IDLE"))
+                    _det = str(prev_crash.get("detail", ""))
+                    _kb = int(prev_crash.get("free_kb", 0))
+                    _dlg = Dialog(
+                        16, 68, 288, 168,
+                        title="WATCHDOG RESET RECOVERED",
+                        lines=[
+                            "Previous session timed out (>8s)",
+                            "and was safely restarted by WDT.",
+                            "Last Op: {} {}".format(_op, ("(" + _det + ")") if _det else "")[:38],
+                            "SRAM before reset: {} KB".format(_kb),
+                            "See [CTRL+L] -> wdt.log for details.",
+                        ],
+                        footer="[ANY KEY] Continue to Desktop",
+                        kind="warn",
+                    )
+                    ui.add_widget(_dlg)
+                    ui.render(force=False)
+                    board.clear_input()
+                    _pf = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
+                    while True:
+                        feed_wdt()
+                        if _pf and _pf() is not None:
+                            board.beep(1200, 12)
+                            break
+                        _sleep_ms(30)
+                    ui.remove_widget(_dlg)
+                    ui.mark_all_dirty(True)
+                    board.clear_input()
+                except Exception:
+                    pass
             ui_loop()
         return {
             "mode": "NORMAL",
