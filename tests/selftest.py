@@ -845,9 +845,9 @@ def run_all(root="/sd/pinhos", interactive_wait=False):
         total_n = len(suites)
         for idx, (label, fn) in enumerate(suites, 1):
             try:
-                _pm_w = sys.modules.get("main") or sys.modules.get("_pinhos_main")
-                if _pm_w is not None and hasattr(_pm_w, "feed_wdt"):
-                    _pm_w.feed_wdt()
+                _w = sys.modules.get("__pinhos_wdt__")
+                if _w is not None:
+                    _w.feed()
             except Exception:
                 pass
             _draw_progress(idx, total_n, label, results)

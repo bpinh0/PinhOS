@@ -61,18 +61,33 @@ def _extract_key(ev):
     return str(val).lower() if val is not None else str(ev).lower()
 
 
+def _feed_wdt():
+    try:
+        import sys as _sy
+        _w = _sy.modules.get("__pinhos_wdt__")
+        if _w is not None:
+            _w.feed()
+    except Exception:
+        pass
+
+
 def _scan_wifi():
     if network is None:
         return [], "No network module"
     try:
+        _feed_wdt()
         wlan = network.WLAN(network.STA_IF)
         if not wlan.active():
             wlan.active(True)
             time.sleep_ms(600)
+        _feed_wdt()
         raw = wlan.scan()
+        _feed_wdt()
         if not raw:
             time.sleep_ms(400)
+            _feed_wdt()
             raw = wlan.scan()
+            _feed_wdt()
         aps = []
         for item in raw:
             ssid = item[0]

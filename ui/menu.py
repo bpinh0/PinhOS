@@ -85,6 +85,7 @@ MENU_TREE = {
         {"id": "set:swap_kb", "label": "SD Swap Quota", "dyn": "swap_kb"},
         {"id": "act:swap_clr", "label": "Clear Swap Cache", "dyn": "swap_used"},
         {"id": "set:sleep_to", "label": "Auto-Sleep Timer", "dyn": "sleep_to"},
+        {"id": "set:wdt_to", "label": "Hardware Watchdog", "dyn": "wdt_to"},
         {"id": "act:sleep", "label": "Sleep Now (5s)", "badge": "[^Z]"},
         {"id": "cfg:save_snap", "label": "Save Config Snapshot", "badge": "[SD]"},
         {"id": "cfg:load_snap", "label": "Restore Config Snapshot", "dyn": "snap_st"},
@@ -327,6 +328,9 @@ def _dyn_badge(tag, board, ui, manifest, cfg=None):
     if tag == "sleep_to":
         sec = int(cfg.get("sleep_timeout_s", 300) if cfg else 300)
         return "OFF" if sec <= 0 else "{}m".format(sec // 60)
+    if tag == "wdt_to":
+        ms = int(cfg.get("wdt_timeout_ms", 8000) if cfg else 8000)
+        return "OFF" if ms <= 0 else "{}s".format(ms // 1000)
     if tag == "sound":
         return "ON" if (cfg.get("sound", True) if cfg else True) else "OFF"
     if tag == "layout":
@@ -945,6 +949,15 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                         status_msg, status_kind = "CPU Clock: {} MHz ({})".format(nxt, tag), "warn" if nxt > 150 else "ok"
                     except Exception as e:
                         status_msg, status_kind = "CPU Clock err: " + str(e)[:20], "err"
+                    _sync(force=True)
+                elif aid == "set:wdt_to":
+                    opts = (8000, 6000, 4000, 0)
+                    cur = int(cfg.get("wdt_timeout_ms", 8000) if cfg else 8000)
+                    nxt = opts[(opts.index(cur) + 1) % len(opts)] if cur in opts else 8000
+                    if cfg:
+                        cfg.set("wdt_timeout_ms", nxt, save_now=True)
+                    lbl = "OFF" if nxt <= 0 else "{}s (max 8.3s)".format(nxt // 1000)
+                    status_msg, status_kind = "Watchdog: {} (next boot)".format(lbl), ("warn" if nxt <= 0 else "ok")
                     _sync(force=True)
                 elif aid == "act:sleep":
                     return "SLEEP_NOW"
