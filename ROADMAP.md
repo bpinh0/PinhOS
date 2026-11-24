@@ -1,7 +1,7 @@
 # 🌲 PinhOS — Architectural Specification & Engineering Roadmap
 
 > **Target Platform:** ClockworkPi PicoCalc (Raspberry Pi Pico 2W / RP2350 — Dual ARM Cortex-M33 @ 150 MHz, 520 KB SRAM, 4 MB Flash, CYW43439 Wi-Fi 4 + BLE 5.2, 320×320 SPI LCD, I2C STM32 Southbridge, SPI microSD).  
-> **Current Status:** Active Development — `v1.0.0-alpha.4.1` (**Phase 1 + Phase 2 + Phase 3 + Phase 3.1 + Phase 4 + Stability/Security Hardening Complete & Verified 12/12 + Stress Gates 13–14 on Hardware** — Android-Style Desktop Home Screen with live SRAM/CPU sparklines, SWAP & Battery bars, `IP`/`Offline` status & `<= 1 KB` Quick Notes, App Drawer `GRID`/`LIST`, 6-Category Settings Tree with dedicated Date/Time/NTP & SD Swap Quota, Built-In BusyBox CLI, On-Device Editor, File Commander, Net Probes, HAL UART1 Console, System Monitor, BMP Screenshots, Non-Blocking `uasyncio` **WebPortal Browser IDE** with CYW43439 RX pump, and `.mpy` Core OS Bytecode Deployment; **Phase 5 Async Wi-Fi/SoftAP, SHA-256 OTA & App Store next**).
+> **Current Status:** Active Development — `v1.0.0-alpha.4.2` (**Phase 1 + Phase 2 + Phase 3 + Phase 3.1 + Phase 4.x Stability, Security & Watchdog Hardening Complete & Verified 12/12 + Deep Stress Suite on Hardware** — Android-Style Desktop Home Screen with live SRAM/CPU sparklines, SWAP & Battery bars, `IP`/`Offline` status, `WEB ON [6:KEY]` & `<= 1 KB` Quick Notes, App Drawer `GRID`/`LIST`, 6-Category Settings Tree with Date/Time/NTP, Wi-Fi Country Code prompt & SD Swap Quota, Built-In BusyBox CLI, On-Device Editor, File Commander, Net Probes, HAL UART1 Console, System Monitor, BMP Screenshots, Hardened Non-Blocking `uasyncio` **WebPortal Browser IDE** with fail-closed `X-PinhOS-Token` auth & CYW43439 RX pump, RP2350 Hardware Watchdog with sandbox/tool/REPL keep-alive, `boot_id` + `HEAP[...]` observability, release-stamping CI, and 31-module `.mpy` Core OS Bytecode Deployment; **Phase 5 Async Wi-Fi/SoftAP, Signed Atomic SHA-256 OTA & App Store next**).
 
 ---
 
@@ -152,23 +152,32 @@ def main(ctx):
   - **App Studio & Virtual Controller:** Line-numbered code editor with `Ctrl+S` streaming save to SD, `compile()` syntax check (`/api/syntax`), remote `SandboxRunner` app launch (`/api/run`), Live 320×320 Device Screen capture (`/api/screenshot`), and interactive Virtual Controller wired to `POST /api/key`.
   - **SD Files, Live Console & Settings:** Browse/create/download/delete under `/sd/pinhos/`, inline BMP previewer, live telemetry bar (`/api/status` including SWAP stats), `web.log` viewer (`/api/weblog`), and remote reboot (`/api/reboot`), verified **12/12 PASS** with Gate 12 loopback & `0 B` SRAM delta.
 - [x] **4.3 Pre-Compiled `.mpy` Core OS Bytecode & Desktop/Settings Polish (`picocalc.ps1`, `ui/`, `core/`):**
-  - Automated `mpy-cross` (`v1.25.0`, mpy `v6.3`, `-O2`) build & deploy pipeline in `picocalc.ps1` for 29 core OS modules (`boards/`, `core/`, `ui/`, `net/`, `web/`, `tools/_shell_cmds.py`, `tests/`, and `main.py` → `_pinhos_main.mpy` + entry shim; `-NoMpy` fallback), reclaiming **+84 KB free SRAM (`~218 KB` free on boot)** while keeping `tools/*.py`, `apps/*.py`, `themes/*.json`, and `web/static/*` plain text on SD.
-  - Upgraded Desktop Home (`ui/desktop.py`) with live **CPU sparkline**, horizontal **SWAP bar**, and `IP: X.X.X.X` / `Offline` status; added configurable **SD Swap Quota** (`swap_max_kb`) & eviction in `core/swap.py`.
-  - Expanded Settings to **6 categories** (`ui/menu.py`, on-demand `ui/_menu_net.py`, `ui/_log_view.py`) with dedicated **Date, Time & NTP** (manual Date/Time editors, background-only NTP, persistent SD RTC retention in `/sd/pinhos/rtc_state.json`) and `ListMenu` Log File Picker (`CTRL+L`).
+  - Automated `mpy-cross` (`v1.25.0`, mpy `v6.3`, `-O2`) build & deploy pipeline in `picocalc.ps1` for 31 core OS modules (`boards/`, `core/`, `ui/`, `net/`, `web/`, `tools/_shell_cmds.py`, `tests/`, and `main.py` → `_pinhos_main.mpy` + entry shim; `-NoMpy` fallback), reclaiming **+84 KB free SRAM (`~220–240 KB` free / `96 KB` contiguous block on boot)** while keeping `tools/*.py`, `apps/*.py`, `themes/*.json`, and `web/static/*` plain text on SD.
+  - Upgraded Desktop Home (`ui/desktop.py`) with live **CPU sparkline**, horizontal **SWAP bar**, `WEB ON [6:KEY]` indicator, and `IP: X.X.X.X` / `Offline` status; added configurable **SD Swap Quota** (`swap_max_kb`) & eviction in `core/swap.py`.
+  - Expanded Settings to **6 categories** (`ui/menu.py`, on-demand `ui/_menu_net.py`, `ui/_log_view.py`) with dedicated **Date, Time & NTP** (manual Date/Time editors, background-only NTP, persistent SD RTC retention in `/sd/pinhos/rtc_state.json`), **Wi-Fi Country Code** prompt & ISO-3166 alpha-2 validation (`wifi_country`), and `ListMenu` Log File Picker (`CTRL+L`).
+- [x] **4.4 Stability, Security, Watchdog & Audit Close-Out (`v1.0.0-alpha.4.1` → `v1.0.0-alpha.4.2`):**
+  - **WebPortal Read/Write Auth Hardening (`#23`):** Fail-closed 16-hex `os.urandom(8)` token (removed static fallback), `X-PinhOS-Token` enforced across all `/api/*` reads & writes, sensitive-file denylist (`wifi.json`, `.swap/`, `breadcrumb.json`, `boot_state.json`, `rtc_state.json` → `403`), 5-failure `429` lockout (`30s`), authenticated Blob URLs in `web/static/app.js`, and uncropped on-device `WEBPORTAL IDE ACTIVE` URL & Token popup (`[6]` menu).
+  - **RP2350 Hardware Watchdog Coverage (`#14`, `#28`):** Shared `sys.modules["__pinhos_wdt__"]` handle (working around read-only MicroPython `builtins`), unconditional `feed_wdt()` in `ui_loop()` (with or without WebPortal active), automatic `board.poll_key` WDT-feed wrapper in `core/sandbox.py` for all sandboxed tools (`shell`, `files`, `editor`, etc.), `_TrackedHandle` file I/O feeds, `<= 4s` `net/sync.py` socket timeouts, standalone-only arming, and hardware `Timer` REPL keep-alive after serial `Ctrl+C`.
+  - **Observability, Heap Telemetry & Autostart (`#13`, `#24`, `#26`, `#29`):** Cached per-boot `boot_id` + `+ms` timestamps, HTTP status/IP/denied request logs in `web.log`, Wi-Fi/NTP result logs, `largest_free(cap=98304)` 96 KB contiguous-heap probe, `HEAP[BOOT_OK|WEB_START|IDLE_DESKTOP|FIRST_TOOL]` timeline logs, and idempotent `_init_interactive_services()` on `ui_loop()` entry.
+  - **Deep Stress Suite & Release Engineering (`#11`, `#21`, `#25`):** Dedicated `.\picocalc.ps1 stress` action (Gate 13 `20×` real-tool launch, Gate 14 live Wi-Fi scan + HTTP + pause/resume, 7-menu walk), UI auto-restore after `test`/`stress`, `scripts/stamp_release.ps1` + `.github/workflows/release-check.yml` tag validator, and runbooks/design docs (`docs/runbooks/`, `docs/design/phase5_ota_security.md`).
 
 ---
 
-### Phase 5: Wi-Fi SoftAP Fallback, GitHub OTA & App/Theme Store (`net/`)
+### Phase 5: Wi-Fi SoftAP Fallback, Signed Atomic OTA & App/Theme Store (`net/`)
 - [ ] **5.1 Wi-Fi STA Manager, Async Background Radio & SoftAP Captive Fallback (`net/wifi.py`):**
-  - [x] Multi-network credential store (`wifi.json`), signal strength scanner, 3-attempt auto-retry connect with hard CYW43 radio bounce, and literal-IPv4 UDP NTP + non-blocking HTTP Date fallback.
+  - [x] Multi-network credential store (`wifi.json`), signal strength scanner, 3-attempt auto-retry connect with hard CYW43 radio bounce, ISO-3166 `wifi_country` prompt, and literal-IPv4 UDP NTP + non-blocking HTTP Date fallback.
   - [ ] Move Wi-Fi association, DHCP polling, and NTP sync to a fully asynchronous `uasyncio` background task (with RP2350 Core 1 LCD DMA / CYW43439 concurrency tuning so networking never impacts UI responsiveness or drops UDP packets).
   - [ ] Automatic SoftAP hotspot fallback (`PinhOS-Setup`) for headless field configuration via WebPortal when no saved STA network is reachable.
-- [ ] **5.2 GitHub OTA Updater (`net/ota.py`):**
-  - Fetch remote `version.json` and file manifest from configured GitHub release/branch.
-  - Download changed files into `/sd/pinhos/.ota_staging/`, verify SHA-256 digests, atomically swap into place, and leverage Phase 1's 3-strike Boot Guard for automatic recovery if an update fails to boot.
+- [ ] **5.2 Signed Atomic GitHub OTA Updater (`net/ota.py` — per `docs/design/phase5_ota_security.md`):**
+  - [x] Security & authenticity architecture design (`docs/design/phase5_ota_security.md`) + single-source-of-truth `version.json` OTA metadata (`#21`).
+  - [ ] Execute on-device TLS heap spike benchmark (measure free SRAM & `largest_free(96KB)` during `ssl.wrap_socket` to GitHub raw/API).
+  - [ ] Implement clean-heap **Updater Mode** (stop WebPortal, purge UI modules before TLS), download signed `release_manifest.json` + changed files into `/sd/pinhos/.ota_staging/`, verify signature/pinned release & SHA-256 digests, atomically swap A/B files (writing `version.json` last), and integrate with the 3-strike Boot Guard for automatic rollback.
 - [ ] **5.3 GitHub App & Theme Store (`net/store.py`):**
   - [x] Direct GitHub theme/app sync and remote version check (`net/sync.py`).
-  - [ ] Curated catalog browser (`store_index.json`) with category filters, version tags, `min_sram` compatibility badges, and one-click install/update/remove into `/sd/pinhos/apps/` and `/sd/pinhos/themes/`.
+  - [ ] Curated catalog browser (`store_index.json`) with category filters, version tags, `min_sram` compatibility badges, SHA-256 verification, and one-click install/update/remove into `/sd/pinhos/apps/` and `/sd/pinhos/themes/`.
+- [ ] **5.4 Optional Bytecode & Diagnostics Polish:**
+  - [ ] Evaluate pre-compiling `tools/shell.py` (or splitting command parser) if low-memory launch fragmentation is observed under heavy WebPortal + TLS workloads.
+  - [ ] Add on-device WebPortal QR code generator for quick phone/laptop URL + token pairing.
 
 ---
 
