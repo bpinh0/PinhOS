@@ -69,9 +69,13 @@ async def _req_tcp(host, port, m, tgt, body=None):
         except Exception: pass
 
 
-async def _req_pipe(ws, m, tgt, body=None, collect_body=True):
+async def _req_pipe(ws, m, tgt, body=None, collect_body=True, hdrs=None):
     bb = body.encode("utf-8") if isinstance(body, str) else (body or b"")
-    raw = "{} {} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n".format(m, tgt, len(bb)).encode("utf-8") + bb
+    ex = ""
+    if hdrs:
+        for k, v in hdrs.items():
+            ex += "{}: {}\r\n".format(k, v)
+    raw = "{} {} HTTP/1.1\r\nHost: 127.0.0.1\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n".format(m, tgt, ex, len(bb)).encode("utf-8") + bb
     wr = _MemW()
     await ws._handle_client(_MemR(raw), wr)
     _assert(wr.closed, "writer not closed")
@@ -96,35 +100,35 @@ def test_webportal_loopback(root="/sd/pinhos"):
     board = get_board()
     board.ensure_serial_repl()
     manifest = load_version_manifest(root=root)
-    rel = ".swap/_gate12_web.txt"
+    rel = "apps/_gate12_web.txt"
     full = root.rstrip("/") + "/" + rel
     txt = "PinhOS Phase 4 WebPortal Loopback OK!"
-    mode = ["tcp"]
+    mode = ["pipe"]
 
     async def _run():
         ws = WebServer(board=board, manifest=manifest, root=root, host="0.0.0.0", port=8080)
         await ws.start_async()
+        tok_h = {"X-PinhOS-Token": ws.token}
         try:
-            tcp = True
-            try:
-                c1, b1 = await _req_tcp("127.0.0.1", 8080, "GET", "/")
-                mode[0] = "tcp"
-            except OSError:
-                tcp = False
-                mode[0] = "pipe"
-                c1, b1 = await _req_pipe(ws, "GET", "/", collect_body=False)
-            req = (lambda m, t, b=None: _req_tcp("127.0.0.1", 8080, m, t, b)) if tcp else (lambda m, t, b=None: _req_pipe(ws, m, t, b))
+            c1, b1 = await _req_pipe(ws, "GET", "/", collect_body=False)
             _assert(c1 == 200 and b"PinhOS" in b1, "GET / fail: {}".format(c1))
-            c2, b2 = await req("GET", "/api/status")
+            c2, b2 = await _req_pipe(ws, "GET", "/api/status")
             st = json.loads(b2.decode("utf-8"))
-            _assert(c2 == 200 and st.get("ok") and "sram_free" in st and st.get("root") == root.rstrip("/"), "status fail")
-            c3, b3 = await req("POST", "/api/file?path=" + rel, txt)
-            _assert(c3 == 200 and json.loads(b3.decode("utf-8")).get("bytes") == len(txt), "POST fail")
-            c4, b4 = await req("GET", "/api/file?path=" + rel)
+            _assert(c2 == 200 and st.get("ok") and "sram_free" in st and "sram_largest" in st and st.get("root") == root.rstrip("/"), "status fail")
+            # Auth, CORS Origin, and write-allowlist security checks (#15)
+            c_noauth, _ = await _req_pipe(ws, "POST", "/api/file?path=" + rel, txt)
+            _assert(c_noauth == 401, "missing token should 401, got {}".format(c_noauth))
+            c_cors, _ = await _req_pipe(ws, "POST", "/api/file?path=" + rel, txt, hdrs={"X-PinhOS-Token": ws.token, "Origin": "http://evil.example"})
+            _assert(c_cors == 403, "cross-origin should 403, got {}".format(c_cors))
+            c_deny, _ = await _req_pipe(ws, "POST", "/api/file?path=core/config.py", txt, hdrs=tok_h)
+            _assert(c_deny == 403, "core write should 403, got {}".format(c_deny))
+            c3, b3 = await _req_pipe(ws, "POST", "/api/file?path=" + rel, txt, hdrs=tok_h)
+            _assert(c3 == 200 and json.loads(b3.decode("utf-8")).get("bytes") == len(txt), "POST fail: {}".format(c3))
+            c4, b4 = await _req_pipe(ws, "GET", "/api/file?path=" + rel)
             _assert(c4 == 200 and b4.decode("utf-8") == txt, "GET file fail")
-            c5, b5 = await req("DELETE", "/api/file?path=" + rel)
+            c5, b5 = await _req_pipe(ws, "DELETE", "/api/file?path=" + rel, hdrs=tok_h)
             _assert(c5 == 200 and json.loads(b5.decode("utf-8")).get("ok"), "DEL fail")
-            c6, _ = await req("GET", "/api/file?path=../../boot.py")
+            c6, _ = await _req_pipe(ws, "GET", "/api/file?path=../../boot.py")
             _assert(c6 == 403, "traversal guard fail: {}".format(c6))
         finally:
             await ws.stop_async()
@@ -143,4 +147,4 @@ def test_webportal_loopback(root="/sd/pinhos"):
         try: os.remove(full)
         except OSError: pass
         board.ensure_serial_repl()
-    return "HTTP 200 ({},/,st,R/W/D,403) d={}B".format(mode[0], delta)
+    return "HTTP 200 ({},/,st,401/403,R/W/D) d={}B".format(mode[0], delta)
