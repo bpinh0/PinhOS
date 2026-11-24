@@ -4,10 +4,10 @@
 import gc
 
 
-def largest_free(cap=32768, step=1024):
+def largest_free(cap=98304, step=1024):
     """
-    Estimate the largest contiguous free SRAM block (bytes) via gc.collect() +
-    binary search with transient bytearray probes. Leaves zero persistent heap.
+    Estimate the largest contiguous free SRAM block (bytes, default 96 KB cap) via
+    gc.collect() + binary search with transient bytearray probes. Zero persistent heap.
     """
     gc.collect()
     free_b = gc.mem_free() if hasattr(gc, "mem_free") else int(cap)
