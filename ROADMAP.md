@@ -1,7 +1,7 @@
 # 🌲 PinhOS — Architectural Specification & Engineering Roadmap
 
 > **Target Platform:** ClockworkPi PicoCalc (Raspberry Pi Pico 2W / RP2350 — Dual ARM Cortex-M33 @ 150 MHz, 520 KB SRAM, 4 MB Flash, CYW43439 Wi-Fi 4 + BLE 5.2, 320×320 SPI LCD, I2C STM32 Southbridge, SPI microSD).  
-> **Current Status:** Active Development — `v1.0.0-alpha.4.3` (**Phase 1 + Phase 2 + Phase 3 + Phase 3.1 + Phase 4.x Stability, Security & Watchdog Hardening Complete & Verified 12/12 + Deep Stress Suite on Hardware** — Android-Style Desktop Home Screen with live SRAM/CPU sparklines, SWAP & Battery bars, `IP`/`Offline` status, `WEB ON [6:KEY]` & `<= 1 KB` Quick Notes, App Drawer `GRID`/`LIST`, 6-Category Settings Tree with Date/Time/NTP, Wi-Fi Country Code prompt & SD Swap Quota, Built-In BusyBox CLI, On-Device Editor, File Commander, Net Probes, HAL UART1 Console, System Monitor, BMP Screenshots, Hardened Non-Blocking `uasyncio` **WebPortal Browser IDE** with fail-closed `X-PinhOS-Token` auth & CYW43439 RX pump, RP2350 Hardware Watchdog with sandbox/tool/REPL keep-alive, `boot_id` + `HEAP[...]` observability, release-stamping CI, and 31-module `.mpy` Core OS Bytecode Deployment; **Phase 5 Async Wi-Fi/SoftAP, Signed Atomic SHA-256 OTA & App Store next**).
+> **Current Status:** Active Development — `v1.0.0-alpha.4.4` (**Phase 1 + Phase 2 + Phase 3 + Phase 3.1 + Phase 4.x Stability, Security & Watchdog Hardening Complete & Verified 12/12 + Deep Stress Suite on Hardware** — Android-Style Desktop Home Screen with live SRAM/CPU sparklines, SWAP & Battery bars, `IP`/`Offline` status, `WEB ON [6:KEY]` & `<= 1 KB` Quick Notes, App Drawer `GRID`/`LIST`, 6-Category Settings Tree with Date/Time/NTP, Wi-Fi Country Code prompt & SD Swap Quota, Built-In BusyBox CLI, On-Device Editor, File Commander, Net Probes, HAL UART1 Console, System Monitor, BMP Screenshots, Hardened Non-Blocking `uasyncio` **WebPortal Browser IDE** with fail-closed `X-PinhOS-Token` auth & CYW43439 RX pump, RP2350 Hardware Watchdog with sandbox/tool/REPL keep-alive, `boot_id` + `HEAP[...]` observability, release-stamping CI, and 31-module `.mpy` Core OS Bytecode Deployment; **Phase 5 Async Wi-Fi/SoftAP, Signed Atomic SHA-256 OTA & App Store next**).
 
 ---
 
@@ -177,7 +177,7 @@ def main(ctx):
   - [x] Direct GitHub theme/app sync and remote version check (`net/sync.py`).
   - [ ] Curated catalog browser (`store_index.json`) with category filters, version tags, `min_sram` compatibility badges, SHA-256 verification, and one-click install/update/remove into `/sd/pinhos/apps/` and `/sd/pinhos/themes/`.
 - [ ] **5.4 Optional Bytecode & Diagnostics Polish:**
-  - [ ] Surface RP2350 Watchdog (`WDT`) diagnostics & reset-cause log entries (`wdt.log` / filtered view of `WDT` arm/reset/breadcrumb events) directly in the on-device **Logs** menu (`CTRL+L` / `ui/_log_view.py`).
+  - [x] Surface RP2350 Watchdog (`WDT`) diagnostics & reset-cause log entries (`wdt.log` + friendly `WATCHDOG RESET RECOVERED` notice) directly in the on-device **Logs** menu (`CTRL+L` / `ui/_log_view.py`, `v1.0.0-alpha.4.4`).
   - [ ] Evaluate pre-compiling `tools/shell.py` (or splitting command parser) if low-memory launch fragmentation is observed under heavy WebPortal + TLS workloads.
   - [ ] Add on-device WebPortal QR code generator for quick phone/laptop URL + token pairing.
 
