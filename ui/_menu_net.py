@@ -12,6 +12,68 @@ def _sleep_ms(ms):
         time.sleep(ms / 1000.0)
 
 
+def is_valid_country_code(code):
+    """Validate 2-letter ISO-3166 alpha-2 Wi-Fi regulatory code (rejects 'XX') (#27)."""
+    s = str(code or "").strip().upper()
+    if len(s) != 2 or s == "XX":
+        return False
+    return ("A" <= s[0] <= "Z") and ("A" <= s[1] <= "Z")
+
+
+def wifi_prompt_country(board, ui, fb, cfg=None):
+    """Prompt for 2-letter ISO-3166 Wi-Fi country code (e.g. US, GB, DE, PT), validate & persist (#27)."""
+    cur = str(cfg.get("wifi_country", "XX") if cfg else "XX").strip().upper()
+    buf = "" if cur == "XX" else cur[:2]
+    board.clear_input()
+    poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
+    err_msg = ""
+    while True:
+        st_txt = err_msg if err_msg else "Wi-Fi Country (2-ltr e.g. US/GB): {}_".format(buf)
+        fb.update(
+            status=st_txt,
+            status_kind="err" if err_msg else "info",
+            hints="A-Z (2 chars) ENT:Save ESC:Skip",
+        )
+        ui.render(force=False)
+        k = poll_fn() if poll_fn else None
+        if k is None:
+            _sleep_ms(30); continue
+        err_msg = ""
+        ku = str(k).upper()
+        if ku in ("ESC", "BACK"):
+            return None
+        if ku in ("ENTER", "RETURN"):
+            cc = buf.strip().upper()
+            if not is_valid_country_code(cc):
+                board.beep(700, 15)
+                err_msg = "Invalid '{}': use 2 letters (not XX)".format(cc)
+                continue
+            if cfg is not None:
+                cfg.set("wifi_country", cc, save_now=True)
+            try:
+                import network
+                if hasattr(network, "country"):
+                    network.country(cc)
+            except Exception:
+                pass
+            board.beep(1450, 12)
+            return cc
+        if ku == "BACKSPACE":
+            buf = buf[:-1]
+        elif len(ku) == 1 and ("A" <= ku <= "Z") and len(buf) < 2:
+            buf += ku
+
+
+def ensure_wifi_country(board, ui, fb, cfg=None):
+    """If wifi_country is still 'XX', prompt once during Wi-Fi setup (#27)."""
+    if cfg is None:
+        return None
+    cur = str(cfg.get("wifi_country", "XX")).strip().upper()
+    if is_valid_country_code(cur):
+        return cur
+    return wifi_prompt_country(board, ui, fb, cfg=cfg)
+
+
 def wifi_prompt_password(board, ui, fb, ssid, initial=""):
     """Inline password prompt on FooterBar (TAB toggles mask, ENTER submits, ESC cancels)."""
     buf = str(initial)
@@ -140,6 +202,7 @@ def wifi_connect_dialog(board, ui, wm, ssid, pw, save=True, cfg=None):
 
 def wifi_scan_and_connect(board, ui, sb, lm, fb, cfg=None):
     from net.wifi import get_wifi_manager
+    ensure_wifi_country(board, ui, fb, cfg=cfg)
     wm = get_wifi_manager()
     fb.update(status="Scanning 2.4 GHz Wi-Fi...", status_kind="warn", hints="Please wait...")
     ui.render(force=False)
@@ -211,4 +274,5 @@ def wifi_saved_menu(board, ui, sb, lm, fb, cfg=None):
         elif ku == "ENTER":
             it = lm.get_selected_item()
             if it:
+                ensure_wifi_country(board, ui, fb, cfg=cfg)
                 return wifi_connect_dialog(board, ui, wm, it["id"], it["pw"], save=False, cfg=cfg)
