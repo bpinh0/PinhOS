@@ -1066,6 +1066,42 @@ def ui_loop(sel_action=0):
                 active, wmsg = toggle_webportal(board=board, cfg=cfg, logger=logger)
                 status_msg = ("WebPortal: " + str(wmsg)) if active else str(wmsg)
                 status_kind = "ok" if active else "info"
+                if active:
+                    _ws = runtime_state.get("web_server")
+                    _tok = str(getattr(_ws, "token", "")) if _ws is not None else ""
+                    try:
+                        from web import portal_url
+                        _url = portal_url(getattr(_ws, "port", 8080))
+                    except Exception:
+                        _url = "http://0.0.0.0:8080"
+                    from ui.widgets import Dialog
+                    _dlg = Dialog(
+                        12, 76, 296, 152,
+                        title="WEBPORTAL IDE ACTIVE",
+                        lines=[
+                            "URL:",
+                            " " + str(_url)[:34],
+                            "Token (X-PinhOS-Token):",
+                            " " + _tok,
+                            "View anytime: [6] -> URL & Token",
+                        ],
+                        footer="[ENT / ESC] Continue",
+                        kind="ok",
+                    )
+                    ui.add_widget(_dlg)
+                    ui.render(force=True)
+                    board.clear_input()
+                    _pf = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
+                    while True:
+                        feed_wdt()
+                        _k = _pf() if _pf else None
+                        if _k and str(_k).upper() in ("ENTER", "ESC", "SPACE", " ", "Q", "BACKSPACE"):
+                            board.beep(1100, 10)
+                            break
+                        step_webportal(20)
+                    ui.remove_widget(_dlg)
+                    _dlg = None
+                    gc.collect()
             board.set_lut(theme_mgr.active.lut)
             view = _mount_view()
             view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)
