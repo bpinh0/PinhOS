@@ -231,7 +231,8 @@ def test_phase3_field_tools(root="/sd/pinhos"):
         _assert((not on2) and _pm.runtime_state.get("serial_link") is False, "LNK disable failed")
         _pm = None
         sys.modules.pop("main", None)
-        gc.collect()
+        sys.modules.pop("_pinhos_main", None)
+        gc.collect(); gc.collect()
         from ui.menu import show_screenshot_toast
         fn, smsg = show_screenshot_toast(board, _ui, path=shot_p, timeout_ticks=1)
         _assert(fn and fn.startswith("shot_") and "Saved:" in str(smsg), "screenshot toast failed")
