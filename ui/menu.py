@@ -111,7 +111,10 @@ TOOL_MAP = {
 def _idle_wait(ms=30):
     try:
         import sys
-        m = sys.modules.get("main")
+        _w = sys.modules.get("__pinhos_wdt__")
+        if _w is not None:
+            _w.feed()
+        m = sys.modules.get("main") or sys.modules.get("_pinhos_main")
         if m and getattr(m, "runtime_state", {}).get("web_active") and hasattr(m, "step_webportal"):
             m.step_webportal(20)
             return
@@ -517,7 +520,10 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                         ui.render(force=False)
                 try:
                     import sys
-                    m = sys.modules.get("main")
+                    _w = sys.modules.get("__pinhos_wdt__")
+                    if _w is not None:
+                        _w.feed()
+                    m = sys.modules.get("main") or sys.modules.get("_pinhos_main")
                     if m and getattr(m, "runtime_state", {}).get("web_active") and hasattr(m, "step_webportal"):
                         m.step_webportal(20)
                         continue
