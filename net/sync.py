@@ -22,13 +22,24 @@ def get_repo_info(config=None):
     return str(repo).strip(), str(branch).strip()
 
 
+def _feed_wdt():
+    try:
+        import builtins as _bi
+        _w = getattr(_bi, "_pinhos_wdt", None)
+        if _w is not None:
+            _w.feed()
+    except Exception:
+        pass
+
+
 def _http_get_stream(url, dst_path=None, max_bytes=32768):
     """
     HTTPS GET using urequests/requests (if present) or raw socket+ssl.
     If dst_path is given, streams response in 1 KB chunks to dst_path and returns byte count.
-    Otherwise returns decoded text (capped at max_bytes).
+    Otherwise returns decoded text (capped at max_bytes). Socket timeout capped <= 4s for WDT (Refs #28).
     """
     gc.collect()
+    _feed_wdt()
     try:
         import urequests as req_mod
     except Exception:
@@ -39,8 +50,12 @@ def _http_get_stream(url, dst_path=None, max_bytes=32768):
 
     headers = {"User-Agent": "PinhOS-PicoCalc/1.0"}
     if req_mod is not None:
-        r = req_mod.get(url, headers=headers)
         try:
+            r = req_mod.get(url, headers=headers, timeout=4)
+        except TypeError:
+            r = req_mod.get(url, headers=headers)
+        try:
+            _feed_wdt()
             code = getattr(r, "status_code", 200)
             if code != 200:
                 raise RuntimeError("HTTP {}".format(code))
@@ -50,6 +65,7 @@ def _http_get_stream(url, dst_path=None, max_bytes=32768):
                 with open(dst_path, "wb") as f:
                     if raw is not None and hasattr(raw, "read"):
                         while total < max_bytes:
+                            _feed_wdt()
                             ch = raw.read(1024)
                             if not ch:
                                 break
@@ -58,6 +74,7 @@ def _http_get_stream(url, dst_path=None, max_bytes=32768):
                     else:
                         data = r.content
                         for i in range(0, len(data), 1024):
+                            _feed_wdt()
                             f.write(data[i:i + 1024])
                         total = len(data)
                 return total
@@ -69,7 +86,7 @@ def _http_get_stream(url, dst_path=None, max_bytes=32768):
                 pass
             gc.collect()
 
-    # Fallback raw TLS socket GET (zero external dependency)
+    # Fallback raw TLS socket GET (zero external dependency, <=4s socket timeout for WDT)
     import socket
     import ssl
     if not url.startswith("https://"):
@@ -78,16 +95,21 @@ def _http_get_stream(url, dst_path=None, max_bytes=32768):
     host, _, path = rest.partition("/")
     path = "/" + path
     s = socket.socket()
-    s.settimeout(10)
+    s.settimeout(4)
+    _feed_wdt()
     addr = socket.getaddrinfo(host, 443)[0][-1]
+    _feed_wdt()
     s.connect(addr)
+    _feed_wdt()
     ss = ssl.wrap_socket(s, server_hostname=host)
+    _feed_wdt()
     try:
         req = "GET {} HTTP/1.0\r\nHost: {}\r\nUser-Agent: PinhOS/1.0\r\nConnection: close\r\n\r\n".format(path, host)
         ss.write(req.encode())
         # Read headers
         hdr = b""
         while b"\r\n\r\n" not in hdr and len(hdr) < 4096:
+            _feed_wdt()
             ch = ss.read(256)
             if not ch:
                 break
@@ -102,6 +124,7 @@ def _http_get_stream(url, dst_path=None, max_bytes=32768):
                 if body:
                     f.write(body); total += len(body)
                 while total < max_bytes:
+                    _feed_wdt()
                     ch = ss.read(1024)
                     if not ch:
                         break
@@ -109,6 +132,7 @@ def _http_get_stream(url, dst_path=None, max_bytes=32768):
             return total
         out = bytearray(body)
         while len(out) < max_bytes:
+            _feed_wdt()
             ch = ss.read(1024)
             if not ch:
                 break
