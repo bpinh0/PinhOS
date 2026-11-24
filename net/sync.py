@@ -14,10 +14,11 @@ DEFAULT_BRANCH = "main"
 
 
 def get_repo_info(config=None):
+    """Single source of truth for OTA repo/branch: version.json (#21)."""
     m = load_version_manifest()
     ota = m.get("ota", {}) if isinstance(m, dict) else {}
-    repo = (config.get("ota_repo") if config else None) or ota.get("repo") or DEFAULT_REPO
-    branch = (config.get("ota_branch") if config else None) or ota.get("branch") or DEFAULT_BRANCH
+    repo = ota.get("repo") or DEFAULT_REPO
+    branch = ota.get("branch") or DEFAULT_BRANCH
     return str(repo).strip(), str(branch).strip()
 
 
