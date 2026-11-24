@@ -291,8 +291,8 @@ class WifiManager:
                     pass
             if attempt == 0:
                 try:
-                    import builtins as _bi
-                    _wd = getattr(_bi, "_pinhos_wdt", None)
+                    import sys as _sy
+                    _wd = _sy.modules.get("__pinhos_wdt__")
                     if _wd is not None:
                         _wd.feed()
                 except Exception:

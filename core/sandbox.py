@@ -395,7 +395,7 @@ class _TrackedHandle:
 
     def _feed_wdt(self):
         if builtins is not None:
-            _w = getattr(builtins, "_pinhos_wdt", None)
+            _w = sys.modules.get("__pinhos_wdt__")
             if _w is not None:
                 try:
                     _w.feed()
@@ -511,7 +511,7 @@ class AppContext:
     def yield_(self, step_web=True):
         """Cooperative yield for long-running tools: feeds hardware WDT and steps WebPortal/CYW43."""
         if builtins is not None:
-            _w = getattr(builtins, "_pinhos_wdt", None)
+            _w = sys.modules.get("__pinhos_wdt__")
             if _w is not None:
                 try:
                     _w.feed()
@@ -656,6 +656,23 @@ class SandboxRunner:
         ret_val, err_str, ok = None, None, False
         leaked_closed = 0
         purged_modules = []
+        # Feed the hardware WDT on every key poll so idle tool loops never trip it (Refs #28)
+        _orig_poll = None
+        _bd = self.board
+        if _bd is not None and sys.modules.get("__pinhos_wdt__") is not None:
+            try:
+                _orig_poll = _bd.poll_key
+                _wd = sys.modules.get("__pinhos_wdt__")
+
+                def _wpoll(_o=_orig_poll, _w=_wd):
+                    try:
+                        _w.feed()
+                    except Exception:
+                        pass
+                    return _o()
+                _bd.poll_key = _wpoll
+            except Exception:
+                _orig_poll = None
         try:
             ret_val = invoke_cb(ctx, tracker)
             ok = True
@@ -671,6 +688,11 @@ class SandboxRunner:
                     pass
             exc = None
         finally:
+            if _orig_poll is not None:
+                try:
+                    _bd.poll_key = _orig_poll
+                except Exception:
+                    pass
             if hooked_builtins and builtins is not None:
                 try:
                     setattr(builtins, "open", real_open)
