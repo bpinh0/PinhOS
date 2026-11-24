@@ -774,7 +774,41 @@ def toggle_webportal(board=None, cfg=None, logger=None):
     return ok, msg
 
 
+def feed_wdt():
+    """Feed RP2350 hardware watchdog if enabled."""
+    if builtins is not None:
+        w = getattr(builtins, "_pinhos_wdt", None)
+        if w is not None:
+            try:
+                w.feed()
+            except Exception:
+                pass
+
+
+def enable_wdt(timeout_ms=8000):
+    """Enable RP2350 machine.WDT once after boot stabilization (max ~8388 ms; 0 disables)."""
+    ms = int(timeout_ms or 0)
+    if ms <= 0:
+        return False
+    ms = min(8388, max(1000, ms))
+    try:
+        if builtins is not None and getattr(builtins, "_pinhos_wdt", None) is not None:
+            getattr(builtins, "_pinhos_wdt").feed()
+            return True
+        import machine
+        if hasattr(machine, "WDT"):
+            w = machine.WDT(timeout=ms)
+            if builtins is not None:
+                setattr(builtins, "_pinhos_wdt", w)
+            bp("[WDT] Enabled hardware watchdog ({}ms)".format(ms))
+            return True
+    except Exception as e:
+        bp("[WDT_ERR]", repr(e))
+    return False
+
+
 def step_webportal(slice_ms=15):
+    feed_wdt()
     ws = runtime_state.get("web_server")
     if ws is not None and ws.running:
         try:
@@ -852,6 +886,7 @@ def _enter_sleep_mode(board, ui, logger, countdown_s=5):
     try:
         ticks = 0
         while True:
+            feed_wdt()
             if poll_fn and poll_fn() is not None:
                 break
             ticks += 1
@@ -959,26 +994,51 @@ def ui_loop(sel_action=0):
             from core.sandbox import SandboxRunner
             sbx = SandboxRunner(board=board, config=cfg, swap=runtime_state.get("swap"), logger=logger, theme=theme_mgr, ui=ui)
             loaded_sbx = True
+        res_dict = None
+        smsg, skind = label[:16] + " ERR", "err"
         try:
-            res = sbx.run_file(path, args=args, wait_on_error=True)
-            smsg = "{} OK (d={}B)".format(label[:16], res.get("sram_delta", 0))
-            skind = "ok" if res.get("ok") else "err"
-            if logger:
-                logger.info("TOOL {}: ok={} delta={}B".format(label, res.get("ok"), res.get("sram_delta", 0)))
-            if wait_after and res.get("ok"):
-                board.clear_input()
-                while True:
-                    if poll_fn and poll_fn() is not None:
-                        board.beep(1100, 10)
-                        break
-                    _sleep_ms(30)
+            from core.sandbox import SandboxError
+            try:
+                res = sbx.run_file(path, args=args, wait_on_error=True)
+                res_dict = res
+                smsg = "{} OK (d={}B)".format(label[:16], res.get("sram_delta", 0))
+                skind = "ok" if res.get("ok") else "err"
+                if logger:
+                    blk = 0
+                    try:
+                        from core.memutil import largest_free
+                        blk = largest_free()
+                    except Exception:
+                        pass
+                    logger.info("TOOL {}: ok={} delta={}B blk={}B".format(label, res.get("ok"), res.get("sram_delta", 0), blk))
+                if wait_after and res.get("ok"):
+                    board.clear_input()
+                    while True:
+                        feed_wdt()
+                        if poll_fn and poll_fn() is not None:
+                            board.beep(1100, 10)
+                            break
+                        _sleep_ms(30)
+            except SandboxError as se:
+                smsg = str(se)[:44]
+                skind = "err"
+                res_dict = {"ok": False, "error": str(se), "sram_before": gc.mem_free() if hasattr(gc, "mem_free") else 0, "sram_after": gc.mem_free() if hasattr(gc, "mem_free") else 0}
+                if logger:
+                    try:
+                        logger.warn("TOOL {} BLOCKED: {}".format(label, str(se)[:80]))
+                    except Exception:
+                        pass
         finally:
             if loaded_sbx:
                 sbx = None
                 sys.modules.pop("core.sandbox", None)
                 gc.collect()
-        if logger:
-            logger.clear_breadcrumb("IDLE")
+            if logger:
+                try:
+                    logger.clear_breadcrumb("IDLE")
+                except Exception:
+                    pass
+        runtime_state["_last_run_res"] = res_dict
         _drain_keys(120)
         board.set_lut(theme_mgr.active.lut)
         return smsg, skind
@@ -1338,6 +1398,32 @@ def ui_loop(sel_action=0):
             if idle_ticks >= 40:
                 idle_ticks = 0
                 gc.collect()
+                # Non-blocking background Wi-Fi auto-connect state machine (#8)
+                if runtime_state.get("wifi_bg_pending"):
+                    runtime_state["wifi_bg_pending"] = False
+                    try:
+                        from net.wifi import get_wifi_manager
+                        _wbg = get_wifi_manager()
+                        _wbg.start_bg_connect(country=str(cfg.get("wifi_country", "XX") if cfg else "XX"), timeout_s=24)
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        _wmod = sys.modules.get("net.wifi")
+                        if _wmod is not None and hasattr(_wmod, "get_wifi_manager"):
+                            _wbg = _wmod.get_wifi_manager()
+                            if _wbg.bg_active:
+                                _bst, _bmsg = _wbg.step_bg_connect()
+                                if _bst == "connected":
+                                    if logger:
+                                        logger.info("WIFI BG: " + str(_bmsg))
+                                    if cfg and cfg.get("ntp_auto", True):
+                                        runtime_state["ntp_pending"] = True
+                                elif _bst in ("timeout", "error"):
+                                    if logger:
+                                        logger.info("WIFI BG: " + str(_bmsg))
+                    except Exception:
+                        pass
                 # Background NTP sync if queued (only when Auto-NTP is enabled; never blocks Wi-Fi connect)
                 if runtime_state.get("ntp_pending"):
                     runtime_state["ntp_pending"] = False
@@ -1390,14 +1476,34 @@ def ui_loop(sel_action=0):
                         stop_webportal(logger=logger)
                         board.reboot()
                     if _ws.pending_run:
-                        _rpath, _rlabel = _ws.pending_run
+                        _pr = _ws.pending_run
                         _ws.pending_run = None
-                        status_msg, status_kind = _exec_sandbox_file(_rpath, _rlabel, wait_after=False)
+                        _rpath = _pr[0]
+                        _rlabel = _pr[1]
+                        _needs_radio = bool(_pr[2]) if len(_pr) > 2 else False
+                        if getattr(_ws, "_run_queued_ms", 0):
+                            _qlat = _ticks_diff(_ticks_ms(), _ws._run_queued_ms)
+                            try:
+                                _ws._wlog("RUN_START {} lat={}ms".format(_rlabel, _qlat))
+                            except Exception:
+                                pass
+                        _ws.set_run_state("running")
+                        _paused_web = False
+                        if _needs_radio and hasattr(_ws, "pause"):
+                            _paused_web = _ws.pause()
+                        gc.collect()
+                        try:
+                            status_msg, status_kind = _exec_sandbox_file(_rpath, _rlabel, wait_after=False)
+                        finally:
+                            if _paused_web and hasattr(_ws, "resume"):
+                                _ws.resume()
+                            _ws.set_run_state("done", runtime_state.get("_last_run_res"))
                         view = _mount_view()
                         view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind, chg_phase=chg_phase)
                         view.render(force=True)
                         last_act_ms = _ticks_ms()
             else:
+                feed_wdt()
                 if (idle_ticks & 1) == 0:
                     _w = runtime_state.get("_sta_wlan")
                     if _w is None:
@@ -1427,6 +1533,29 @@ def ui_loop(sel_action=0):
         if hasattr(board, "init_uart_bridge"):
             board.init_uart_bridge()
         bp("[UI] Interrupted via serial Ctrl+C; returning to REPL.")
+    except MemoryError as mem_exc:
+        gc.collect(); gc.collect()
+        if runtime_state.get("web_active") and not runtime_state.get("_mem_retry"):
+            runtime_state["_mem_retry"] = True
+            stop_webportal(logger=logger)
+            gc.collect(); gc.collect()
+            if logger:
+                try:
+                    logger.warn("UI: MemoryError recovered by pausing WebPortal")
+                except Exception:
+                    pass
+            bp("[UI] MemoryError caught -> WebPortal paused, recovering UI")
+            return ui_loop()
+        runtime_state["_mem_retry"] = False
+        choice = show_bsod(
+            board,
+            "UI_MEMORY_ERROR",
+            mem_exc,
+            context="mode={} theme={}".format(ui.mode, theme_mgr.active.id),
+            interactive=True,
+        )
+        if choice in ("RECOVER", "LOGS"):
+            return ui_loop()
     except Exception as ui_exc:
         choice = show_bsod(
             board,
@@ -1458,6 +1587,11 @@ _boot_splash_active = False
 def _boot_progress(pct, msg, pause_ms=0, clear_splash=False):
     """Advance the frozen pinhos_boot splash progress bar in-place during cold boot."""
     global _boot_splash_active
+    try:
+        from core.memutil import largest_free
+        bp("[BOOT {}%] {} (free={}B blk={}B)".format(pct, msg, gc.mem_free() if hasattr(gc, "mem_free") else 0, largest_free()))
+    except Exception:
+        pass
     if not _boot_splash_active:
         return
     try:
@@ -1558,27 +1692,23 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
         swap = get_swap_manager()
         swap.set_max_kb(int(cfg.get("swap_max_kb", 512)))
         swap.prune_stale()
+        if hasattr(board, "prune_screenshots"):
+            board.prune_screenshots(keep=5)
+        if hasattr(gc, "threshold"):
+            try:
+                gc.threshold(16384)
+            except Exception:
+                pass
+        try:
+            import core.memutil  # Pre-import early to pack at bottom of heap (#20)
+        except Exception:
+            pass
 
         _boot_progress(94, "Core Services Ready...", pause_ms=80)
 
-        # Optional Wi-Fi Auto-Connect on interactive boot (NTP deferred to background ui_loop if enabled)
+        # Defer Wi-Fi Auto-Connect to non-blocking ui_loop() state machine (#8) so boot never stalls
         if interactive:
-            try:
-                from net.wifi import get_wifi_manager
-                wm = get_wifi_manager()
-                if wm.get_auto_connect() and wm.list_saved():
-                    _boot_progress(96, "Wi-Fi Auto-Connect...")
-                    wok, wmsg = wm.auto_connect_saved(
-                        timeout_s=15,
-                        max_attempts=3,
-                        status_cb=lambda ph, _e, _t, _s: _boot_progress(96, ("Wi-Fi " + str(ph))[:32]),
-                    )
-                    logger.info("WIFI BOOT: " + str(wmsg))
-                    bp("[WIFI_BOOT]", wmsg)
-                    if wok and cfg.get("ntp_auto", True):
-                        runtime_state["ntp_pending"] = True
-            except Exception as _we:
-                bp("[WIFI_BOOT_ERR]", repr(_we))
+            runtime_state["wifi_bg_pending"] = True
 
         # Show clean 100% on native monochrome boot splash, cut cleanly to black BEFORE applying theme LUT!
         _boot_progress(100, "PinhOS Ready!", pause_ms=400, clear_splash=True)
@@ -1655,6 +1785,8 @@ def start(state_path=None, simulate_fault=None, wait_for_stability=True, skip_st
             view.render(force=False)
 
         gc.collect()
+        if interactive and runtime_state.get("stabilized") and not runtime_state.get("serial_link"):
+            enable_wdt(int(cfg.get("wdt_timeout_ms", 8000)))
         if interactive and cfg.get("webportal_autostart", False):
             start_webportal(board=board, cfg=cfg, logger=logger)
         free_b = gc.mem_free() if hasattr(gc, "mem_free") else 262144

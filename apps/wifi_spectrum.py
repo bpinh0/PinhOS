@@ -15,6 +15,7 @@ APP_META = {
     "description": "2.4 GHz channel congestion & RSSI spectrum analyzer",
     "entry": "main",
     "min_sram": 24576,
+    "needs_radio": True,
     "ui_modes": ["gui", "tui", "native"],
     "native_libs": [],
 }

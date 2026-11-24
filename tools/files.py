@@ -78,8 +78,39 @@ def list_dir_entries(path):
     return entries
 
 
-def read_text_preview(path, offset=0, max_bytes=4096):
-    """Stream up to max_bytes in <= 1 KB chunks into display-safe lines (53-col ready)."""
+MAX_LINE_COLS = 96
+MAX_CARRY = 128
+
+
+def _sanitize_line(raw, max_cols=MAX_LINE_COLS):
+    """Sanitize raw bytes in-place into printable ASCII without per-char list allocs."""
+    if not raw:
+        return ""
+    if len(raw) > max_cols:
+        raw = raw[:max_cols]
+    buf = bytearray(raw)
+    for i in range(len(buf)):
+        c = buf[i]
+        if c < 32 or c >= 127:
+            buf[i] = 46  # '.'
+    return buf.decode("ascii")
+
+
+def is_binary_file(path):
+    """Return True if first 256 bytes contain a NUL byte (0x00)."""
+    try:
+        f = open(path, "rb")
+        try:
+            head = f.read(256)
+        finally:
+            f.close()
+        return b"\x00" in head
+    except Exception:
+        return False
+
+
+def read_text_preview(path, offset=0, max_bytes=2048):
+    """Stream up to max_bytes in <= 1 KB chunks into display-safe lines (bounded SRAM)."""
     lines = []
     carry = b""
     done = 0
@@ -92,14 +123,28 @@ def read_text_preview(path, offset=0, max_bytes=4096):
             if not ch:
                 break
             done += len(ch)
-            parts = (carry + ch).split(b"\n")
-            carry = parts.pop()
-            for p in parts:
-                if p[-1:] == b"\r":
-                    p = p[:-1]
-                lines.append("".join([chr(c) if 32 <= c < 127 else "." for c in p]))
+            data = carry + ch
+            carry = b""
+            pos = 0
+            n = len(data)
+            while pos < n:
+                nl = data.find(b"\n", pos)
+                if nl < 0:
+                    rem = data[pos:]
+                    while len(rem) >= MAX_CARRY:
+                        lines.append(_sanitize_line(rem[:MAX_LINE_COLS]))
+                        rem = rem[MAX_LINE_COLS:]
+                    carry = rem
+                    break
+                seg = data[pos:nl]
+                if seg[-1:] == b"\r":
+                    seg = seg[:-1]
+                lines.append(_sanitize_line(seg))
+                pos = nl + 1
         if carry:
-            lines.append("".join([chr(c) if 32 <= c < 127 else "." for c in carry]))
+            if carry[-1:] == b"\r":
+                carry = carry[:-1]
+            lines.append(_sanitize_line(carry))
     finally:
         f.close()
     return lines, done
@@ -186,12 +231,16 @@ def _open_viewer(board, ui, path, hex_mode=False):
     except OSError:
         pass
 
+    if not hex_mode and is_binary_file(path):
+        hex_mode = True
+
     def load_page():
+        gc.collect()
         if hex_mode:
             lines = read_hex_preview(path, offset=offset, max_bytes=256)
             tv.title = "HEX @0x{:X} ({})".format(offset, _hsize(size))
         else:
-            lines, _n = read_text_preview(path, offset=offset, max_bytes=4096)
+            lines, _n = read_text_preview(path, offset=offset, max_bytes=2048)
             tv.title = "TXT @{} ({})".format(_hsize(offset), _hsize(size))
         tv.set_lines(lines or ["(empty file)"], reset_scroll=True)
         sb.update(title=path[-28:], mode_label=ui.mode_badge, right_text="HEX" if hex_mode else "TXT")
@@ -225,12 +274,12 @@ def _open_viewer(board, ui, path, hex_mode=False):
             hex_mode = not hex_mode
             load_page(); ui.render(force=True)
         elif ku == "N":
-            step = 256 if hex_mode else 4096
+            step = 256 if hex_mode else 2048
             if offset + step < size:
                 offset += step
                 load_page(); ui.render(force=True)
         elif ku == "P":
-            step = 256 if hex_mode else 4096
+            step = 256 if hex_mode else 2048
             offset = max(0, offset - step)
             load_page(); ui.render(force=True)
     gc.collect()

@@ -24,14 +24,14 @@ def start_portal(rs, board=None, cfg=None, logger=None, host="0.0.0.0", port=Non
     ws = rs.get("web_server")
     if ws is not None and ws.running:
         rs["web_active"] = True
-        return True, portal_url(ws.port)
+        return True, "{} (Tok:{})".format(portal_url(ws.port), getattr(ws, "token", ""))
     p = int(port if port is not None else (cfg.get("webportal_port", 8080) if cfg else 8080))
     try:
         ws = WebServer(board=board, config=cfg, manifest=rs.get("manifest"), logger=logger, host=host, port=p)
         ws.start()
         rs["web_server"] = ws
         rs["web_active"] = True
-        return True, portal_url(p)
+        return True, "{} (Tok:{})".format(portal_url(p), ws.token)
     except Exception as e:
         rs["web_server"] = None
         rs["web_active"] = False

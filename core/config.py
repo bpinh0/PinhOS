@@ -56,17 +56,16 @@ DEFAULT_CONFIG = {
     "tz_offset_h": 0,
     "ntp_auto": True,
     "ntp_server": "162.159.200.1",
+    "wifi_country": "XX",
     "cpu_freq_mhz": 150,
     "swap_enabled": True,
     "swap_max_kb": 512,
     "swap_low_sram": 65536,
     "boot_strike_limit": 3,
     "boot_stable_ms": 5000,
+    "wdt_timeout_ms": 8000,
     "webportal_autostart": False,
     "webportal_port": 8080,
-    "ota_channel": "alpha",
-    "ota_repo": "bpinh0/PinhOS",
-    "ota_branch": "main",
 }
 
 SNAPSHOT_PATH = PINHOS_ROOT + "/config.snap.json"
@@ -248,9 +247,28 @@ class ConfigManager:
             with open(self.path, "r") as f:
                 loaded = json.load(f)
             if isinstance(loaded, dict):
-                self.data.update(loaded)
+                dirty = False
+                for old_k, new_k in (
+                    ("cpu_mhz", "cpu_freq_mhz"),
+                    ("tz_offset", "tz_offset_h"),
+                    ("lcd_bright", "lcd_brightness"),
+                    ("kb_bright", "kb_brightness"),
+                    ("web_port", "webportal_port"),
+                ):
+                    if old_k in loaded:
+                        if new_k not in loaded:
+                            loaded[new_k] = loaded[old_k]
+                        dirty = True
+                for k, v in loaded.items():
+                    if k in self.defaults:
+                        self.data[k] = v
+                    else:
+                        dirty = True
                 if self.data.get("ntp_server") in ("pool.ntp.org", "", None):
                     self.data["ntp_server"] = "162.159.200.1"
+                    dirty = True
+                if dirty:
+                    self.save()
                 return True
         except Exception:
             pass
