@@ -190,6 +190,13 @@ class WifiManager:
                 except Exception:
                     pass
             if attempt == 0:
+                try:
+                    import builtins as _bi
+                    _wd = getattr(_bi, "_pinhos_wdt", None)
+                    if _wd is not None:
+                        _wd.feed()
+                except Exception:
+                    pass
                 _sleep_ms(250)
         res = sorted(seen.values(), key=lambda x: x["rssi"], reverse=True)
         gc.collect()

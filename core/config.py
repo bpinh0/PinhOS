@@ -62,6 +62,7 @@ DEFAULT_CONFIG = {
     "swap_low_sram": 65536,
     "boot_strike_limit": 3,
     "boot_stable_ms": 5000,
+    "wdt_timeout_ms": 8000,
     "webportal_autostart": False,
     "webportal_port": 8080,
     "ota_channel": "alpha",

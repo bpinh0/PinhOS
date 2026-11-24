@@ -481,6 +481,23 @@ class AppContext:
             return self.swap.load(self.app_id, default=default)
         return default
 
+    def yield_(self, step_web=True):
+        """Cooperative yield for long-running tools: feeds hardware WDT and steps WebPortal/CYW43."""
+        if builtins is not None:
+            _w = getattr(builtins, "_pinhos_wdt", None)
+            if _w is not None:
+                try:
+                    _w.feed()
+                except Exception:
+                    pass
+        if step_web:
+            m = sys.modules.get("main") or sys.modules.get("_pinhos_main")
+            if m is not None and hasattr(m, "step_webportal"):
+                try:
+                    m.step_webportal(0)
+                except Exception:
+                    pass
+
 
 class SandboxRunner:
     """
