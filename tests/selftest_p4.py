@@ -108,14 +108,22 @@ def test_webportal_loopback(root="/sd/pinhos"):
     async def _run():
         ws = WebServer(board=board, manifest=manifest, root=root, host="0.0.0.0", port=8080)
         await ws.start_async()
+        _assert(len(ws.token) == 16 and ws.token != "pinhos01", "token entropy check failed")
         tok_h = {"X-PinhOS-Token": ws.token}
         try:
             c1, b1 = await _req_pipe(ws, "GET", "/", collect_body=False)
             _assert(c1 == 200 and b"PinhOS" in b1, "GET / fail: {}".format(c1))
-            c2, b2 = await _req_pipe(ws, "GET", "/api/status")
+            # Read-side auth + sensitive file denylist checks (Refs #23)
+            c_wf0, _ = await _req_pipe(ws, "GET", "/api/file?path=wifi.json")
+            _assert(c_wf0 == 401, "unauth GET wifi.json should 401, got {}".format(c_wf0))
+            c_wf1, _ = await _req_pipe(ws, "GET", "/api/file?path=wifi.json", hdrs=tok_h)
+            _assert(c_wf1 == 403, "auth GET wifi.json should 403 denylist, got {}".format(c_wf1))
+            c_ls0, _ = await _req_pipe(ws, "GET", "/api/files")
+            _assert(c_ls0 == 401, "unauth GET /api/files should 401, got {}".format(c_ls0))
+            c2, b2 = await _req_pipe(ws, "GET", "/api/status", hdrs=tok_h)
             st = json.loads(b2.decode("utf-8"))
             _assert(c2 == 200 and st.get("ok") and "sram_free" in st and "sram_largest" in st and st.get("root") == root.rstrip("/"), "status fail")
-            # Auth, CORS Origin, and write-allowlist security checks (#15)
+            # Auth, CORS Origin, and write-allowlist security checks
             c_noauth, _ = await _req_pipe(ws, "POST", "/api/file?path=" + rel, txt)
             _assert(c_noauth == 401, "missing token should 401, got {}".format(c_noauth))
             c_cors, _ = await _req_pipe(ws, "POST", "/api/file?path=" + rel, txt, hdrs={"X-PinhOS-Token": ws.token, "Origin": "http://evil.example"})
@@ -124,21 +132,27 @@ def test_webportal_loopback(root="/sd/pinhos"):
             _assert(c_deny == 403, "core write should 403, got {}".format(c_deny))
             c3, b3 = await _req_pipe(ws, "POST", "/api/file?path=" + rel, txt, hdrs=tok_h)
             _assert(c3 == 200 and json.loads(b3.decode("utf-8")).get("bytes") == len(txt), "POST fail: {}".format(c3))
-            c4, b4 = await _req_pipe(ws, "GET", "/api/file?path=" + rel)
+            c4, b4 = await _req_pipe(ws, "GET", "/api/file?path=" + rel, hdrs=tok_h)
             _assert(c4 == 200 and b4.decode("utf-8") == txt, "GET file fail")
             c5, b5 = await _req_pipe(ws, "DELETE", "/api/file?path=" + rel, hdrs=tok_h)
             _assert(c5 == 200 and json.loads(b5.decode("utf-8")).get("ok"), "DEL fail")
-            c6, _ = await _req_pipe(ws, "GET", "/api/file?path=../../boot.py")
+            c6, _ = await _req_pipe(ws, "GET", "/api/file?path=../../boot.py", hdrs=tok_h)
             _assert(c6 == 403, "traversal guard fail: {}".format(c6))
-            # /api/run 409 guard & /api/run/status (#7)
+            # /api/run 409 guard & /api/run/status
             c7, _ = await _req_pipe(ws, "POST", "/api/run?path=apps/hello_world.py", hdrs=tok_h)
             _assert(c7 == 200, "run queue fail: {}".format(c7))
             c8, _ = await _req_pipe(ws, "POST", "/api/run?path=apps/hello_world.py", hdrs=tok_h)
             _assert(c8 == 409, "duplicate run should 409, got {}".format(c8))
-            c9, b9 = await _req_pipe(ws, "GET", "/api/run/status")
+            c9, b9 = await _req_pipe(ws, "GET", "/api/run/status", hdrs=tok_h)
             _assert(c9 == 200 and json.loads(b9.decode("utf-8")).get("state") == "queued", "run status fail")
             ws.pending_run = None
             ws.set_run_state("idle")
+            # 401 lockout after 5 consecutive failures (Refs #23)
+            bad_h = {"X-PinhOS-Token": "0000000000000000"}
+            c_lock = 0
+            for _ in range(5):
+                c_lock, _ = await _req_pipe(ws, "GET", "/api/status", hdrs=bad_h)
+            _assert(c_lock == 429, "5th bad token should 429 lockout, got {}".format(c_lock))
         finally:
             await ws.stop_async()
 

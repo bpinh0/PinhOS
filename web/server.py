@@ -34,21 +34,38 @@ _MIME = {
 
 _STAT = {
     200: "OK", 204: "No Content", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
-    405: "Method Not Allowed", 409: "Conflict", 413: "Too Large",
+    405: "Method Not Allowed", 409: "Conflict", 413: "Too Large", 429: "Too Many Requests",
     500: "Server Error", 503: "Service Unavailable",
 }
 
 WEB_LOG_MAX = 16384
 _WRITE_PREFIXES = ("apps/", "tools/", "themes/")
 _WRITE_EXACT = ("apps", "tools", "themes", "notes.txt", "config.json")
+_READ_DENY_EXACT = ("wifi.json", "boot_state.json", "rtc_state.json", "logs/breadcrumb.json", ".swap")
+_READ_DENY_PREFIXES = (".swap/",)
+_AUTH_MAX_FAILS = 5
+_AUTH_LOCK_MS = 30000
 
 
 def _gen_token():
-    try:
-        raw = os.urandom(4)
-        return "".join("{:02x}".format(b) for b in raw)
-    except Exception:
-        return "pinhos01"
+    """Generate an 8-byte (16-hex-char) random token; fail closed if os.urandom is unavailable (Refs #23)."""
+    raw = os.urandom(8)
+    if not raw or len(raw) < 8:
+        raise RuntimeError("os.urandom failed to generate 8-byte WebPortal token")
+    return "".join("{:02x}".format(b) for b in raw)
+
+
+def _is_read_denied(rel):
+    """Denylist sensitive credential/state files from WebPortal read/listing even when authenticated (Refs #23)."""
+    if not rel:
+        return False
+    r = str(rel).strip("/")
+    if r in _READ_DENY_EXACT:
+        return True
+    for pre in _READ_DENY_PREFIXES:
+        if r.startswith(pre):
+            return True
+    return False
 
 
 def _const_eq(a, b):
@@ -155,6 +172,8 @@ class WebServer:
         self.max_conns = max(1, int(max_conns))
         self.req_timeout = max(1, int(req_timeout))
         self.token = str(token) if token else _gen_token()
+        self._auth_fails = 0
+        self._auth_lock_until = 0
         self._srv = None
         self._loop = None
         self._running = False
@@ -472,18 +491,31 @@ class WebServer:
         return meth, tgt, clen, b"", hdrs
 
     def _check_auth(self, meth, rt, hdrs):
-        """Enforce same-origin check + X-PinhOS-Token on mutating/sensitive endpoints."""
+        """Enforce same-origin check + X-PinhOS-Token on all /api/* & mutating endpoints with 401 lockout (Refs #23)."""
         orig = hdrs.get("origin", "")
         if orig:
             oh = _origin_host(orig)
             hh = str(hdrs.get("host", "")).strip().lower()
             if not oh or not hh or oh != hh:
                 return 403, "Cross-origin forbidden"
-        needs_tok = (meth != "GET") or (rt in ("/api/run", "/api/key", "/api/screenshot", "/api/reboot"))
+        needs_tok = (meth != "GET") or rt.startswith("/api/")
         if needs_tok:
+            import time as _tm
+            now = _tm.ticks_ms() if hasattr(_tm, "ticks_ms") else int(_tm.time() * 1000)
+            if self._auth_lock_until:
+                rem = _tm.ticks_diff(self._auth_lock_until, now) if hasattr(_tm, "ticks_diff") else (self._auth_lock_until - now)
+                if rem > 0:
+                    return 429, "Auth locked ({}s)".format(max(1, (rem + 999) // 1000))
+                self._auth_lock_until = 0
             tok = hdrs.get("x-pinhos-token", "")
             if not _const_eq(tok, self.token):
+                self._auth_fails += 1
+                if self._auth_fails >= _AUTH_MAX_FAILS:
+                    self._auth_fails = 0
+                    self._auth_lock_until = _tm.ticks_add(now, _AUTH_LOCK_MS) if hasattr(_tm, "ticks_add") else (now + _AUTH_LOCK_MS)
+                    return 429, "Too many auth failures (locked 30s)"
                 return 401, "Unauthorized (X-PinhOS-Token required)"
+            self._auth_fails = 0
         return 0, ""
 
     async def _handle_client(self, r, w):
@@ -653,7 +685,7 @@ class WebServer:
 
     async def _api_files(self, w, q):
         full, rel = self.resolve_path(q.get("path", ""))
-        if not full:
+        if not full or _is_read_denied(rel):
             await self._err(w, 403, "Forbidden")
             return
         ex, isd, _ = _stat(full)
@@ -662,16 +694,19 @@ class WebServer:
             return
         ents = []
         for nm in os.listdir(full):
-            if nm.startswith(".") and nm != ".swap":
+            if nm.startswith("."):
+                continue
+            item_rel = nm if not rel else (rel + "/" + nm)
+            if _is_read_denied(item_rel):
                 continue
             _, cd, cs = _stat(full + "/" + nm)
-            ents.append({"name": nm, "path": nm if not rel else (rel + "/" + nm), "type": "dir" if cd else "file", "size": 0 if cd else cs})
+            ents.append({"name": nm, "path": item_rel, "type": "dir" if cd else "file", "size": 0 if cd else cs})
         ents.sort(key=lambda e: (0 if e["type"] == "dir" else 1, e["name"].lower()))
         await self._json(w, 200, {"ok": True, "root": self.root, "path": rel, "entries": ents})
 
     async def _api_get(self, w, q):
         full, rel = self.resolve_path(q.get("path", ""))
-        if not full or not rel:
+        if not full or not rel or _is_read_denied(rel):
             await self._err(w, 403, "Forbidden")
             return
         dl = (rel.rpartition("/")[2] or "file.bin") if q.get("download") in ("1", "true") else None

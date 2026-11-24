@@ -53,6 +53,7 @@ MENU_TREE = {
         {"id": "wifi:auto", "label": "Auto-Connect Boot", "dyn": "wifi_auto"},
         {"id": "wifi:off", "label": "Disconnect Wi-Fi", "badge": "[OFF]"},
         {"id": "web:toggle", "label": "WebPortal IDE", "dyn": "web_st"},
+        {"id": "web:info", "label": "WebPortal URL & Token", "badge": "[KEY]"},
         {"id": "web:auto", "label": "Auto-Start WebPortal", "dyn": "web_auto"},
         {"id": "sync:check", "label": "GitHub: Check OS Version", "badge": "[VER]"},
         {"id": "sync:themes", "label": "GitHub: Sync Themes", "badge": "[JSON]"},
@@ -836,6 +837,32 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                     status_msg, status_kind = "Wi-Fi disconnected", "warn"; _sync(force=True)
                 elif aid == "web:toggle":
                     return "TOGGLE_WEBPORTAL"
+                elif aid == "web:info":
+                    import sys as _sys
+                    _mm = _sys.modules.get("main") or _sys.modules.get("_pinhos_main")
+                    _rs = getattr(_mm, "runtime_state", {}) if _mm else {}
+                    _ws = _rs.get("web_server")
+                    if _ws is not None and getattr(_ws, "running", False):
+                        try:
+                            from web import portal_url
+                            _url = portal_url(_ws.port)
+                        except Exception:
+                            _url = "http://0.0.0.0:{}".format(getattr(_ws, "port", 8080))
+                        show_info_dialog(board, ui, "WEBPORTAL IDE TOKEN", [
+                            "Status: ACTIVE",
+                            "URL   : " + str(_url)[:28],
+                            "Token : " + str(getattr(_ws, "token", "")),
+                            "",
+                            "Enter token in browser prompt",
+                            "or X-PinhOS-Token header.",
+                        ], kind="ok")
+                    else:
+                        show_info_dialog(board, ui, "WEBPORTAL IDE TOKEN", [
+                            "Status: STOPPED",
+                            "Enable 'WebPortal IDE' first",
+                            "to generate a per-boot token.",
+                        ], kind="info")
+                    _sync(force=True)
                 elif aid == "web:auto":
                     cur = bool(cfg.get("webportal_autostart", False) if cfg else False)
                     nxt = not cur
