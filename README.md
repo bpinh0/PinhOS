@@ -150,4 +150,10 @@ pinhos/
 
 ## License
 
-TBD — Core operating system planned under an open-source license, with modular commercial packaging, hardware-locked licensing, and encrypted Pro Field Packs defined for `v1.2.0`.
+PinhOS is licensed under the **[PolyForm Noncommercial License 1.0.0](LICENSE)** (`SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0`).
+
+* **Permitted (Free):** Personal use, hobby projects, learning, experimentation, and non-commercial organizations.
+* **Commercial Use / Resale:** Selling, bundling, pre-installing on commercial hardware/SD cards, or any other commercial use is **prohibited** without a separate commercial license from the author (`bpinh0`).
+* **Commercial Packaging & Licensing (`v1.2.0`):** Hardware-locked licensing, private license verification, and encrypted Pro Field Packs are planned under a separate commercial agreement.
+
+`Required Notice: Copyright (c) 2026 Bruno Pinho (bpinh0) (https://github.com/bpinh0/PinhOS)`
