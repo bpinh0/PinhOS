@@ -28,6 +28,12 @@ PinhOS turns the ClockworkPi PicoCalc (and custom RP2350 hardware builds) into a
 
 ---
 
+## Architecture
+
+![PinhOS Architecture Diagram](docs/architecture.png)
+
+---
+
 ## Release Roadmap
 
 | Version | Milestone | Focus & Deliverables |
@@ -85,7 +91,7 @@ pinhos/
 ├── apps/                   # Community & user applets (single-entry APP_META contract)
 ├── themes/                 # Built-in & user JSON themes (cyber_amber, phosphor_green, arctic_daylight, synthwave_pulse)
 ├── tests/                  # On-device 12/12 self-test suite + Deep Stress Suite (Gates 13-14 + menu walk)
-├── docs/                   # Design specs (phase5_ota_security.md), runbooks (freeze/heap/WDT) & release notes
+├── docs/                   # Architecture diagram (architecture.png), design specs, runbooks & release notes
 ├── scripts/                # Host release & boot helpers (stamp_release.ps1, setup_persistent_boot.py)
 ├── firmware/               # Custom RP2350 PicoCalc MicroPython UF2 builder & frozen Dual-Boot router
 │   ├── frozen/_boot.py     # Early hardware init (PicoDisplay, PicoKeyboard, PicoSD, UART0 COM4)
