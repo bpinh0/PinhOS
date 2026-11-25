@@ -92,6 +92,7 @@ pinhos/
 | **`v1.0.0`** | **Foundation & Daily Driver** *(Active)* | HAL, Boot Guard, WDT, Sandbox/Swap, Dual-UI + Desktop Home, Themes, BusyBox Field Kit, Hardened WebPortal IDE *(Done)* → Signed SHA-256 OTA, App Store & BLE HID *(Next)* |
 | **`v1.1.0`** | **Power & Native Performance** | Multi-UF2 SD chainloader (ARM + RISC-V) and dynamic C `.mpy` native modules (MP3/DSP/blits) |
 | **`v1.2.0`** | **Commercial Packaging** | Frozen `.mpy` flash XIP firmware, RP2350 OTP/Secure Boot hardware-locked licensing & encrypted Pro Field Packs |
+| **`v1.3.0`** | **Cloud WebPortal Relay & Identity** | Outbound `wss://` cloud relay (CGNAT-safe off-LAN access, `1 KB` binary BMP streaming), persistent `unique_id()` pairing & cloud license/entitlement sync |
 
 See **[ROADMAP.md](./ROADMAP.md)** for full specs, memory budgets, and phase checklists.
 
