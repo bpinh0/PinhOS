@@ -182,6 +182,7 @@ def main(ctx):
   - [ ] Evaluate pre-compiling `tools/shell.py` (or splitting command parser) if low-memory launch fragmentation is observed under heavy WebPortal + TLS workloads.
   - [ ] Add on-device WebPortal QR code generator for quick phone/laptop URL + token pairing.
   - [ ] Add on-device **License & Legal Notices** viewer next to **About PinhOS** in Settings (`#58` — PolyForm Noncommercial 1.0.0, `NOTICE`, and third-party attributions streamed in `<= 1 KB` chunks).
+  - [ ] Add configurable **Time Format** (`24h` / `12h` AM/PM) and **Date Format** (EU `DD/MM/YYYY` / US `MM/DD/YYYY` / ISO `YYYY-MM-DD`) settings across Desktop Home, StatusBar, and Date & Time UI (`#62`).
 
 ---
 
