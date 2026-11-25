@@ -227,6 +227,7 @@ def main(ctx):
 
 ### Phase 9: Outbound WSS Cloud Portal, Persistent Auth & License Integration
 - [ ] **9.0 Cloud Relay & Auth Protocol Spec (`docs/design/v1.3_cloud_wss.md`):**
+  - Reference UX & ecosystem prototype: [`docs/portal-preview/pinhos_cloud_webportal_ecosystem_prototype.html`](docs/portal-preview/pinhos_cloud_webportal_ecosystem_prototype.html) (Product & Ecosystem landing, Cloud Studio IDE, Devices & Licensing / Pair New Device flow).
   - Lock down the WSS JSON/binary framing schema, HMAC/Ed25519 challenge-response handshake (never transmitting raw `device_key.json` secrets), server certificate/SPKI pinning strategy, and cloud relay backend architecture before firmware implementation.
 - [ ] **9.1 Outbound WSS Relay Client (`net/wss_client.py`):**
   - Replace the local multi-socket HTTP portal (`0.0.0.0:8080`) during normal WAN-connected operation with a single persistent outbound TLS WebSocket (`wss://`) to the cloud-hosted WebPortal backend—enabling off-LAN remote access through CGNAT/hotspots without router port forwarding while reclaiming `~25 KB` of local HTTP/lwIP socket overhead.
