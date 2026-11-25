@@ -226,13 +226,20 @@ def main(ctx):
 ## 6. Release `v1.3.0` — Cloud WebPortal Relay & Persistent Identity
 
 ### Phase 9: Outbound WSS Cloud Portal, Persistent Auth & License Integration
+- [ ] **9.0 Cloud Relay & Auth Protocol Spec (`docs/design/v1.3_cloud_wss.md`):**
+  - Lock down the WSS JSON/binary framing schema, HMAC/Ed25519 challenge-response handshake (never transmitting raw `device_key.json` secrets), server certificate/SPKI pinning strategy, and cloud relay backend architecture before firmware implementation.
 - [ ] **9.1 Outbound WSS Relay Client (`net/wss_client.py`):**
-  - Replace the local multi-socket HTTP portal (`0.0.0.0:8080`) during normal WAN-connected operation with a single persistent outbound TLS WebSocket (`wss://`) to the cloud-hosted WebPortal backend—enabling off-LAN remote access through CGNAT/hotspots without router port forwarding while reclaiming `~25 KB` SRAM and lwIP socket overhead.
+  - Replace the local multi-socket HTTP portal (`0.0.0.0:8080`) during normal WAN-connected operation with a single persistent outbound TLS WebSocket (`wss://`) to the cloud-hosted WebPortal backend—enabling off-LAN remote access through CGNAT/hotspots without router port forwarding while reclaiming `~25 KB` of local HTTP/lwIP socket overhead.
   - Implement lightweight JSON-over-WSS control framing (`status`, `run`, `key`, `file`) paired with `1 KB` chunked binary WebSocket frames (`opcode 0x02`) for zero-Base64 `320x320` 4-bit BMP screenshot streaming, reusing a single pre-allocated `1024 B` `bytearray` buffer.
+  - Manage RP2350 mbedTLS SRAM budget (`~30–40 KB` live TLS buffer) with **auto-pause/resume** during SRAM-heavy apps or OTA updates, 30s `PING/PONG` heartbeat, exponential backoff + jitter reconnect, and server certificate/SPKI pinning.
   - Retain a stripped-down local HTTP listener strictly for `PinhOS-Setup` SoftAP captive provisioning and an explicit offline `"Local LAN Mode"` toggle.
-- [ ] **9.2 Persistent Device Identity & One-Time Pairing (Replacing Per-Boot Tokens):**
+- [ ] **9.2 Persistent Device Identity, Pairing & Remote-Control Guard:**
   - Replace the ephemeral per-boot 16-hex `X-PinhOS-Token` UX with a persistent device identity bound to `machine.unique_id()` and a long-lived secret stored in `/sd/pinhos/device_key.json`.
   - Support one-time pairing via a short pairing code or on-device QR code so subsequent boots authenticate silently over `wss://` with zero manual token entry, plus an `"Unpair Cloud / Rotate Key"` action in Settings (`set_conn`).
+  - Add an on-device **Remote-Control Safety Switch** (`Cloud: OFF / View-Only / Full Control`) paired with a visible **`CLD`** status badge so remote `run`/`key`/`file` commands can never execute silently without user awareness.
 - [ ] **9.3 Cloud-Integrated Licensing & Entitlement Sync:**
   - Prepare and integrate the runtime license verification mechanism on WSS handshake (`machine.unique_id()` + signed HMAC/Ed25519 entitlement payload), validating `Free` vs `Pro` tier access and pushing signed `/sd/pinhos/license.key` updates or Pro Field Packs directly from the cloud backend.
-  - Cache signed license/entitlement state locally with an offline grace window so licensed tools continue operating seamlessly when off-grid.
+  - Cache signed license/entitlement state locally with an offline grace window anchored to NTP/monotonic counters (preventing RTC clock-rollback abuse) so licensed tools continue operating seamlessly when off-grid.
+  - Support cloud-side **Deactivate / Transfer Device** and signed revocation lists for hardware replacements or upgrades.
+- [ ] **9.4 Encrypted Cloud Config & Workspace Backup (Pro Feature):**
+  - Provide 1-click encrypted cloud backup and restore of `config.json`, custom JSON themes, Quick Notes, and user `apps/` over the authenticated WSS channel.
