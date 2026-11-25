@@ -167,7 +167,7 @@ def main(ctx):
 - [ ] **5.1 Wi-Fi STA Manager, Async Background Radio & SoftAP Captive Fallback (`net/wifi.py`):**
   - [x] Multi-network credential store (`wifi.json`), signal strength scanner, 3-attempt auto-retry connect with hard CYW43 radio bounce, ISO-3166 `wifi_country` prompt, and literal-IPv4 UDP NTP + non-blocking HTTP Date fallback.
   - [ ] Move Wi-Fi association, DHCP polling, and NTP sync to a fully asynchronous `uasyncio` background task (with RP2350 Core 1 LCD DMA / CYW43439 concurrency tuning so networking never impacts UI responsiveness or drops UDP packets).
-  - [ ] **Configurable Boot & Periodic NTP Sync:** Automatically trigger non-blocking NTP sync immediately after boot Wi-Fi connects (when both `wifi_auto_connect` and `ntp_auto_sync` are enabled in `config.json`), persist synced RTC state to `/sd/pinhos/rtc_state.json`, and support configurable periodic background resync (e.g., hourly/on-reconnect) to keep accurate wall-clock time.
+  - [ ] **Configurable Boot & Periodic NTP Sync + RTC Persistence (`#47`):** Automatically trigger non-blocking NTP sync immediately after boot Wi-Fi connects (when both `wifi_auto_connect` and `ntp_auto_sync` are enabled in `config.json`), support configurable periodic background resync (e.g., hourly/on-reconnect), and persist synced RTC state to `/sd/pinhos/rtc_state.json` on sync, periodically (~5 min idle), and before sleep/reboot.
   - [ ] Automatic SoftAP hotspot fallback (`PinhOS-Setup`) for headless field configuration via WebPortal when no saved STA network is reachable.
 - [ ] **5.2 Signed Atomic GitHub OTA Updater (`net/ota.py` — per `docs/design/phase5_ota_security.md`):**
   - [x] Security & authenticity architecture design (`docs/design/phase5_ota_security.md`) + single-source-of-truth `version.json` OTA metadata (`#21`).
@@ -177,8 +177,10 @@ def main(ctx):
   - [x] Direct GitHub theme/app sync and remote version check (`net/sync.py`).
   - [ ] Curated catalog browser (`store_index.json`) with category filters, version tags, `min_sram` compatibility badges, SHA-256 verification, and one-click install/update/remove into `/sd/pinhos/apps/` and `/sd/pinhos/themes/`.
 - [ ] **5.4 Optional Bytecode & Diagnostics Polish:**
-  - [x] Surface RP2350 Watchdog (`WDT`) diagnostics & reset-cause log entries (`wdt.log` + friendly `WATCHDOG RESET RECOVERED` notice) directly in the on-device **Logs** menu (`CTRL+L` / `ui/_log_view.py`, `v1.0.0-alpha.4.4`).
-  - [ ] Implement **Two-Stage Soft + Hard Watchdog**: 2s `machine.Timer` supervisor keeping the 8s silicon WDT fed for true deadlocks while enforcing a configurable soft timeout (`15s`/`30s`/`60s`/`OFF`) with a Windows-style **"Not Responding"** dialog (`[W] Wait`, `[ESC] Abort`, `[R] Reboot`).
+  - [x] Surface RP2350 Watchdog (`WDT`) diagnostics & reset-cause log entries (`wdt.log` + friendly `WATCHDOG RESET RECOVERED` notice) directly in the on-device **Logs** menu (`CTRL+L` / `ui/_log_view.py`, `v1.0.0-alpha.4.4`, `#48`).
+  - [ ] Implement **Two-Stage Soft + Hard Watchdog (`#54`):** 2s `machine.Timer` supervisor keeping the 8s silicon WDT fed for true deadlocks while enforcing a configurable soft timeout (`15s`/`30s`/`60s`/`OFF`) with a Windows-style **"Not Responding"** dialog (`[W] Wait`, `[ESC] Abort`, `[R] Reboot`).
+  - [ ] Standardize the `F1`–`F5` (`F1:Help`, `F2:Thm`, `F3:Mode`, `F4:Cfg`, `F5:Notes`) & `Shift+F6`–`F10` (`WEB`, `COM`, `Mouse` hook, `Notes Edit`, `Self-Test`) function-key bar with an `[F1]` Help popup on Desktop Home & App Drawer.
+  - [ ] Always render all 3 status rows (`IP`/`Offline`, `SIG` + `GUI`/`TUI`, and `WEB ON`/`WEB OFF`) in `DesktopHome` `SYS TELEMETRY`.
   - [ ] Evaluate pre-compiling `tools/shell.py` (or splitting command parser) if low-memory launch fragmentation is observed under heavy WebPortal + TLS workloads.
   - [ ] Add on-device WebPortal QR code generator for quick phone/laptop URL + token pairing.
   - [ ] Add on-device **License & Legal Notices** viewer next to **About PinhOS** in Settings (`#58` — PolyForm Noncommercial 1.0.0, `NOTICE`, and third-party attributions streamed in `<= 1 KB` chunks).
@@ -218,3 +220,26 @@ def main(ctx):
 - [ ] **8.3 Encrypted OTA Pro Field Packs:**
   - Package specialized commercial vertical suites (e.g., NetOps/NOC switch-port & VLAN audit pack, industrial Modbus/CAN diagnostics) as AES-encrypted `.mpy` bundles.
   - Decrypt licensed Pro modules strictly into volatile SRAM at runtime via `cryptolib` using keys derived from the RP2350 OTP secret + `unique_id()`, ensuring unencrypted bytecode never touches the SD card.
+
+---
+
+## 6. Release `v1.3.0` — Cloud WebPortal Relay & Persistent Identity
+
+### Phase 9: Outbound WSS Cloud Portal, Persistent Auth & License Integration
+- [ ] **9.0 Cloud Relay & Auth Protocol Spec (`docs/design/v1.3_cloud_wss.md`):**
+  - Lock down the WSS JSON/binary framing schema, HMAC/Ed25519 challenge-response handshake (never transmitting raw `device_key.json` secrets), server certificate/SPKI pinning strategy, and cloud relay backend architecture before firmware implementation.
+- [ ] **9.1 Outbound WSS Relay Client (`net/wss_client.py`):**
+  - Replace the local multi-socket HTTP portal (`0.0.0.0:8080`) during normal WAN-connected operation with a single persistent outbound TLS WebSocket (`wss://`) to the cloud-hosted WebPortal backend—enabling off-LAN remote access through CGNAT/hotspots without router port forwarding while reclaiming `~25 KB` of local HTTP/lwIP socket overhead.
+  - Implement lightweight JSON-over-WSS control framing (`status`, `run`, `key`, `file`) paired with `1 KB` chunked binary WebSocket frames (`opcode 0x02`) for zero-Base64 `320x320` 4-bit BMP screenshot streaming, reusing a single pre-allocated `1024 B` `bytearray` buffer.
+  - Manage RP2350 mbedTLS SRAM budget (`~30–40 KB` live TLS buffer) with **auto-pause/resume** during SRAM-heavy apps or OTA updates, 30s `PING/PONG` heartbeat, exponential backoff + jitter reconnect, and server certificate/SPKI pinning.
+  - Retain a stripped-down local HTTP listener strictly for `PinhOS-Setup` SoftAP captive provisioning and an explicit offline `"Local LAN Mode"` toggle.
+- [ ] **9.2 Persistent Device Identity, Pairing & Remote-Control Guard:**
+  - Replace the ephemeral per-boot 16-hex `X-PinhOS-Token` UX with a persistent device identity bound to `machine.unique_id()` and a long-lived secret stored in `/sd/pinhos/device_key.json`.
+  - Support one-time pairing via a short pairing code or on-device QR code so subsequent boots authenticate silently over `wss://` with zero manual token entry, plus an `"Unpair Cloud / Rotate Key"` action in Settings (`set_conn`).
+  - Add an on-device **Remote-Control Safety Switch** (`Cloud: OFF / View-Only / Full Control`) paired with a visible **`CLD`** status badge so remote `run`/`key`/`file` commands can never execute silently without user awareness.
+- [ ] **9.3 Cloud-Integrated Licensing & Entitlement Sync:**
+  - Prepare and integrate the runtime license verification mechanism on WSS handshake (`machine.unique_id()` + signed HMAC/Ed25519 entitlement payload), validating `Free` vs `Pro` tier access and pushing signed `/sd/pinhos/license.key` updates or Pro Field Packs directly from the cloud backend.
+  - Cache signed license/entitlement state locally with an offline grace window anchored to NTP/monotonic counters (preventing RTC clock-rollback abuse) so licensed tools continue operating seamlessly when off-grid.
+  - Support cloud-side **Deactivate / Transfer Device** and signed revocation lists for hardware replacements or upgrades.
+- [ ] **9.4 Encrypted Cloud Config & Workspace Backup (Pro Feature):**
+  - Provide 1-click encrypted cloud backup and restore of `config.json`, custom JSON themes, Quick Notes, and user `apps/` over the authenticated WSS channel.
