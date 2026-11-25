@@ -1,0 +1,1487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PinhOS Cloud — Pocket Hardware Intelligence &amp; Cloud Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #090A0D;
+    --bg-panel: #111318;
+    --bg-surface: #161922;
+    --bg-hover: #1E222D;
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.14);
+    --border-amber: rgba(245, 158, 11, 0.35);
+    --text: #F3F4F6;
+    --muted: #9CA3AF;
+    --subtle: #6B7280;
+    --amber: #F59E0B;
+    --amber-hover: #FBBF24;
+    --amber-soft: rgba(245, 158, 11, 0.12);
+    --emerald: #10B981;
+    --emerald-soft: rgba(16, 185, 129, 0.12);
+    --blue: #38BDF8;
+    --danger: #EF4444;
+    --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 13.5px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  body { display: flex; flex-direction: column; overflow-x: hidden; }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
+
+  /* ================= TOP NAVIGATION BAR ================= */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+    padding: 0 20px; min-height: 54px;
+    background: rgba(9, 10, 13, 0.88);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 40;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-mark {
+    width: 28px; height: 28px; border-radius: 7px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-strong);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .brand-name { font-weight: 700; font-size: 15px; letter-spacing: -0.02em; color: var(--text); }
+  .brand-pill {
+    font-family: var(--mono); font-size: 10.5px; font-weight: 600;
+    padding: 2px 7px; border-radius: 5px;
+    background: var(--amber-soft); color: var(--amber);
+    border: 1px solid var(--border-amber);
+    letter-spacing: 0.02em;
+  }
+
+  .segmented-tabs {
+    display: flex; align-items: center; gap: 2px;
+    background: var(--bg-panel);
+    padding: 3px; border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .seg-tab {
+    background: transparent; border: none; color: var(--muted);
+    padding: 5px 12px; border-radius: 6px;
+    font-family: var(--sans); font-size: 12.5px; font-weight: 500;
+    cursor: pointer; transition: all 0.15s ease;
+  }
+  .seg-tab:hover { color: var(--text); }
+  .seg-tab.active {
+    background: var(--bg-surface); color: var(--text); font-weight: 600;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.4), inset 0 0 0 1px var(--border-strong);
+  }
+
+  .topbar-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .device-pill {
+    display: flex; align-items: center; gap: 7px;
+    background: var(--bg-panel); border: 1px solid var(--border);
+    padding: 4px 10px; border-radius: 7px;
+  }
+  .dot-live { width: 7px; height: 7px; border-radius: 50%; background: var(--emerald); flex-shrink: 0; }
+  .dot-live.offline { background: var(--subtle); }
+  .dev-select {
+    background: transparent; border: none; color: var(--text);
+    font-family: var(--sans); font-size: 12px; font-weight: 500;
+    outline: none; cursor: pointer;
+  }
+  .dev-select option { background: var(--bg-panel); color: var(--text); }
+
+  .account-pill {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 10px 4px 6px; border-radius: 999px;
+    background: var(--bg-panel); border: 1px solid var(--border);
+    font-size: 12px; font-weight: 500; color: var(--text);
+  }
+  .plan-tag {
+    font-family: var(--mono); font-size: 10px; font-weight: 600;
+    padding: 1px 6px; border-radius: 4px;
+    background: var(--amber-soft); color: var(--amber);
+    border: 1px solid var(--border-amber);
+  }
+
+  /* ================= SHARED COMPONENTS ================= */
+  .view { display: none; flex: 1; min-height: 0; }
+  .view.active { display: flex; flex-direction: column; }
+
+  .panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    display: flex; flex-direction: column; min-height: 0;
+    overflow: hidden;
+  }
+  .panel-head {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    font-size: 11.5px; font-weight: 600; color: var(--muted);
+    letter-spacing: 0.03em; text-transform: uppercase;
+    flex-shrink: 0;
+  }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 7px 13px; border-radius: 7px;
+    font-family: var(--sans); font-size: 12.5px; font-weight: 500;
+    cursor: pointer; transition: all 0.14s ease;
+    background: var(--bg-surface); color: var(--text);
+    border: 1px solid var(--border-strong);
+  }
+  .btn:hover { background: var(--bg-hover); border-color: rgba(255,255,255,0.22); }
+  .btn:active { transform: translateY(0.5px); }
+  .btn-sm { padding: 4px 10px; font-size: 11.5px; border-radius: 6px; }
+  .btn-primary {
+    background: var(--amber); color: #090A0D; font-weight: 600;
+    border-color: var(--amber);
+  }
+  .btn-primary:hover { background: var(--amber-hover); border-color: var(--amber-hover); }
+  .btn-ghost { background: transparent; border-color: transparent; color: var(--muted); }
+  .btn-ghost:hover { background: var(--bg-surface); color: var(--text); }
+  .btn-danger { color: var(--danger); border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.08); }
+  .btn-danger:hover { background: rgba(239, 68, 68, 0.16); border-color: var(--danger); }
+
+  /* ================= VIEW 1: PRODUCT & ECOSYSTEM ================= */
+  .landing-wrap {
+    max-width: 1120px; width: 100%; margin: 0 auto;
+    padding: 44px 20px 64px;
+    display: flex; flex-direction: column; gap: 48px;
+  }
+  .hero-block {
+    display: grid; grid-template-columns: 1.2fr 0.9fr; gap: 36px; align-items: center;
+  }
+  @media (max-width: 880px) { .hero-block { grid-template-columns: 1fr; } }
+
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+    padding: 4px 10px; border-radius: 999px;
+    background: var(--bg-panel); border: 1px solid var(--border);
+    margin-bottom: 16px;
+  }
+  .eyebrow b { color: var(--amber); font-weight: 600; }
+  .hero-title {
+    font-size: clamp(30px, 4vw, 44px);
+    font-weight: 700; line-height: 1.12; letter-spacing: -0.03em;
+    color: var(--text); margin-bottom: 14px;
+  }
+  .hero-sub {
+    font-size: 15px; color: var(--muted); max-width: 540px;
+    line-height: 1.6; margin-bottom: 24px;
+  }
+  .hero-cta-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+  .arch-card {
+    background: var(--bg-panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .arch-card-hdr {
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: var(--mono); font-size: 11px; color: var(--subtle);
+    padding-bottom: 10px; border-bottom: 1px solid var(--border);
+  }
+  .arch-node {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 12px; border-radius: 8px;
+    background: var(--bg-surface); border: 1px solid var(--border);
+  }
+  .arch-node-title { font-size: 12.5px; font-weight: 600; color: var(--text); }
+  .arch-node-sub { font-size: 11.5px; color: var(--muted); }
+  .arch-node-tag { font-family: var(--mono); font-size: 11px; color: var(--amber); }
+  .arch-link {
+    text-align: center; font-family: var(--mono); font-size: 11px; color: var(--subtle);
+  }
+
+  /* Spec Strip */
+  .spec-strip {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px;
+    overflow: hidden;
+  }
+  @media (max-width: 760px) { .spec-strip { grid-template-columns: repeat(2, 1fr); } }
+  .spec-cell {
+    padding: 16px 18px; border-right: 1px solid var(--border);
+  }
+  .spec-cell:last-child { border-right: none; }
+  .spec-k { font-size: 11.5px; color: var(--subtle); font-weight: 500; }
+  .spec-v { font-family: var(--mono); font-size: 14px; font-weight: 600; color: var(--text); margin-top: 3px; }
+
+  /* Bento Grid */
+  .section-label { font-size: 12px; font-weight: 600; color: var(--amber); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+  .section-title { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 18px; }
+  .bento-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 860px) { .bento-grid { grid-template-columns: 1fr; } }
+  .bento-card {
+    background: var(--bg-panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 22px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .bento-num { font-family: var(--mono); font-size: 11px; color: var(--subtle); }
+  .bento-card h3 { font-size: 15.5px; font-weight: 600; letter-spacing: -0.01em; color: var(--text); }
+  .bento-card p { font-size: 13px; color: var(--muted); line-height: 1.55; }
+
+  /* Pricing Comparison */
+  .pricing-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+  @media (max-width: 760px) { .pricing-grid { grid-template-columns: 1fr; } }
+  .tier-card {
+    background: var(--bg-panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 26px;
+    display: flex; flex-direction: column; justify-content: space-between; gap: 20px;
+  }
+  .tier-card.featured { border-color: var(--border-amber); background: linear-gradient(180deg, rgba(245,158,11,0.04) 0%, var(--bg-panel) 100%); }
+  .tier-name { font-size: 14px; font-weight: 600; color: var(--text); display: flex; justify-content: space-between; align-items: center; }
+  .tier-price { font-size: 32px; font-weight: 700; letter-spacing: -0.03em; margin: 8px 0 4px; }
+  .tier-price span { font-size: 13px; font-weight: 400; color: var(--muted); }
+  .tier-desc { font-size: 13px; color: var(--muted); }
+  .tier-list { list-style: none; display: flex; flex-direction: column; gap: 9px; margin-top: 16px; font-size: 13px; color: var(--text); }
+  .tier-list li { display: flex; align-items: center; gap: 8px; }
+  .tier-list li::before { content: "✓"; color: var(--emerald); font-weight: 700; font-size: 12px; }
+
+  /* ================= VIEW 2: CLOUD STUDIO IDE ================= */
+  .studio-grid {
+    display: grid;
+    grid-template-columns: 260px 1fr 372px;
+    gap: 12px;
+    padding: 12px 16px;
+    flex: 1;
+    min-height: calc(100vh - 54px);
+  }
+  @media (max-width: 1180px) {
+    .studio-grid { grid-template-columns: 230px 1fr; }
+    .studio-right { grid-column: 1 / -1; flex-direction: row !important; flex-wrap: wrap; }
+  }
+  @media (max-width: 780px) { .studio-grid { grid-template-columns: 1fr; } }
+
+  .studio-left { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+  .tree-path-bar {
+    padding: 8px 14px; font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .file-list { list-style: none; padding: 6px; flex: 1; overflow-y: auto; }
+  .file-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 6px 10px; border-radius: 6px; cursor: pointer;
+    font-family: var(--mono); font-size: 12px; color: var(--muted);
+    transition: background 0.12s, color 0.12s;
+  }
+  .file-row:hover { background: var(--bg-surface); color: var(--text); }
+  .file-row.active { background: var(--bg-surface); color: var(--amber); font-weight: 600; box-shadow: inset 0 0 0 1px var(--border-amber); }
+  .file-size { font-size: 10.5px; color: var(--subtle); }
+
+  .compact-telem { padding: 12px 14px; display: flex; flex-direction: column; gap: 9px; }
+  .ct-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+  .ct-k { color: var(--muted); }
+  .ct-v { font-family: var(--mono); font-size: 11.5px; font-weight: 600; color: var(--text); }
+  .ct-v.ok { color: var(--emerald); }
+  .ct-v.amber { color: var(--amber); }
+  .sram-bar-track { height: 5px; background: var(--bg); border-radius: 99px; overflow: hidden; border: 1px solid var(--border); }
+  .sram-bar-fill { height: 100%; width: 65%; background: var(--emerald); transition: width 0.25s; }
+
+  /* Center Editor */
+  .studio-center { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+  .editor-panel { flex: 1.7; }
+  .editor-bar {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    padding: 8px 12px; background: var(--bg-panel); border-bottom: 1px solid var(--border);
+  }
+  .file-tab-chip {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 4px 10px; border-radius: 6px;
+    background: var(--bg-surface); border: 1px solid var(--border-strong);
+    font-family: var(--mono); font-size: 12px; color: var(--text);
+  }
+  .unsaved-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); display: none; }
+  .editor-stage {
+    flex: 1; display: flex; min-height: 300px; background: #0B0D11;
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.6;
+    position: relative;
+  }
+  .line-gutter {
+    width: 46px; padding: 14px 10px 14px 0; text-align: right;
+    color: var(--subtle); background: #090A0D; border-right: 1px solid var(--border);
+    user-select: none; overflow: hidden; white-space: pre;
+  }
+  .code-stack { position: relative; flex: 1; overflow: hidden; }
+  .code-pre, .code-input {
+    position: absolute; inset: 0; padding: 14px 16px;
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.6;
+    tab-size: 4; white-space: pre; overflow: auto; border: none; outline: none;
+  }
+  .code-pre { pointer-events: none; color: #E5E7EB; z-index: 1; }
+  .code-input {
+    background: transparent; color: transparent; caret-color: var(--amber);
+    resize: none; z-index: 2;
+  }
+  .code-input::selection { background: rgba(245, 158, 11, 0.24); }
+
+  .tok-kw { color: #F472B6; font-weight: 500; }
+  .tok-str { color: #34D399; }
+  .tok-num { color: #60A5FA; }
+  .tok-com { color: #6B7280; font-style: italic; }
+  .tok-fn { color: #FBBF24; }
+  .tok-key { color: #38BDF8; }
+
+  /* Collapsible WSS Drawer */
+  .wss-panel { flex: 0.72; min-height: 150px; }
+  .wss-panel.collapsed { flex: 0 0 auto; min-height: 0; }
+  .wss-panel.collapsed .wss-log { display: none; }
+  .wss-log {
+    flex: 1; padding: 10px 14px; background: #08090C;
+    font-family: var(--mono); font-size: 11.5px; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 5px;
+  }
+  .wss-entry { display: flex; gap: 8px; align-items: baseline; }
+  .wss-time { color: var(--subtle); font-size: 10.5px; flex-shrink: 0; }
+  .wss-tag { font-weight: 600; flex-shrink: 0; font-size: 11px; }
+  .wss-tag.tx { color: var(--blue); }
+  .wss-tag.rx { color: var(--emerald); }
+  .wss-tag.bin { color: var(--amber); }
+  .wss-msg { color: #D1D5DB; word-break: break-all; }
+
+  /* Right Hardware Mirror */
+  .studio-right { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+  .lcd-stage {
+    padding: 14px; background: #0C0E13;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+  }
+  .lcd-chassis {
+    padding: 10px; border-radius: 12px;
+    background: #171A21;
+    border: 1px solid var(--border-strong);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  }
+  canvas#pico-canvas {
+    display: block; width: 320px; height: 320px;
+    border-radius: 4px; background: #0A0C10;
+    image-rendering: pixelated;
+  }
+  .stream-prog {
+    width: 340px; max-width: 100%; display: flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: 10.5px; color: var(--subtle);
+  }
+  .stream-track { flex: 1; height: 4px; background: var(--bg-surface); border-radius: 99px; overflow: hidden; }
+  .stream-fill { height: 100%; width: 100%; background: var(--amber); transition: width 0.08s linear; }
+
+  .hw-deck {
+    padding: 12px; border-top: 1px solid var(--border);
+    background: var(--bg-panel);
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .hw-fkeys { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+  .hw-dpad { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  .hw-btn {
+    background: var(--bg-surface); color: var(--text);
+    border: 1px solid var(--border-strong); border-radius: 6px;
+    padding: 6px 2px; font-family: var(--mono); font-size: 11px; font-weight: 600;
+    cursor: pointer; text-align: center; transition: all 0.12s;
+  }
+  .hw-btn:hover { background: var(--bg-hover); border-color: rgba(255,255,255,0.24); }
+  .hw-btn:active { transform: translateY(1px); }
+  .hw-btn.fn { color: var(--amber); }
+  .hw-btn.ent { background: var(--amber-soft); border-color: var(--border-amber); color: var(--amber); }
+  .hw-btn sub { display: block; font-family: var(--sans); font-size: 9.5px; font-weight: 500; color: var(--subtle); margin-top: 1px; }
+
+  /* ================= VIEW 3: DEVICES & LICENSING ================= */
+  .fleet-wrap {
+    max-width: 1120px; width: 100%; margin: 0 auto;
+    padding: 28px 20px 56px;
+    display: flex; flex-direction: column; gap: 24px;
+  }
+  .page-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+  .page-top h2 { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+  .page-top p { font-size: 13px; color: var(--muted); }
+
+  .table-wrap { overflow-x: auto; }
+  table.fleet-table { width: 100%; border-collapse: collapse; text-align: left; }
+  .fleet-table th {
+    padding: 11px 14px; font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--subtle);
+    border-bottom: 1px solid var(--border); background: var(--bg-surface);
+  }
+  .fleet-table td {
+    padding: 13px 14px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle;
+  }
+  .fleet-table tr:last-child td { border-bottom: none; }
+  .fleet-table tr:hover td { background: rgba(255,255,255,0.015); }
+  .mono-id { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+
+  .status-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 500;
+  }
+  .status-badge.on { background: var(--emerald-soft); color: var(--emerald); }
+  .status-badge.off { background: rgba(255,255,255,0.06); color: var(--muted); }
+
+  .entitlement-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; }
+  @media (max-width: 820px) { .entitlement-grid { grid-template-columns: 1fr; } }
+  .key-box {
+    padding: 14px; background: #0B0D11; border: 1px solid var(--border);
+    border-radius: 8px; font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+    line-height: 1.6;
+  }
+  .pack-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 11px 14px; border-bottom: 1px solid var(--border);
+  }
+  .pack-row:last-child { border-bottom: none; }
+
+  /* Modal & Toast */
+  .modal-bg {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, 0.72); backdrop-filter: blur(4px);
+    display: none; align-items: center; justify-content: center; z-index: 90; padding: 16px;
+  }
+  .modal-bg.open { display: flex; }
+  .modal-card {
+    background: var(--bg-panel); border: 1px solid var(--border-strong);
+    border-radius: 12px; max-width: 420px; width: 100%; padding: 22px;
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.7);
+  }
+  .code-display {
+    font-family: var(--mono); font-size: 26px; font-weight: 700; letter-spacing: 0.18em;
+    text-align: center; padding: 14px; margin: 16px 0;
+    background: var(--bg); border: 1px solid var(--border-amber); border-radius: 8px;
+    color: var(--amber);
+  }
+
+  .toasts {
+    position: fixed; bottom: 16px; right: 16px; z-index: 100;
+    display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+  }
+  .toast-item {
+    background: var(--bg-surface); border: 1px solid var(--border-strong);
+    border-left: 3px solid var(--amber);
+    padding: 9px 14px; border-radius: 8px; font-size: 12.5px; color: var(--text);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  }
+  .toast-item.ok { border-left-color: var(--emerald); }
+</style>
+</head>
+<body>
+
+  <!-- TOP NAVIGATION BAR -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 18 18" fill="none">
+          <path d="M9 2L4.2 7H7.2L3.2 11.5H6.8L2.8 15.5H15.2L11.2 11.5H14.8L10.8 7H13.8L9 2Z" stroke="#F59E0B" stroke-width="1.5" stroke-linejoin="round"/>
+          <path d="M9 15.5V17.2" stroke="#F59E0B" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <span class="brand-name">PinhOS</span>
+      <span class="brand-pill">Cloud</span>
+    </div>
+
+    <nav class="segmented-tabs" role="tablist">
+      <button class="seg-tab active" data-tab="landing">Product &amp; Ecosystem</button>
+      <button class="seg-tab" data-tab="studio">Cloud Studio IDE</button>
+      <button class="seg-tab" data-tab="devices">Devices &amp; Licensing</button>
+    </nav>
+
+    <div class="topbar-right">
+      <div class="device-pill">
+        <span id="top-dev-dot" class="dot-live"></span>
+        <select id="top-dev-select" class="dev-select" aria-label="Active Device">
+          <option value="dev1">PicoCalc RP2350 · Online</option>
+          <option value="dev2">Field Unit #02 · Offline</option>
+        </select>
+      </div>
+      <div class="account-pill">
+        <span class="plan-tag">PRO PLAN</span>
+        <span>Bruno Pinho</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ==================== VIEW 1: PRODUCT & ECOSYSTEM ==================== -->
+  <main id="view-landing" class="view active">
+    <div class="landing-wrap">
+      <section class="hero-block">
+        <div>
+          <div class="eyebrow"><b>v1.3.0 Architecture</b> · RP2350 &amp; ClockworkPi PicoCalc</div>
+          <h1 class="hero-title">Pocket-scale hardware intelligence, cloud-connected.</h1>
+          <p class="hero-sub">
+            A deterministic MicroPython &amp; native C operating system built for field engineers, network operators, and embedded developers—paired with an outbound WSS relay for zero-config remote development.
+          </p>
+          <div class="hero-cta-row">
+            <button class="btn btn-primary" onclick="goTab('studio')">Open Cloud Studio</button>
+            <button class="btn" onclick="notify('Downloading pinhos-picocalc-pico2w-1.0.1.uf2 (1.42 MB)...', 'ok')">Download UF2 v1.0.1</button>
+          </div>
+        </div>
+
+        <div class="arch-card">
+          <div class="arch-card-hdr">
+            <span>SYSTEM TOPOLOGY</span>
+            <span style="color:var(--emerald);">● WSS RELAY ACTIVE</span>
+          </div>
+          <div class="arch-node">
+            <div>
+              <div class="arch-node-title">PinhOS Cloud Studio</div>
+              <div class="arch-node-sub">Next.js · Monaco Editor · Supabase Auth</div>
+            </div>
+            <span class="arch-node-tag">HTTPS / WSS</span>
+          </div>
+          <div class="arch-link">↕ Outbound TLS WebSocket (1 KB Binary Frames)</div>
+          <div class="arch-node">
+            <div>
+              <div class="arch-node-title">Cloudflare Durable Object</div>
+              <div class="arch-node-sub">Zero-config CGNAT &amp; hotspot traversal</div>
+            </div>
+            <span class="arch-node-tag">18ms RTT</span>
+          </div>
+          <div class="arch-link">↕ Persistent device_key.json Handshake</div>
+          <div class="arch-node">
+            <div>
+              <div class="arch-node-title">ClockworkPi PicoCalc (RP2350)</div>
+              <div class="arch-node-sub">520 KB SRAM · Dual-UI · 3-Strike Boot Guard</div>
+            </div>
+            <span class="arch-node-tag">XIP + .mpy</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Hardware & Architecture Spec Strip -->
+      <section class="spec-strip">
+        <div class="spec-cell">
+          <div class="spec-k">Compute Silicon</div>
+          <div class="spec-v">RP2350 Dual Cortex-M33</div>
+        </div>
+        <div class="spec-cell">
+          <div class="spec-k">Memory Architecture</div>
+          <div class="spec-v">520 KB Deterministic SRAM</div>
+        </div>
+        <div class="spec-cell">
+          <div class="spec-k">Remote Transport</div>
+          <div class="spec-v">Outbound WSS Relay</div>
+        </div>
+        <div class="spec-cell">
+          <div class="spec-k">Entitlement Security</div>
+          <div class="spec-v">Hardware-Locked Licensing</div>
+        </div>
+      </section>
+
+      <!-- 3-Column Feature Bento Grid -->
+      <section>
+        <div class="section-label">Core Platform</div>
+        <h2 class="section-title">Engineered for constrained silicon and real field work</h2>
+        <div class="bento-grid">
+          <div class="bento-card">
+            <span class="bento-num">01 / CONNECTIVITY</span>
+            <h3>Zero-Config Outbound WSS Relay</h3>
+            <p>The PicoCalc initiates a single outbound TLS WebSocket to Cloudflare Durable Objects, punching cleanly through CGNAT, corporate firewalls, and phone hotspots with 1 KB binary screenshot framing.</p>
+          </div>
+          <div class="bento-card">
+            <span class="bento-num">02 / EXECUTION</span>
+            <h3>Sandboxed MicroPython &amp; Native C Engine</h3>
+            <p>Core OS modules execute in-place from QSPI Flash (XIP), while SandboxRunner enforces contiguous SRAM gates, descriptor cleanup, and 0 B residual heap leak across applet runs.</p>
+          </div>
+          <div class="bento-card">
+            <span class="bento-num">03 / DISTRIBUTION</span>
+            <h3>Fleet Licensing &amp; Pro Field Packs</h3>
+            <p>Bind signed HMAC-SHA256 / Ed25519 entitlements directly to each unit’s <code style="font-family:var(--mono);font-size:12px;">machine.unique_id()</code> with a 30-day offline grace cache for air-gapped field deployments.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2-Tier Pricing Comparison -->
+      <section>
+        <div class="section-label">Editions</div>
+        <h2 class="section-title">Transparent licensing for solo makers and field teams</h2>
+        <div class="pricing-grid">
+          <div class="tier-card">
+            <div>
+              <div class="tier-name"><span>Community / Open Core</span><span class="mono-id">OPEN SOURCE</span></div>
+              <div class="tier-price">Free <span>/ forever</span></div>
+              <p class="tier-desc">Everything required to run PinhOS locally on your PicoCalc or custom RP2350 build.</p>
+              <ul class="tier-list">
+                <li>Complete PinhOS Core OS, Dual-UI Engine &amp; 4 JSON Themes</li>
+                <li>BusyBox CLI, File Commander, Text Editor &amp; UART1 Console</li>
+                <li>Local LAN WebPortal &amp; SoftAP Setup Mode</li>
+                <li>1 Paired PicoCalc on Cloud WSS Relay</li>
+              </ul>
+            </div>
+            <button class="btn" onclick="goTab('studio')">Launch Studio Workspace</button>
+          </div>
+
+          <div class="tier-card featured">
+            <div>
+              <div class="tier-name"><span>PinhOS Pro</span><span class="plan-tag">RECOMMENDED</span></div>
+              <div class="tier-price">$9 <span>/ month</span></div>
+              <p class="tier-desc">Full cloud development workflow, multi-device fleet management, and encrypted field packs.</p>
+              <ul class="tier-list">
+                <li>Unlimited Paired RP2350 Devices &amp; Multi-Device Fleet Sync</li>
+                <li>Cloud Studio IDE with Persistent SD &amp; Cloud Config Backups</li>
+                <li>Encrypted NetOps VLAN, Modbus/CAN &amp; C-DSP Field Packs</li>
+                <li>30-Day Offline Grace Cache for Air-Gapped Operations</li>
+              </ul>
+            </div>
+            <button class="btn btn-primary" onclick="goTab('devices')">Manage Fleet &amp; Pro License</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ==================== VIEW 2: CLOUD STUDIO IDE ==================== -->
+  <section id="view-studio" class="view">
+    <div class="studio-grid">
+
+      <!-- Left Sidebar: File Tree + Compact Telemetry -->
+      <aside class="studio-left">
+        <div class="panel" style="flex:1;">
+          <div class="panel-head">
+            <span>SD File Tree</span>
+            <button id="btn-new-file" class="btn btn-sm">+ File</button>
+          </div>
+          <div class="tree-path-bar">
+            <span>/sd/pinhos/</span>
+            <span id="tree-file-count">5 files</span>
+          </div>
+          <ul id="file-tree" class="file-list"></ul>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <span>Device Telemetry</span>
+            <span style="color:var(--emerald);font-family:var(--mono);font-size:10.5px;">● LIVE</span>
+          </div>
+          <div class="compact-telem">
+            <div class="ct-row">
+              <span class="ct-k">Free SRAM</span>
+              <span id="ide-sram-txt" class="ct-v ok">182 / 520 KB</span>
+            </div>
+            <div class="sram-bar-track"><div id="ide-sram-bar" class="sram-bar-fill"></div></div>
+            <div class="ct-row">
+              <span class="ct-k">Largest Block</span>
+              <span class="ct-v">96 KB</span>
+            </div>
+            <div class="ct-row">
+              <span class="ct-k">Wi-Fi Signal</span>
+              <span id="ide-wifi-txt" class="ct-v">-49 dBm</span>
+            </div>
+            <div class="ct-row">
+              <span class="ct-k">Battery</span>
+              <span class="ct-v amber">98% (4.20V)</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Center Pane: Monaco Editor + Collapsible WSS Relay Inspector -->
+      <section class="studio-center">
+        <div class="panel editor-panel">
+          <div class="editor-bar">
+            <div class="file-tab-chip">
+              <span id="editor-filename">apps/hello_world.py</span>
+              <span id="editor-dirty-dot" class="unsaved-dot"></span>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button id="btn-check-syntax" class="btn btn-sm">Check Syntax</button>
+              <button id="btn-deploy-run" class="btn btn-sm btn-primary">Deploy &amp; Run</button>
+            </div>
+          </div>
+          <div class="editor-stage">
+            <div id="editor-gutter" class="line-gutter">1</div>
+            <div class="code-stack">
+              <pre id="code-pre" class="code-pre" aria-hidden="true"></pre>
+              <textarea id="code-input" class="code-input" spellcheck="false" wrap="off"></textarea>
+            </div>
+          </div>
+        </div>
+
+        <div id="wss-panel" class="panel wss-panel">
+          <div class="panel-head">
+            <span>WSS Relay Inspector · wss://relay.pinhos.io/ws</span>
+            <div style="display:flex; gap:6px;">
+              <button id="btn-wss-clear" class="btn btn-sm btn-ghost">Clear</button>
+              <button id="btn-wss-toggle" class="btn btn-sm">Collapse</button>
+            </div>
+          </div>
+          <div id="wss-log" class="wss-log"></div>
+        </div>
+      </section>
+
+      <!-- Right Pane: 320x320 Live Display Mirror + Minimalist Hardware Deck -->
+      <aside class="studio-right">
+        <div class="panel">
+          <div class="panel-head">
+            <span>Live Display (320×320)</span>
+            <button id="btn-capture-frame" class="btn btn-sm">Capture Frame</button>
+          </div>
+          <div class="lcd-stage">
+            <div class="lcd-chassis">
+              <canvas id="pico-canvas" width="320" height="320"></canvas>
+            </div>
+            <div class="stream-prog">
+              <span id="stream-label">51.3 KB BMP4 · Ready</span>
+              <div class="stream-track"><div id="stream-fill" class="stream-fill"></div></div>
+            </div>
+          </div>
+          <div class="hw-deck">
+            <div class="hw-fkeys">
+              <button class="hw-btn fn" data-key="F1">F1<sub>Help</sub></button>
+              <button class="hw-btn fn" data-key="F2">F2<sub>Theme</sub></button>
+              <button class="hw-btn fn" data-key="F3">F3<sub>Mode</sub></button>
+              <button class="hw-btn fn" data-key="F4">F4<sub>Settings</sub></button>
+              <button class="hw-btn fn" data-key="F5">F5<sub>Notes</sub></button>
+            </div>
+            <div class="hw-dpad">
+              <button class="hw-btn" data-key="UP">▲</button>
+              <button class="hw-btn" data-key="DOWN">▼</button>
+              <button class="hw-btn" data-key="LEFT">◀</button>
+              <button class="hw-btn" data-key="RIGHT">▶</button>
+              <button class="hw-btn ent" data-key="ENT">ENT</button>
+              <button class="hw-btn" data-key="ESC">ESC</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ==================== VIEW 3: DEVICES & LICENSING ==================== -->
+  <section id="view-devices" class="view">
+    <div class="fleet-wrap">
+      <div class="page-top">
+        <div>
+          <h2>Devices &amp; Licensing</h2>
+          <p>Manage paired RP2350 hardware nodes, persistent <code style="font-family:var(--mono);font-size:12px;">device_key.json</code> credentials, and signed entitlements.</p>
+        </div>
+        <button id="btn-pair-modal" class="btn btn-primary">+ Pair New Device</button>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <span>Paired Hardware Fleet</span>
+          <span class="mono-id">2 REGISTERED UNITS</span>
+        </div>
+        <div class="table-wrap">
+          <table class="fleet-table">
+            <thead>
+              <tr>
+                <th>Device Name</th>
+                <th>Hardware Unique ID</th>
+                <th>Firmware / OS</th>
+                <th>WSS Relay</th>
+                <th>License Tier</th>
+                <th style="text-align:right;">Controls</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>PicoCalc RP2350</strong><div style="font-size:11.5px;color:var(--subtle);">Primary Field Unit · 192.168.1.93</div></td>
+                <td class="mono-id">E66368254F3B2829</td>
+                <td class="mono-id">UF2 1.0.1 / v1.3.0</td>
+                <td><span class="status-badge on">● Online · 18ms</span></td>
+                <td><span class="plan-tag">PRO PLAN</span></td>
+                <td style="text-align:right;white-space:nowrap;">
+                  <button class="btn btn-sm" onclick="selectFleetDevice('dev1')">Studio</button>
+                  <button class="btn btn-sm" onclick="notify('Rotated device_key.json for E66368254F3B2829', 'ok')">Rotate Key</button>
+                  <button class="btn btn-sm btn-danger" onclick="notify('Unpair command staged for E66368254F3B2829')">Unpair</button>
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Field Unit #02</strong><div style="font-size:11.5px;color:var(--subtle);">Bench RP2350 · Last seen 2h ago</div></td>
+                <td class="mono-id">D9140A77C2189E04</td>
+                <td class="mono-id">UF2 1.0.1 / v1.0.0-alpha.4.3</td>
+                <td><span class="status-badge off">○ Offline</span></td>
+                <td><span class="plan-tag">PRO PLAN</span></td>
+                <td style="text-align:right;white-space:nowrap;">
+                  <button class="btn btn-sm" onclick="selectFleetDevice('dev2')">Inspect</button>
+                  <button class="btn btn-sm" onclick="notify('Key rotation queued for next WSS handshake')">Rotate Key</button>
+                  <button class="btn btn-sm btn-danger" onclick="notify('Removed D9140A77C2189E04 from fleet')">Unpair</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="entitlement-grid">
+        <div class="panel">
+          <div class="panel-head">
+            <span>Signed License Entitlement (/sd/pinhos/license.key)</span>
+            <button class="btn btn-sm btn-primary" onclick="notify('Pushed signed license.key over WSS (HMAC-SHA256 verified)', 'ok')">Sync Entitlement</button>
+          </div>
+          <div style="padding:14px;">
+            <div class="key-box">
+{<br>
+&nbsp;&nbsp;"schema": "pinhos.license.v1",<br>
+&nbsp;&nbsp;"unique_id": "E66368254F3B2829",<br>
+&nbsp;&nbsp;"tier": "PRO",<br>
+&nbsp;&nbsp;"packs": ["netops_audit", "modbus_can"],<br>
+&nbsp;&nbsp;"offline_grace_until": "2026-12-25T00:00:00Z",<br>
+&nbsp;&nbsp;"sig": "ed25519:8f9c2a41e7b04d19...c41a"<br>
+}
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <span>Encrypted Pro Field Packs</span>
+            <span class="mono-id">SRAM-ONLY DECRYPT</span>
+          </div>
+          <div>
+            <div class="pack-row">
+              <div>
+                <div style="font-weight:600;font-size:13px;">NetOps VLAN &amp; Switch Audit</div>
+                <div style="font-size:11.5px;color:var(--muted);">LLDP/CDP sniffer &amp; DHCP auditor (18 KB .mpy)</div>
+              </div>
+              <span class="status-badge on">Active</span>
+            </div>
+            <div class="pack-row">
+              <div>
+                <div style="font-weight:600;font-size:13px;">Industrial Modbus &amp; CAN</div>
+                <div style="font-size:11.5px;color:var(--muted);">RS-485 RTU &amp; CAN frame decoder (22 KB .mpy)</div>
+              </div>
+              <span class="status-badge on">Active</span>
+            </div>
+            <div class="pack-row">
+              <div>
+                <div style="font-weight:600;font-size:13px;">C-Native MP3 / DSP Audio</div>
+                <div style="font-size:11.5px;color:var(--muted);">Hardware I2S/PWM decoder &amp; FFT (26 KB .mpy)</div>
+              </div>
+              <span class="status-badge off">Available</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PAIR NEW DEVICE MODAL -->
+  <div id="pair-modal" class="modal-bg">
+    <div class="modal-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="font-size:16px;font-weight:700;">Pair New Device</h3>
+        <button id="btn-pair-close" class="btn btn-sm btn-ghost">✕</button>
+      </div>
+      <p style="font-size:13px;color:var(--muted);margin-top:8px;">
+        On your PicoCalc, navigate to <strong style="color:var(--text);">[6] Wi-Fi &amp; Network → Pair Cloud Portal</strong> and enter this 6-digit pairing code to bind <code style="font-family:var(--mono);font-size:12px;">machine.unique_id()</code>:
+      </p>
+      <div id="pair-code-val" class="code-display">482-915</div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;">
+        <button id="btn-pair-regen" class="btn btn-sm">Regenerate</button>
+        <button id="btn-pair-confirm" class="btn btn-sm btn-primary">Verify Handshake</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST STACK -->
+  <div id="toast-stack" class="toasts"></div>
+
+<script>
+(() => {
+  const FILES = {
+    "apps/hello_world.py": {
+      size: "1.8 KB",
+      code: `# PinhOS Sandboxed Applet (apps/hello_world.py)
+APP_META = {
+    "id": "hello_world",
+    "name": "Hello PinhOS",
+    "version": "1.3.0",
+    "category": "System",
+    "entry": "main",
+    "min_sram": 16384,
+    "ui_modes": ["gui", "tui"],
+}
+
+def main(ctx):
+    board = ctx.board
+    theme = ctx.theme
+    prev = ctx.load_state(default={"runs": 0})
+    runs = int(prev.get("runs", 0)) + 1
+    ctx.save_state({"runs": runs})
+
+    board.fill(theme.color("bg"))
+    board.fill_rect(0, 0, 320, 22, theme.color("accent"))
+    board.text("HELLO PINHOS [CLOUD WSS]", 10, 7, theme.color("accent_fg"))
+    board.text("Sandboxed Runs: {}".format(runs), 20, 62, theme.color("ok"))
+    board.text("Status: ISOLATED OK", 20, 84, theme.color("text"))
+    board.show()
+    return {"app_id": ctx.app_id, "runs": runs}`
+    },
+    "apps/wifi_spectrum.py": {
+      size: "4.6 KB",
+      code: `# 2.4 GHz Wi-Fi Spectrum Analyzer (apps/wifi_spectrum.py)
+import network
+
+APP_META = {
+    "id": "wifi_spectrum",
+    "name": "Wi-Fi Spectrum",
+    "version": "1.1.0",
+    "category": "Network",
+    "entry": "main",
+    "min_sram": 24576,
+    "needs_radio": True,
+    "ui_modes": ["gui", "tui"],
+}
+
+def main(ctx):
+    wlan = network.WLAN(network.STA_IF)
+    wlan.active(True)
+    aps = wlan.scan()
+    ctx.yield_(step_web=True)
+    return {"aps_found": len(aps)}`
+    },
+    "tools/net_tools.py": {
+      size: "5.4 KB",
+      code: `# PinhOS Network Field Probes (tools/net_tools.py)
+import socket, time
+
+APP_META = {
+    "id": "net_tools",
+    "name": "Network Probes",
+    "version": "1.1.0",
+    "category": "Network",
+    "entry": "main",
+    "min_sram": 40960,
+    "needs_radio": True,
+    "ui_modes": ["gui", "tui"],
+}
+
+def tcp_probe(host, port, timeout_s=0.6):
+    s = socket.socket()
+    s.settimeout(timeout_s)
+    t0 = time.ticks_ms()
+    s.connect(socket.getaddrinfo(host, port)[0][-1])
+    dt = time.ticks_diff(time.ticks_ms(), t0)
+    s.close()
+    return True, dt`
+    },
+    "themes/cyber_amber.json": {
+      size: "412 B",
+      code: `{
+  "id": "cyber_amber",
+  "name": "Cyber Amber",
+  "author": "bpinh0",
+  "version": "1.0.0",
+  "colors": {
+    "bg": "#0A0C10",
+    "surface": "#12161F",
+    "fg": "#FFB000",
+    "fg_muted": "#9E7216",
+    "accent": "#F59E0B",
+    "accent_fg": "#0A0C10",
+    "border": "#FFB000",
+    "ok": "#10B981",
+    "warn": "#FF9900",
+    "err": "#EF4444"
+  }
+}`
+    },
+    "config.json": {
+      size: "548 B",
+      code: `{
+  "board": "picocalc",
+  "ui_mode": "gui",
+  "boot_screen": "desktop",
+  "theme": "cyber_amber",
+  "cpu_freq_mhz": 200,
+  "swap_max_kb": 1024,
+  "wdt_timeout_ms": 8000,
+  "cloud_wss_enabled": true,
+  "cloud_relay_url": "wss://relay.pinhos.io/ws"
+}`
+    }
+  };
+
+  const THEMES = [
+    { name: "Cyber Amber", bg: "#0A0C10", surface: "#12161F", border: "#9E7216", accent: "#F59E0B", accentFg: "#0A0C10", text: "#F3F4F6", muted: "#9CA3AF", ok: "#10B981", warn: "#F59E0B" },
+    { name: "Phosphor Green", bg: "#070C09", surface: "#0E1712", border: "#15803D", accent: "#10B981", accentFg: "#070C09", text: "#ECFDF5", muted: "#6EE7B7", ok: "#10B981", warn: "#FBBF24" },
+    { name: "Arctic Daylight", bg: "#F1F5F9", surface: "#E2E8F0", border: "#94A3B8", accent: "#0F172A", accentFg: "#FFFFFF", text: "#0F172A", muted: "#475569", ok: "#059669", warn: "#D97706" },
+    { name: "Synthwave Pulse", bg: "#0D0B1A", surface: "#16132B", border: "#4C1D95", accent: "#EC4899", accentFg: "#FFFFFF", text: "#F3E8FF", muted: "#A78BFA", ok: "#2DD4BF", warn: "#FBBF24" }
+  ];
+
+  const state = {
+    activeFile: "apps/hello_world.py",
+    themeIdx: 0,
+    uiMode: "GUI",
+    helpOpen: false,
+    chipIdx: 0,
+    seq: 20,
+    sramKb: 182
+  };
+
+  window.notify = function(msg, type = "") {
+    const stack = document.getElementById("toast-stack");
+    const el = document.createElement("div");
+    el.className = "toast-item " + type;
+    el.textContent = msg;
+    stack.appendChild(el);
+    setTimeout(() => {
+      el.style.opacity = "0";
+      el.style.transition = "opacity 0.2s";
+      setTimeout(() => el.remove(), 220);
+    }, 2600);
+  };
+
+  window.goTab = function(tabName) {
+    document.querySelectorAll(".seg-tab").forEach(b => b.classList.toggle("active", b.dataset.tab === tabName));
+    document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + tabName));
+  };
+
+  document.querySelectorAll(".seg-tab").forEach(b => {
+    b.addEventListener("click", () => goTab(b.dataset.tab));
+  });
+
+  // --- WSS Relay Log ---
+  function appendWss(dir, payload) {
+    const box = document.getElementById("wss-log");
+    const row = document.createElement("div");
+    row.className = "wss-entry";
+    const ts = new Date().toTimeString().slice(0, 8);
+    const cls = dir.startsWith("BIN") ? "bin" : (dir.startsWith("TX") ? "tx" : "rx");
+    row.innerHTML = `<span class="wss-time">${ts}</span><span class="wss-tag ${cls}">${dir}</span><span class="wss-msg">${esc(payload)}</span>`;
+    box.appendChild(row);
+    while (box.children.length > 35) box.removeChild(box.firstChild);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  // --- Syntax Highlighter & Editor ---
+  function syntaxHtml(src, file) {
+    let h = esc(src);
+    if (file.endsWith(".json")) {
+      return h.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?)/g, m => {
+        if (/^"/.test(m)) return /:$/.test(m) ? `<span class="tok-key">${m}</span>` : `<span class="tok-str">${m}</span>`;
+        if (/true|false|null/.test(m)) return `<span class="tok-kw">${m}</span>`;
+        return `<span class="tok-num">${m}</span>`;
+      });
+    }
+    return h
+      .replace(/(#.*$)/gm, '<span class="tok-com">$1</span>')
+      .replace(/("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/g, '<span class="tok-str">$1</span>')
+      .replace(/\b(def|return|import|from|if|else|elif|for|while|in|try|except|True|False|None)\b/g, '<span class="tok-kw">$1</span>')
+      .replace(/\b(APP_META|main|ctx|board|theme)\b/g, '<span class="tok-fn">$1</span>')
+      .replace(/\b(\d+)\b/g, '<span class="tok-num">$1</span>');
+  }
+
+  const fileTreeEl = document.getElementById("file-tree");
+  const codeInput = document.getElementById("code-input");
+  const codePre = document.getElementById("code-pre");
+  const gutter = document.getElementById("editor-gutter");
+
+  function renderTree() {
+    fileTreeEl.innerHTML = "";
+    const keys = Object.keys(FILES);
+    document.getElementById("tree-file-count").textContent = `${keys.length} files`;
+    keys.forEach(path => {
+      const li = document.createElement("li");
+      li.className = "file-row" + (path === state.activeFile ? " active" : "");
+      li.innerHTML = `<span>${path}</span><span class="file-size">${FILES[path].size}</span>`;
+      li.onclick = () => loadFile(path);
+      fileTreeEl.appendChild(li);
+    });
+  }
+
+  function refreshEditorHighlight() {
+    const txt = codeInput.value;
+    codePre.innerHTML = syntaxHtml(txt, state.activeFile) + "\n";
+    const count = txt.split("\n").length;
+    let nums = "";
+    for (let i = 1; i <= count; i++) nums += i + "\n";
+    gutter.textContent = nums;
+  }
+
+  function loadFile(path) {
+    state.activeFile = path;
+    document.getElementById("editor-filename").textContent = path;
+    document.getElementById("editor-dirty-dot").style.display = "none";
+    codeInput.value = FILES[path].code;
+    refreshEditorHighlight();
+    renderTree();
+  }
+
+  codeInput.addEventListener("input", () => {
+    FILES[state.activeFile].code = codeInput.value;
+    document.getElementById("editor-dirty-dot").style.display = "inline-block";
+    refreshEditorHighlight();
+  });
+  codeInput.addEventListener("scroll", () => {
+    codePre.scrollTop = codeInput.scrollTop;
+    codePre.scrollLeft = codeInput.scrollLeft;
+    gutter.scrollTop = codeInput.scrollTop;
+  });
+  codeInput.addEventListener("keydown", e => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      deployAndRun(false);
+    }
+  });
+
+  // --- 320x320 HTML5 Canvas PicoCalc Simulator ---
+  const canvas = document.getElementById("pico-canvas");
+  const ctx = canvas.getContext("2d");
+
+  function renderCanvas() {
+    const t = THEMES[state.themeIdx];
+    const isTui = state.uiMode === "TUI";
+    const cardBg = isTui ? t.bg : t.surface;
+
+    ctx.fillStyle = t.bg;
+    ctx.fillRect(0, 0, 320, 320);
+
+    // StatusBar
+    ctx.fillStyle = isTui ? t.bg : t.accent;
+    ctx.fillRect(0, 0, 320, 20);
+    if (isTui) {
+      ctx.fillStyle = t.border;
+      ctx.fillRect(0, 19, 320, 1);
+    }
+    const topFg = isTui ? t.accent : t.accentFg;
+    ctx.font = "bold 10px 'JetBrains Mono', monospace";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = topFg;
+    ctx.fillText("PinhOS v1.3.0", 10, 10);
+
+    ctx.fillStyle = topFg;
+    ctx.fillRect(212, 4, 24, 12);
+    ctx.fillStyle = isTui ? t.bg : t.accent;
+    ctx.fillText("WSS", 215, 10);
+
+    ctx.fillStyle = topFg;
+    ctx.fillText("09:42", 244, 10);
+    ctx.strokeStyle = topFg;
+    ctx.strokeRect(284, 5, 22, 10);
+    ctx.fillRect(286, 7, 17, 6);
+    ctx.fillRect(306, 7, 2, 6);
+
+    // Quick Category Strip
+    const chips = ["1:TOOL", "2:FILE", "3:APPS", "4:SYS", "5:CFG", "6:NET"];
+    chips.forEach((c, i) => {
+      const x = 5 + i * 52;
+      const sel = i === state.chipIdx;
+      ctx.fillStyle = sel ? t.accent : cardBg;
+      ctx.fillRect(x, 24, 50, 18);
+      ctx.strokeStyle = t.border;
+      ctx.strokeRect(x + 0.5, 24.5, 49, 17);
+      ctx.fillStyle = sel ? t.accentFg : t.text;
+      ctx.fillText(c, x + 6, 33);
+    });
+
+    // Left Telemetry Card
+    ctx.fillStyle = cardBg;
+    ctx.fillRect(4, 47, 154, 200);
+    ctx.strokeStyle = t.border;
+    ctx.strokeRect(4.5, 47.5, 153, 199);
+    ctx.fillStyle = isTui ? t.bg : t.accent;
+    if (!isTui) ctx.fillRect(5, 48, 152, 16);
+    ctx.fillStyle = isTui ? t.accent : t.accentFg;
+    ctx.fillText(isTui ? "== TELEMETRY ==" : "SYS TELEMETRY", 10, 56);
+
+    ctx.fillStyle = t.ok;
+    ctx.fillText(`SRAM ${state.sramKb}K/520K`, 10, 74);
+    ctx.fillStyle = t.bg;
+    ctx.fillRect(10, 82, 142, 18);
+    ctx.strokeStyle = t.border;
+    ctx.strokeRect(10.5, 82.5, 141, 17);
+    [64, 65, 63, 66, 65, 67, 65, 66, 64, 65, 66, 65].forEach((v, idx) => {
+      const h = Math.round((v / 100) * 14);
+      ctx.fillStyle = t.ok;
+      ctx.fillRect(13 + idx * 11, 98 - h, 8, h);
+    });
+
+    ctx.fillStyle = t.text;
+    ctx.fillText("CPU 200MHz 26C", 10, 110);
+    ctx.fillStyle = t.bg;
+    ctx.fillRect(10, 118, 142, 18);
+    ctx.strokeStyle = t.border;
+    ctx.strokeRect(10.5, 118.5, 141, 17);
+    [28, 30, 34, 42, 36, 29, 31, 33, 30, 28, 31, 30].forEach((v, idx) => {
+      const h = Math.round((v / 100) * 14);
+      ctx.fillStyle = t.warn;
+      ctx.fillRect(13 + idx * 11, 134 - h, 8, h);
+    });
+
+    ctx.fillStyle = t.muted;
+    ctx.fillText("SWAP 16K/1024K", 10, 146);
+    ctx.fillStyle = t.bg;
+    ctx.fillRect(10, 153, 142, 6);
+    ctx.strokeRect(10.5, 153.5, 141, 5);
+    ctx.fillStyle = t.accent;
+    ctx.fillRect(12, 155, 14, 2);
+
+    ctx.fillStyle = t.ok;
+    ctx.fillText("BAT 98% 4.20V", 10, 169);
+    ctx.fillStyle = t.bg;
+    ctx.fillRect(10, 176, 142, 6);
+    ctx.strokeRect(10.5, 176.5, 141, 5);
+    ctx.fillStyle = t.ok;
+    ctx.fillRect(12, 178, 134, 2);
+
+    ctx.fillStyle = t.ok;
+    ctx.fillText("IP: 192.168.1.93", 10, 195);
+    ctx.fillStyle = t.muted;
+    ctx.fillText(`SIG -49dBm | ${state.uiMode}`, 10, 210);
+    ctx.fillStyle = t.accent;
+    ctx.fillText("WSS ON [relay.io]", 10, 225);
+
+    // Right Notes Card
+    ctx.fillStyle = cardBg;
+    ctx.fillRect(162, 47, 154, 200);
+    ctx.strokeStyle = t.border;
+    ctx.strokeRect(162.5, 47.5, 153, 199);
+    ctx.fillStyle = isTui ? t.bg : t.accent;
+    if (!isTui) ctx.fillRect(163, 48, 152, 16);
+    ctx.fillStyle = isTui ? t.accent : t.accentFg;
+    ctx.fillText(isTui ? "== QUICK NOTES ==" : "QUICK NOTES  [F5]", 168, 56);
+
+    const lines = [
+      "      /\\",
+      "     /  \\   PinhOS",
+      "    / /\\ \\  v1.3.0",
+      "   / ____ \\ ------",
+      "  /_/ || \\_\\RP2350",
+      "      ||    200MHz",
+      "  .---''---.520K",
+      "  |  WSS   |SRAM",
+      "  | CLOUD  |XIP",
+      "  '--------'320px"
+    ];
+    ctx.fillStyle = t.text;
+    lines.forEach((ln, i) => ctx.fillText(ln, 168, 74 + i * 14));
+    ctx.fillStyle = t.muted;
+    ctx.fillText("10 ln | <=1KB SD", 168, 235);
+
+    // App Drawer Strip
+    ctx.fillStyle = cardBg;
+    ctx.fillRect(4, 251, 312, 21);
+    ctx.strokeStyle = t.accent;
+    ctx.strokeRect(4.5, 251.5, 311, 20);
+    ctx.fillStyle = t.accent;
+    ctx.fillText("[ENTER] App Drawer (GRID) | [F5] Note", 32, 261);
+
+    // FooterBar
+    ctx.fillStyle = isTui ? t.bg : t.surface;
+    ctx.fillRect(0, 276, 320, 22);
+    ctx.fillStyle = t.border;
+    ctx.fillRect(0, 276, 320, 1);
+    ctx.fillStyle = t.ok;
+    ctx.fillText(`Cloud WSS Synced (${t.name})`, 8, 287);
+
+    ctx.fillStyle = isTui ? t.bg : t.accent;
+    ctx.fillRect(0, 298, 320, 22);
+    if (isTui) {
+      ctx.fillStyle = t.border;
+      ctx.fillRect(0, 298, 320, 1);
+    }
+    ctx.fillStyle = isTui ? t.accent : t.accentFg;
+    ctx.fillText("F1:Help F2:Thm F3:Mode F4:Cfg F5:Notes", 8, 309);
+
+    if (state.helpOpen) {
+      ctx.fillStyle = "rgba(0,0,0,0.72)";
+      ctx.fillRect(0, 20, 320, 278);
+      ctx.fillStyle = t.surface;
+      ctx.fillRect(20, 48, 280, 208);
+      ctx.strokeStyle = t.accent;
+      ctx.strokeRect(20.5, 48.5, 279, 207);
+      ctx.fillStyle = t.accent;
+      ctx.fillRect(21, 49, 278, 19);
+      ctx.fillStyle = t.accentFg;
+      ctx.fillText("PINHOS CONTROLS (F1-F10)", 30, 58);
+
+      const help = [
+        "F1: Help       Shift+F6: WEB Toggle",
+        "F2: Theme      Shift+F7: COM Link",
+        "F3: GUI/TUI    Shift+F8: Mouse Mode",
+        "F4: Settings   Shift+F9: Edit Notes",
+        "F5: QuickNote  Shift+F10: Self-Test",
+        "L/R: Category  ENT: App Drawer",
+        "CTRL+P: Capture 320x320 BMP"
+      ];
+      ctx.fillStyle = t.text;
+      help.forEach((h, i) => ctx.fillText(h, 30, 84 + i * 20));
+      ctx.fillStyle = t.accent;
+      ctx.fillText("[Press F1 or ESC to close]", 68, 238);
+    }
+  }
+
+  // --- Frame Capture Streaming Simulation ---
+  function captureFrameStream() {
+    const id = ++state.seq;
+    const fill = document.getElementById("stream-fill");
+    const lbl = document.getElementById("stream-label");
+    appendWss("TX →", JSON.stringify({ id, op: "shot" }));
+    fill.style.width = "0%";
+    let chunk = 0;
+    const total = 51;
+    const timer = setInterval(() => {
+      chunk += 9;
+      const pct = Math.min(100, Math.round((chunk / total) * 100));
+      fill.style.width = pct + "%";
+      lbl.textContent = `Streaming ${Math.min(chunk, total)}/${total} KB chunks...`;
+      if (chunk >= total) {
+        clearInterval(timer);
+        renderCanvas();
+        lbl.textContent = "51.3 KB BMP4 · Synced";
+        appendWss("RX ←", JSON.stringify({ id, ok: true, d: { bytes: 51318, fmt: "bmp4" } }));
+        appendWss("BIN ←", "51 × 1024 B binary frames (opcode 0x02)");
+        notify("Captured 320×320 frame over 1 KB WSS stream", "ok");
+      }
+    }, 35);
+  }
+
+  // --- Hardware Deck Controls ---
+  document.querySelectorAll(".hw-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const k = btn.dataset.key;
+      const id = ++state.seq;
+      appendWss("TX →", JSON.stringify({ id, op: "key", d: { k } }));
+      if (k === "F1") {
+        state.helpOpen = !state.helpOpen;
+      } else if (k === "ESC") {
+        state.helpOpen = false;
+      } else if (k === "F2") {
+        state.helpOpen = false;
+        state.themeIdx = (state.themeIdx + 1) % THEMES.length;
+        notify(`Theme switched → ${THEMES[state.themeIdx].name}`);
+      } else if (k === "F3") {
+        state.helpOpen = false;
+        state.uiMode = state.uiMode === "GUI" ? "TUI" : "GUI";
+        notify(`UI mode switched → ${state.uiMode}`);
+      } else if (k === "LEFT") {
+        state.chipIdx = (state.chipIdx + 5) % 6;
+      } else if (k === "RIGHT") {
+        state.chipIdx = (state.chipIdx + 1) % 6;
+      } else if (k === "F4") {
+        notify("Opened 6-Category Settings Menu on device");
+      } else if (k === "F5") {
+        notify("Quick Note input active on FooterBar");
+      } else if (k === "ENT") {
+        notify("Opened App Drawer (3×2 GRID) on device");
+      }
+      renderCanvas();
+      setTimeout(() => {
+        appendWss("RX ←", JSON.stringify({ id, ok: true, d: { key: k, mode: state.uiMode, theme: THEMES[state.themeIdx].name } }));
+      }, 70);
+    });
+  });
+
+  // --- Studio Actions ---
+  function deployAndRun(runAfter = true) {
+    const path = state.activeFile;
+    const bytes = new TextEncoder().encode(codeInput.value).length;
+    FILES[path].size = bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
+    document.getElementById("editor-dirty-dot").style.display = "none";
+    renderTree();
+
+    const id = ++state.seq;
+    appendWss("TX →", JSON.stringify({ id, op: "file_write", d: { path, bytes } }));
+    setTimeout(() => {
+      appendWss("RX ←", JSON.stringify({ id, ok: true, d: { path, written: bytes } }));
+      if (!runAfter) {
+        notify(`Saved ${path} (${bytes} B) via WSS`, "ok");
+        return;
+      }
+      if (!path.endsWith(".py")) {
+        notify(`Saved ${path} (${bytes} B) to SD`, "ok");
+        return;
+      }
+      const rid = ++state.seq;
+      appendWss("TX →", JSON.stringify({ id: rid, op: "run", d: { path } }));
+      setTimeout(() => {
+        state.sramKb = 180;
+        document.getElementById("ide-sram-txt").textContent = "180 / 520 KB";
+        document.getElementById("ide-sram-bar").style.width = "65%";
+        appendWss("RX ←", JSON.stringify({ ev: "run_done", d: { path, ok: true, sram_delta_b: 0 } }));
+        notify(`Deployed & ran ${path} (0 B SRAM leak)`, "ok");
+        captureFrameStream();
+      }, 280);
+    }, 120);
+  }
+
+  document.getElementById("btn-deploy-run").onclick = () => deployAndRun(true);
+  document.getElementById("btn-check-syntax").onclick = () => {
+    const path = state.activeFile;
+    const id = ++state.seq;
+    appendWss("TX →", JSON.stringify({ id, op: "syntax", d: { path } }));
+    setTimeout(() => {
+      appendWss("RX ←", JSON.stringify({ id, ok: true, d: { path, compile: "OK" } }));
+      notify(`Syntax verified for ${path}`, "ok");
+    }, 110);
+  };
+  document.getElementById("btn-capture-frame").onclick = captureFrameStream;
+
+  document.getElementById("btn-new-file").onclick = () => {
+    const name = prompt("New file path under /sd/pinhos/:", "apps/sensor_log.py");
+    if (!name) return;
+    const clean = name.replace(/^\/+/, "");
+    FILES[clean] = {
+      size: "220 B",
+      code: `# PinhOS Applet (${clean})\nAPP_META = {\n    "id": "sensor_log",\n    "name": "Sensor Log",\n    "version": "1.0.0",\n    "category": "Field Tools",\n    "entry": "main",\n    "min_sram": 16384,\n    "ui_modes": ["gui", "tui"],\n}\n\ndef main(ctx):\n    ctx.board.text("Sensor Log Active", 20, 48, 15)\n    ctx.board.show()\n`
+    };
+    loadFile(clean);
+    notify(`Created ${clean}`, "ok");
+  };
+
+  document.getElementById("btn-wss-clear").onclick = () => { document.getElementById("wss-log").innerHTML = ""; };
+  document.getElementById("btn-wss-toggle").onclick = e => {
+    const p = document.getElementById("wss-panel");
+    p.classList.toggle("collapsed");
+    e.target.textContent = p.classList.contains("collapsed") ? "Expand" : "Collapse";
+  };
+
+  // --- Top Device Selector & Fleet Actions ---
+  const topSel = document.getElementById("top-dev-select");
+  topSel.addEventListener("change", () => {
+    const online = topSel.value === "dev1";
+    document.getElementById("top-dev-dot").classList.toggle("offline", !online);
+    document.getElementById("ide-wifi-txt").textContent = online ? "-49 dBm" : "Offline";
+    notify(online ? "Connected to PicoCalc RP2350 (18ms WSS)" : "Viewing Field Unit #02 (Offline Cache)");
+  });
+
+  window.selectFleetDevice = function(id) {
+    topSel.value = id;
+    topSel.dispatchEvent(new Event("change"));
+    goTab("studio");
+  };
+
+  // --- Pair Modal ---
+  const modal = document.getElementById("pair-modal");
+  document.getElementById("btn-pair-modal").onclick = () => modal.classList.add("open");
+  document.getElementById("btn-pair-close").onclick = () => modal.classList.remove("open");
+  document.getElementById("btn-pair-regen").onclick = () => {
+    const a = Math.floor(100 + Math.random() * 900);
+    const b = Math.floor(100 + Math.random() * 900);
+    document.getElementById("pair-code-val").textContent = `${a}-${b}`;
+  };
+  document.getElementById("btn-pair-confirm").onclick = () => {
+    modal.classList.remove("open");
+    appendWss("RX ←", JSON.stringify({ ev: "paired", unique_id: "E66368254F3B2829", key: "device_key.json" }));
+    notify("Device paired! Persistent device_key.json stored on SD.", "ok");
+  };
+
+  // Boot Init
+  loadFile("apps/hello_world.py");
+  renderCanvas();
+  appendWss("RX ←", JSON.stringify({ ev: "hello", unique_id: "E66368254F3B2829", fw: "1.0.1", os: "v1.3.0" }));
+  appendWss("TX →", JSON.stringify({ id: 19, op: "status" }));
+  appendWss("RX ←", JSON.stringify({ id: 19, ok: true, d: { sram_free: 186368, largest_block: 98304, wdt_ms: 8000 } }));
+})();
+</script>
+</body>
+</html>
