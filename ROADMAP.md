@@ -181,6 +181,7 @@ def main(ctx):
   - [ ] Implement **Two-Stage Soft + Hard Watchdog**: 2s `machine.Timer` supervisor keeping the 8s silicon WDT fed for true deadlocks while enforcing a configurable soft timeout (`15s`/`30s`/`60s`/`OFF`) with a Windows-style **"Not Responding"** dialog (`[W] Wait`, `[ESC] Abort`, `[R] Reboot`).
   - [ ] Evaluate pre-compiling `tools/shell.py` (or splitting command parser) if low-memory launch fragmentation is observed under heavy WebPortal + TLS workloads.
   - [ ] Add on-device WebPortal QR code generator for quick phone/laptop URL + token pairing.
+  - [ ] Add on-device **License & Legal Notices** viewer next to **About PinhOS** in Settings (`#58` — PolyForm Noncommercial 1.0.0, `NOTICE`, and third-party attributions streamed in `<= 1 KB` chunks).
 
 ---
 
