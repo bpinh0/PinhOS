@@ -7,7 +7,7 @@ In `web/server.py`, `start_async()` ran `gc.collect()` *before* `asyncio.start_s
 Run immediately after a clean power-cycle (press `Ctrl-C` on boot splash or run via `COM4`):
 
 ```powershell
-Set-Location C:\Users\BrunoPinho\Gemini_Workplace\pinhos
+Set-Location <path-to-pinhos>
 @"
 import sys, gc
 if '/sd/pinhos' not in sys.path: sys.path.insert(0, '/sd/pinhos')

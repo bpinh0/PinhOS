@@ -5,7 +5,7 @@ Because `machine.WDT` performs a real RP2350 hardware reset (and is intentionall
 ## 1. Deploy Branch & Create Temporary Hang Applet
 
 ```powershell
-Set-Location C:\Users\BrunoPinho\Gemini_Workplace\pinhos
+Set-Location <path-to-pinhos>
 git checkout fix/issue-28-wdt-coverage
 .\picocalc.ps1 test
 ```

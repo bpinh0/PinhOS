@@ -7,7 +7,7 @@ This runbook collects real RP2350 PicoCalc hardware data for **Issue #11** (`Net
 ## 1. Deploy Branch & Run Stress Gates 13–14
 
 ```powershell
-Set-Location C:\Users\BrunoPinho\Gemini_Workplace\pinhos
+Set-Location <path-to-pinhos>
 .\picocalc.ps1 test
 ```
 

@@ -42,7 +42,7 @@ Fetching both a payload file (`*.mpy` / `*.py`) and its `sha256` manifest from t
 Run on a connected PicoCalc to measure the exact `gc.mem_free()` and `largest_free(96*1024)` required for an HTTPS handshake to `raw.githubusercontent.com:443`:
 
 ```powershell
-Set-Location C:\Users\BrunoPinho\Gemini_Workplace\pinhos
+Set-Location <path-to-pinhos>
 @"
 import sys, gc, socket, ssl
 if '/sd/pinhos' not in sys.path: sys.path.insert(0, '/sd/pinhos')
