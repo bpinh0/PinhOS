@@ -53,7 +53,7 @@ def _clear_main_refs():
 
 
 _KEEP_MODS = (
-    "boards", "boards.base", "boards.picocalc", "core", "core.config",
+    "boards", "boards.base", "boards.picocalc", "core.config",
     "tests", "tests.selftest", "picocalc", "picocalcdisplay", "vtterminal",
 )
 
@@ -171,6 +171,7 @@ def test_hal_init(root="/sd/pinhos"):
     gen_board.text("Generic SPI OK", 10, 10, 15)
     gen_board.deinit()
     del gen_board
+    sys.modules.pop("boards.generic_spi", None)
     gc.collect()
     board.ensure_serial_repl()
 
@@ -304,7 +305,16 @@ def test_swap_and_core(root="/sd/pinhos"):
     _assert(aborted, "Soft WDT [ESC] Abort did not raise SoftWatchdogAbort")
     swdt.deinit()
 
-    return "R/W + CRC + crash + SoftWDT OK"
+    # 7. MemGuard: reclaim() unloads stale transient modules; ensure_heap() pre-flight passes
+    from core.memutil import reclaim, ensure_heap
+    sys.modules["ui._menu_net"] = sys
+    sys.modules["ui._log_view"] = sys
+    reclaim(1, None, keep=("tests.selftest",))
+    _assert("ui._menu_net" not in sys.modules and "ui._log_view" not in sys.modules, "MemGuard reclaim() left stale modules")
+    mg_free, mg_ok = ensure_heap(None, min_free=1024, min_blk=1024, keep=("tests.selftest",))
+    _assert(mg_ok and mg_free > 1024, "MemGuard ensure_heap pre-flight failed")
+
+    return "R/W + CRC + crash + SoftWDT + MemGuard OK"
 
 
 def test_sandbox_isolation(root="/sd/pinhos"):
@@ -693,7 +703,8 @@ def test_dual_ui_engine(root="/sd/pinhos"):
     from boards import get_board
     from core.config import ConfigManager
     from core.theme import ThemeManager, CANONICAL_THEME_IDS
-    from ui import UIEngine, StatusBar, FooterBar, Panel, ListMenu, ProgressBar, Dialog, TextView
+    from ui.engine import UIEngine
+    from ui.widgets import StatusBar, FooterBar, Panel, ListMenu, ProgressBar, Dialog, TextView
 
     board = get_board()
     themes_dir = root.rstrip("/") + "/themes"

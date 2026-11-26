@@ -1,8 +1,8 @@
 # PinhOS Phase 4 — WebPortal Browser IDE package & lifecycle helpers
 import gc
-from web.server import WebServer
+import sys
 
-__all__ = ["WebServer", "portal_url", "start_portal", "stop_portal", "toggle_portal", "step_portal"]
+__all__ = ["portal_url", "start_portal", "stop_portal", "toggle_portal", "step_portal"]
 
 
 def portal_url(port=8080):
@@ -27,6 +27,8 @@ def start_portal(rs, board=None, cfg=None, logger=None, host="0.0.0.0", port=Non
         return True, "{} (Tok:{})".format(portal_url(ws.port), getattr(ws, "token", ""))
     p = int(port if port is not None else (cfg.get("webportal_port", 8080) if cfg else 8080))
     try:
+        gc.collect()
+        from web.server import WebServer
         ws = WebServer(board=board, config=cfg, manifest=rs.get("manifest"), logger=logger, host=host, port=p)
         ws.start()
         rs["web_server"] = ws
@@ -47,6 +49,8 @@ def stop_portal(rs):
             ws.stop()
         except Exception:
             pass
+        ws = None
+    sys.modules.pop("web.server", None)
     gc.collect()
     return True, "WebPortal IDE stopped"
 

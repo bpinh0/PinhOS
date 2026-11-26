@@ -203,7 +203,7 @@ def _prompt_line(board, ui, fb, label, initial=""):
             _sleep_ms(30)
             continue
         if getattr(board, "pending_screenshot", None):
-            from ui.menu import show_screenshot_toast
+            from ui.widgets import show_screenshot_toast
             show_screenshot_toast(board, ui, fb)
             continue
         if k == "ESC":
@@ -259,7 +259,7 @@ def _open_viewer(board, ui, path, hex_mode=False):
             continue
         ku = k.upper()
         if getattr(board, "pending_screenshot", None):
-            from ui.menu import show_screenshot_toast
+            from ui.widgets import show_screenshot_toast
             show_screenshot_toast(board, ui, fb)
             continue
         if ku in ("ESC", "Q", "BACKSPACE"):

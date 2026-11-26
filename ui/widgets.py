@@ -887,3 +887,49 @@ def show_toast_dialog(board, ui, title, lines, fb=None, status_msg="", kind="inf
     ui.remove_widget(dlg)
     ui.mark_all_dirty(True)
     board.clear_input()
+
+
+def confirm_dialog(board, ui, title, lines, footer="[Y/ENTER] Yes  [N/ESC] No", kind="warn"):
+    """Lightweight modal confirmation Dialog (lives in ui.widgets for zero ui.menu import)."""
+    dlg = Dialog(20, 96, 280, 120, title=title, lines=lines, footer=footer, kind=kind)
+    ui.add_widget(dlg)
+    ui.render(force=False)
+    board.clear_input()
+    poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
+    ans = False
+    try:
+        while True:
+            k = poll_fn() if poll_fn else None
+            if k:
+                ku = str(k).upper()
+                if ku in ("Y", "ENTER"):
+                    ans = True
+                    break
+                if ku in ("N", "ESC", "Q", "BACK", "BACKSPACE"):
+                    break
+            _toast_wait_ms(30)
+    except KeyboardInterrupt:
+        ans = False
+    ui.remove_widget(dlg)
+    ui.mark_all_dirty(True)
+    board.clear_input()
+    return ans
+
+
+DASHBOARD_ACTIONS = (
+    {"id": "cat:toolkit", "short": "TOOLKIT", "label": "TERMINAL & TOOLKIT", "icon": "term", "badge": "[1]", "tui_badge": "[SH >]"},
+    {"id": "cat:files", "short": "FILES & EDIT", "label": "FILES & EDITOR", "icon": "files", "badge": "[2]", "tui_badge": "[/sd >]"},
+    {"id": "cat:apps", "short": "APPS & STUDIO", "label": "APPS & STUDIO", "icon": "apps", "badge": "[3]", "tui_badge": "[APPS >]"},
+    {"id": "cat:system", "short": "SYS & DIAG", "label": "SYSTEM & DIAGNOSTICS", "icon": "dash", "badge": "[4]", "tui_badge": "[DIAG >]"},
+    {"id": "cat:settings", "short": "SETTINGS", "label": "SETTINGS", "icon": "sys", "badge": "[5]", "tui_badge": "[CFG >]"},
+    {"id": "cat:set_conn", "short": "WI-FI & NET", "label": "WI-FI & NETWORK", "icon": "net", "badge": "[6]", "tui_badge": "[NET >]"},
+)
+
+TOOL_MAP = {
+    "shell": ("/sd/pinhos/tools/shell.py", "BusyBox Shell", False),
+    "editor": ("/sd/pinhos/tools/editor.py", "Text Editor", False),
+    "files": ("/sd/pinhos/tools/files.py", "File Manager", False),
+    "net": ("/sd/pinhos/tools/net_tools.py", "Net Probes", False),
+    "uart": ("/sd/pinhos/tools/uart_term.py", "UART Console", False),
+    "sysmon": ("/sd/pinhos/tools/sysmon.py", "SysMon", False),
+}

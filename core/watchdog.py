@@ -63,14 +63,26 @@ class TwoStageWatchdog:
         self._sched_cb = self._on_soft_timeout
 
         if arm_hw and machine is not None and hasattr(machine, "WDT"):
-            self._hw_wdt = machine.WDT(timeout=self.hw_timeout_ms)
+            # Try Stage 1 periodic timer BEFORE/independently of silicon WDT so an
+            # exhausted RP2350 alarm pool (OSError 12 / ENOMEM) NEVER strands an unfed WDT.
             if hasattr(machine, "Timer"):
-                self._timer = machine.Timer(
-                    -1,
-                    period=2000,
-                    mode=machine.Timer.PERIODIC,
-                    callback=self._timer_cb,
-                )
+                try:
+                    self._timer = machine.Timer(
+                        -1,
+                        period=2000,
+                        mode=machine.Timer.PERIODIC,
+                        callback=self._timer_cb,
+                    )
+                except Exception:
+                    try:
+                        self._timer = machine.Timer(
+                            period=2000,
+                            mode=machine.Timer.PERIODIC,
+                            callback=self._timer_cb,
+                        )
+                    except Exception:
+                        self._timer = None
+            self._hw_wdt = machine.WDT(timeout=self.hw_timeout_ms)
 
     def attach(self, board=None, ui=None, logger=None):
         if board is not None:

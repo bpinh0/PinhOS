@@ -4,9 +4,7 @@
 # Zero full-screen framebuffers; zero hardcoded GPIO pins.
 
 import gc
-
-from ui.gui import GUIBackend
-from ui.tui import TUIBackend
+import sys
 
 VALID_UI_MODES = ("gui", "tui")
 
@@ -64,7 +62,13 @@ class UIEngine:
 
     def _make_backend(self, mode):
         if mode == "tui":
+            sys.modules.pop("ui.gui", None)
+            gc.collect()
+            from ui.tui import TUIBackend
             return TUIBackend(self.board)
+        sys.modules.pop("ui.tui", None)
+        gc.collect()
+        from ui.gui import GUIBackend
         return GUIBackend(self.board)
 
     @property

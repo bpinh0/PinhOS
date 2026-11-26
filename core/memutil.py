@@ -41,6 +41,55 @@ def largest_free(cap=98304, step=1024):
     return best
 
 
+_TRANSIENT_MODS = (
+    "ui.menu", "ui._menu_net", "ui._log_view", "net.sync",
+    "core.sandbox", "boards.generic_spi", "ui.fonts_ext",
+)
+
+
+def reclaim(level=1, rs=None, keep=()):
+    """
+    MemGuard reclaimer (call ONLY from safe points: idle tick / pre-flight, never mid-tool).
+    L1: unload transient modules (menus, sandbox, tests.*) + gc.collect().
+    L2: additionally stop an idle WebPortal (frees lwIP/uasyncio heap).
+    Returns bytes freed.
+    """
+    import sys
+    gc.collect()
+    b0 = gc.mem_free() if hasattr(gc, "mem_free") else 0
+    if level >= 1:
+        for m in list(sys.modules.keys()):
+            if m in keep:
+                continue
+            if m in _TRANSIENT_MODS or m == "tests" or m.startswith("tests."):
+                sys.modules.pop(m, None)
+        gc.collect()
+    if level >= 2 and rs is not None and rs.get("web_active"):
+        ws = rs.get("web_server")
+        if ws is not None and not getattr(ws, "pending_run", None):
+            w = sys.modules.get("web")
+            if w is not None:
+                try:
+                    w.stop_portal(rs)
+                except Exception:
+                    pass
+        gc.collect()
+    return max(0, (gc.mem_free() if hasattr(gc, "mem_free") else 0) - b0)
+
+
+def ensure_heap(rs=None, min_free=98304, min_blk=32768, keep=()):
+    """Pre-flight: guarantee free SRAM + contiguous block before heavy ops. Returns (free_bytes, ok)."""
+    gc.collect()
+    if gc.mem_free() >= min_free and largest_free(min_blk) >= min_blk:
+        return gc.mem_free(), True
+    reclaim(1, rs, keep)
+    if gc.mem_free() >= min_free and largest_free(min_blk) >= min_blk:
+        return gc.mem_free(), True
+    reclaim(2, rs, keep)
+    ok = gc.mem_free() >= min_free // 2 and largest_free(min_blk) >= min_blk
+    return gc.mem_free(), ok
+
+
 def heap_pressure(cfg=None, min_block=16384):
     """Return True if total free SRAM < swap_low_sram OR largest_free < min_block."""
     low_sram = 65536

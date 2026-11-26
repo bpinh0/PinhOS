@@ -407,9 +407,19 @@ def _unwrap(it):
 
 class Shell:
     Error = ShellError
+    HOME = HOME
+    CHUNK = CHUNK
+    PROTECTED = PROTECTED
     opts = staticmethod(opts)
     int_opt = staticmethod(int_opt)
     read_tail = staticmethod(read_tail)
+    stat_of = staticmethod(stat_of)
+    is_dir = staticmethod(is_dir)
+    join = staticmethod(join)
+    basename = staticmethod(basename)
+    iter_lines = staticmethod(iter_lines)
+    close_gen = staticmethod(close_gen)
+    format_columns = staticmethod(format_columns)
 
     def __init__(self, board=None, config=None, logger=None, theme_mgr=None, ui=None, cwd=HOME, app_id="busybox_shell"):
         self.board, self.config, self.logger = board, config, logger
@@ -422,7 +432,7 @@ class Shell:
         self.line = LineInput()
         self.interrupt_cb = None; self.on_output = None
         self.handlers = {}; self.out = self._sb_out; self._ticks = 0
-        self.commands = dict(COMMANDS)
+        self.commands = {}
         try:
             from tools._shell_cmds import SYS_COMMANDS
             self.commands.update(SYS_COMMANDS)
@@ -570,286 +580,7 @@ class Shell:
         return lg.sys_log_path if lg else HOME + "/logs/system.log"
 
 
-# --- Core FS Commands ---
-
-def _ls_gen(sh, targets, lng, allf):
-    for t in targets:
-        p = sh.path(t); st = stat_of(p)
-        if st is None:
-            raise ShellError("ls: {}: No such file".format(t))
-        if not (st[0] & 0x4000):
-            yield ("- {:>6} {}".format(hsize(st[6]), t) if lng else t); continue
-        ents = sorted([(e[0], e[1] == 0x4000) for e in os.ilistdir(p) if allf or e[0][:1] != "."])
-        if lng:
-            for nm, isd in ents:
-                s2 = stat_of(join(p, nm))
-                if s2:
-                    yield ("c" if isd else " ", "{} {:>6} {}{}".format("d" if isd else "-", hsize(s2[6]), nm, "/" if isd else ""))
-        else:
-            for r in format_columns([nm + "/" if isd else nm for nm, isd in ents]):
-                yield r
-        if not ents:
-            yield ("m", "(empty)")
-
-
-def cmd_ls(sh, a, inp):
-    fl, pos = opts(a, "", "ls")
-    return _ls_gen(sh, pos or ["."], "l" in fl, "a" in fl)
-
-
-def cmd_cd(sh, a, inp):
-    t = sh.oldpwd if (a and a[0] == "-") else (a[0] if a else HOME)
-    p = sh.path(t)
-    if not is_dir(p):
-        raise ShellError("cd: {}: Not a directory".format(t))
-    sh.oldpwd, sh.cwd = sh.cwd, p
-
-
-def _srcs(sh, cmd, files, inp):
-    if files:
-        for f in files:
-            yield f, iter_lines(sh.need_file(cmd, f), sh.tick)
-    elif inp is not None:
-        yield "(stdin)", inp
-    else:
-        raise ShellError(cmd + ": missing file")
-
-
-def cmd_cat(sh, a, inp):
-    fl, pos = opts(a, "", "cat"); num = "n" in fl
-    def _g():
-        n = 0
-        for _, it in _srcs(sh, "cat", pos, inp):
-            for ln in it:
-                n += 1; yield "{:>5} {}".format(n, ln) if num else ln
-    return _g()
-
-
-def cmd_head(sh, a, inp):
-    fl, pos = opts(a, "n", "head"); n = int_opt(fl, "n", 10, "head")
-    def _g():
-        for _, it in _srcs(sh, "head", pos, inp):
-            c = 0
-            for ln in it:
-                if c >= n:
-                    break
-                yield ln; c += 1
-            close_gen(it)
-    return _g()
-
-
-def cmd_tail(sh, a, inp):
-    fl, pos = opts(a, "n", "tail"); n = min(500, int_opt(fl, "n", 10, "tail"))
-    def _g():
-        if pos:
-            for f in pos:
-                for ln in read_tail(sh.need_file("tail", f), n, tick=sh.tick):
-                    yield ln
-        elif inp is not None:
-            ring = []
-            for ln in inp:
-                ring.append(ln)
-                if len(ring) > n:
-                    ring.pop(0)
-            for ln in ring:
-                yield ln
-        else:
-            raise ShellError("tail: missing file")
-    return _g()
-
-
-def cmd_grep(sh, a, inp):
-    fl, pos = opts(a, "", "grep")
-    if not pos:
-        raise ShellError("grep: PAT [FILE...]")
-    pat, files = pos[0], pos[1:]
-    ic, num, inv, cnt = "i" in fl, "n" in fl, "v" in fl, "c" in fl
-    nd = pat.lower() if ic else pat
-    def _g():
-        hits = 0
-        for lbl, it in _srcs(sh, "grep", files, inp):
-            n = c = 0
-            for ln in it:
-                n += 1
-                if (nd in (ln.lower() if ic else ln)) != inv:
-                    c += 1
-                    if not cnt:
-                        yield ("{}:".format(n) if num else "") + ln
-                sh.tick()
-            hits += c
-            if cnt:
-                yield str(c)
-        if hits == 0:
-            sh.rc_hint = 1
-    return _g()
-
-
-def cmd_wc(sh, a, inp):
-    fl, pos = opts(a, "", "wc")
-    wl, ww, wc = "l" in fl, "w" in fl, "c" in fl
-    if not (wl or ww or wc):
-        wl = ww = wc = True
-    def fmt(l, w, c, lbl):
-        p = ([str(l)] if wl else []) + ([str(w)] if ww else []) + ([str(c)] if wc else [])
-        return " ".join(["{:>6}".format(x) for x in p]) + ((" " + lbl) if lbl else "")
-    def _g():
-        if pos:
-            for fn in pos:
-                p = sh.need_file("wc", fn); l = w = c = 0; inw = False
-                with open(p, "rb") as f:
-                    while True:
-                        ch = f.read(CHUNK)
-                        if not ch:
-                            break
-                        c += len(ch); l += ch.count(b"\n"); pts = ch.split(); w += len(pts)
-                        if inw and pts and ch[0] not in b" \t\r\n":
-                            w -= 1
-                        inw = ch[-1] not in b" \t\r\n"; sh.tick()
-                yield fmt(l, w, c, fn)
-        elif inp is not None:
-            l = w = c = 0
-            for ln in inp:
-                l += 1; w += len(ln.split()); c += len(ln) + 1
-            yield fmt(l, w, c, "")
-    return _g()
-
-
-def cmd_mkdir(sh, a, inp):
-    fl, pos = opts(a, "", "mkdir")
-    if not pos:
-        raise ShellError("mkdir: missing operand")
-    for t in pos:
-        p = sh.path(t)
-        if "p" in fl:
-            cur = ""
-            for s in p.split("/"):
-                if s:
-                    cur += "/" + s
-                    if not is_dir(cur):
-                        os.mkdir(cur)
-        else:
-            os.mkdir(p)
-
-
-def _guard(cmd, p):
-    pp = p.rstrip("/") or "/"
-    if pp in PROTECTED:
-        raise ShellError("{}: refusing to modify protected '{}'".format(cmd, pp))
-
-
-def _rm_tree(sh, p):
-    for nm in os.listdir(p):
-        c = join(p, nm)
-        _rm_tree(sh, c) if is_dir(c) else os.remove(c)
-        sh.tick()
-    os.rmdir(p)
-
-
-def cmd_rm(sh, a, inp):
-    fl, pos = opts(a, "", "rm"); rec = "r" in fl or "R" in fl; frc = "f" in fl
-    if not pos:
-        raise ShellError("rm: missing operand")
-    for t in pos:
-        p = sh.path(t); _guard("rm", p); st = stat_of(p)
-        if st is None:
-            if not frc:
-                raise ShellError("rm: {}: No such file".format(t))
-        elif st[0] & 0x4000:
-            if not rec:
-                raise ShellError("rm: {}: Is a directory".format(t))
-            _rm_tree(sh, p)
-        else:
-            os.remove(p)
-
-
-def _cp_file(sh, s, d):
-    with open(s, "rb") as fi:
-        with open(d, "wb") as fo:
-            while True:
-                b = fi.read(CHUNK)
-                if not b:
-                    break
-                fo.write(b); sh.tick()
-
-
-def cmd_cp(sh, a, inp):
-    fl, pos = opts(a, "", "cp")
-    if len(pos) < 2:
-        raise ShellError("cp: SRC DST")
-    dst = sh.path(pos[-1]); isd = is_dir(dst)
-    for s in pos[:-1]:
-        sp = sh.path(s)
-        _cp_file(sh, sp, join(dst, basename(sp)) if isd else dst)
-
-
-def cmd_mv(sh, a, inp):
-    if len(a) < 2:
-        raise ShellError("mv: SRC DST")
-    dst = sh.path(a[-1]); isd = is_dir(dst)
-    for s in a[:-1]:
-        sp = sh.path(s); _guard("mv", sp)
-        d = join(dst, basename(sp)) if isd else dst
-        try:
-            os.rename(sp, d)
-        except OSError:
-            _cp_file(sh, sp, d); os.remove(sp)
-
-
-def cmd_hexdump(sh, a, inp):
-    fl, pos = opts(a, "ns", "hexdump")
-    if not pos:
-        raise ShellError("hexdump: FILE")
-    p = sh.need_file("hexdump", pos[0])
-    skip, lim = int_opt(fl, "s", 0, "hexdump"), int_opt(fl, "n", 256, "hexdump")
-    def _g():
-        with open(p, "rb") as f:
-            if skip:
-                f.seek(skip)
-            off, rem = skip, lim
-            while rem > 0:
-                ch = f.read(min(CHUNK, rem))
-                if not ch:
-                    break
-                for i in range(0, len(ch), 8):
-                    r = ch[i:i + 8]
-                    yield "{:06x}: {:<23} |{}|".format(
-                        off + i, " ".join(["{:02x}".format(c) for c in r]),
-                        "".join([chr(c) if 32 <= c < 127 else "." for c in r]))
-                off += len(ch); rem -= len(ch); sh.tick()
-    return _g()
-
-
-def cmd_edit(sh, a, inp):
-    if not a:
-        raise ShellError("edit: FILE")
-    h = sh.handlers.get("edit")
-    if not h:
-        raise ShellError("edit: no UI")
-    msg = h(sh.path(a[0]))
-    return (msg,) if msg else None
-
-
-def cmd_help(sh, a, inp):
-    nms = sorted(sh.commands)
-    return [("c", "PinhOS BusyBox sh ({} cmds)".format(len(nms)))] + format_columns(nms)
-
-
-COMMANDS = {
-    "ls": cmd_ls, "ll": lambda sh, a, i: cmd_ls(sh, ["-l"] + list(a), i),
-    "pwd": lambda sh, a, i: (sh.cwd,), "cd": cmd_cd,
-    "echo": lambda sh, a, i: (" ".join(a[1:] if (a and a[0] == "-n") else a),),
-    "cat": cmd_cat, "head": cmd_head, "tail": cmd_tail, "grep": cmd_grep, "wc": cmd_wc,
-    "mkdir": cmd_mkdir, "rm": cmd_rm, "rmdir": lambda sh, a, i: ([_guard("rmdir", sh.path(t)) or os.rmdir(sh.path(t)) for t in a] and None),
-    "cp": cmd_cp, "mv": cmd_mv,
-    "touch": lambda sh, a, i: ([open(sh.path(t), "a").close() for t in a if stat_of(sh.path(t)) is None] and None),
-    "hexdump": cmd_hexdump, "hd": cmd_hexdump, "edit": cmd_edit, "nano": cmd_edit,
-    "clear": lambda sh, a, i: sh.scrollback.clear(), "cls": lambda sh, a, i: sh.scrollback.clear(),
-    "exit": lambda sh, a, i: setattr(sh, "exit_requested", True),
-    "quit": lambda sh, a, i: setattr(sh, "exit_requested", True),
-    "history": lambda sh, a, i: ["{:>3} {}".format(k + 1, l) for k, l in enumerate(sh.line.hist)],
-    "env": lambda sh, a, i: ["{}={}".format(k, sh.env[k]) for k in sorted(sh.env)] + ["PWD=" + sh.cwd],
-    "help": cmd_help,
-}
+# Core FS & System commands live in tools/_shell_cmds.py (.mpy) to keep shell.py AST small.
 
 
 def main(ctx):

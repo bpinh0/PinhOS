@@ -14,13 +14,12 @@ def _sleep_ms(ms):
         time.sleep(ms / 1000.0)
 
 
-DASHBOARD_ACTIONS = (
-    {"id": "cat:toolkit", "short": "TOOLKIT", "label": "TERMINAL & TOOLKIT", "icon": "term", "badge": "[1]", "tui_badge": "[SH >]"},
-    {"id": "cat:files", "short": "FILES & EDIT", "label": "FILES & EDITOR", "icon": "files", "badge": "[2]", "tui_badge": "[/sd >]"},
-    {"id": "cat:apps", "short": "APPS & STUDIO", "label": "APPS & STUDIO", "icon": "apps", "badge": "[3]", "tui_badge": "[APPS >]"},
-    {"id": "cat:system", "short": "SYS & DIAG", "label": "SYSTEM & DIAGNOSTICS", "icon": "dash", "badge": "[4]", "tui_badge": "[DIAG >]"},
-    {"id": "cat:settings", "short": "SETTINGS", "label": "SETTINGS", "icon": "sys", "badge": "[5]", "tui_badge": "[CFG >]"},
-    {"id": "cat:set_conn", "short": "WI-FI & NET", "label": "WI-FI & NETWORK", "icon": "net", "badge": "[6]", "tui_badge": "[NET >]"},
+from ui.widgets import (
+    DASHBOARD_ACTIONS,
+    TOOL_MAP,
+    confirm_dialog,
+    show_screenshot_toast,
+    show_toast_dialog,
 )
 
 MENU_TREE = {
@@ -101,16 +100,6 @@ MENU_TREE = {
     )),
 }
 
-TOOL_MAP = {
-    "shell": ("/sd/pinhos/tools/shell.py", "BusyBox Shell", False),
-    "editor": ("/sd/pinhos/tools/editor.py", "Text Editor", False),
-    "files": ("/sd/pinhos/tools/files.py", "File Manager", False),
-    "net": ("/sd/pinhos/tools/net_tools.py", "Net Probes", False),
-    "uart": ("/sd/pinhos/tools/uart_term.py", "UART Console", False),
-    "sysmon": ("/sd/pinhos/tools/sysmon.py", "SysMon", False),
-}
-
-
 def _idle_wait(ms=30):
     try:
         import sys
@@ -124,33 +113,6 @@ def _idle_wait(ms=30):
     except Exception:
         pass
     _sleep_ms(ms)
-
-
-def confirm_dialog(board, ui, title, lines, footer="[Y/ENTER] Yes  [N/ESC] No", kind="warn"):
-    """Lightweight modal confirmation Dialog. Polls board.poll_key() only."""
-    from ui.widgets import Dialog
-    dlg = Dialog(20, 96, 280, 120, title=title, lines=lines, footer=footer, kind=kind)
-    ui.add_widget(dlg)
-    ui.render(force=False)
-    board.clear_input()
-    poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
-    ans = False
-    try:
-        while True:
-            k = poll_fn() if poll_fn else None
-            if k:
-                ku = str(k).upper()
-                if ku in ("Y", "ENTER"):
-                    ans = True; break
-                if ku in ("N", "ESC", "Q", "BACK", "BACKSPACE"):
-                    break
-            _idle_wait(30)
-    except KeyboardInterrupt:
-        ans = False
-    ui.remove_widget(dlg)
-    ui.mark_all_dirty(True)
-    board.clear_input()
-    return ans
 
 
 def show_info_dialog(board, ui, title, lines, kind="info"):
@@ -172,9 +134,6 @@ def show_info_dialog(board, ui, title, lines, kind="info"):
     ui.remove_widget(dlg)
     ui.mark_all_dirty(True)
     board.clear_input()
-
-
-from ui.widgets import show_screenshot_toast, show_toast_dialog
 
 
 def open_log_viewer(board, ui, logger, kind="system"):
@@ -629,11 +588,7 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                 elif aid == "act:logs":
                     open_log_viewer(board, ui, logger, kind="system"); _sync(force=True)
                 elif aid == "act:selftest":
-                    import tests.selftest as _st
-                    res = _st.run_all(interactive_wait=True)
-                    board.set_lut(theme_mgr.active.lut)
-                    status_msg = "Self-Test {}/{} {}".format(res.get("passed", 0), res.get("total", 10), "PASS" if res.get("ok") else "FAIL")
-                    status_kind = "ok" if res.get("ok") else "err"; _sync(force=True)
+                    return "RUN_SELFTEST"
                 elif aid == "act:reboot":
                     if confirm_dialog(board, ui, "REBOOT PINHOS?", ["Write clean breadcrumb and", "perform hardware reset?"]):
                         try:
