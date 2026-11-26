@@ -798,3 +798,92 @@ class TelemetryStrip(Widget):
     def _render(self, backend, theme, full=True):
         if hasattr(backend, "draw_telemetry_strip"):
             backend.draw_telemetry_strip(self, theme)
+
+
+def _toast_wait_ms(ms=30):
+    import time as _t
+    try:
+        import sys as _s
+        _w = _s.modules.get("__pinhos_wdt__")
+        if _w is not None:
+            _w.feed()
+        _m = _s.modules.get("main") or _s.modules.get("_pinhos_main")
+        if _m and getattr(_m, "runtime_state", {}).get("web_active") and hasattr(_m, "step_webportal"):
+            _m.step_webportal(20)
+            return
+    except Exception:
+        pass
+    if hasattr(_t, "sleep_ms"):
+        _t.sleep_ms(int(ms))
+    else:
+        _t.sleep(ms / 1000.0)
+
+
+def show_screenshot_toast(board, ui, fb=None, path=None, timeout_ticks=30):
+    """
+    Brief confirmation toast Dialog shown after CTRL+P captures a clean 320x320 4-bit BMP.
+    Lives in ui.widgets (always resident) so CTRL+P never imports the 24 KB ui.menu module.
+    Returns (fname, status_msg) or (None, None) on failure.
+    """
+    p = path
+    if p is None and hasattr(board, "pop_pending_screenshot"):
+        p = board.pop_pending_screenshot()
+    if p is None and hasattr(board, "screenshot"):
+        p = board.screenshot()
+    if not p:
+        if fb is not None:
+            fb.update(status="Screenshot failed (check SD)", status_kind="err")
+        return None, None
+    fname = str(p).rstrip("/").rpartition("/")[2] or str(p)
+    smsg = "Saved: " + fname
+    if fb is not None:
+        fb.update(status=smsg, status_kind="ok")
+    if ui is not None:
+        dlg = Dialog(
+            18, 92, 284, 128,
+            title="SCREENSHOT SAVED",
+            lines=[
+                "320x320 4-bit Indexed BMP:",
+                "  " + fname[:36],
+                "Dir: /sd/pinhos/screenshots/",
+            ],
+            footer="[ANY KEY / 1s] Continue",
+            kind="ok",
+        )
+        ui.add_widget(dlg)
+        ui.render(force=False)
+        poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
+        for _ in range(max(1, int(timeout_ticks))):
+            if poll_fn and poll_fn() is not None:
+                break
+            _toast_wait_ms(30)
+        ui.remove_widget(dlg)
+        ui.mark_all_dirty(True)
+        board.clear_input()
+        ui.render(force=True)
+    return fname, smsg
+
+
+def show_toast_dialog(board, ui, title, lines, fb=None, status_msg="", kind="info", timeout_ticks=25):
+    """Brief self-dismissing toast Dialog (lives in ui.widgets for zero extra import SRAM)."""
+    if fb is not None and status_msg:
+        fb.update(status=status_msg, status_kind=kind)
+    if ui is None or board is None:
+        return
+    dlg = Dialog(
+        24, 96, 272, 120,
+        title=title,
+        lines=lines,
+        footer="[ANY KEY / Auto] OK",
+        kind=kind,
+    )
+    ui.add_widget(dlg)
+    ui.render(force=False)
+    poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
+    for _ in range(max(1, int(timeout_ticks))):
+        if poll_fn and poll_fn() is not None:
+            break
+        _toast_wait_ms(30)
+    ui.remove_widget(dlg)
+    ui.mark_all_dirty(True)
+    board.clear_input()

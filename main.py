@@ -1326,7 +1326,8 @@ def ui_loop(sel_action=0):
                 alt = bool(mods & MOD_ALT)
 
                 if (ctrl and k == "P") or getattr(board, "pending_screenshot", None):
-                    from ui.menu import show_screenshot_toast
+                    gc.collect()
+                    from ui.widgets import show_screenshot_toast
                     _, smsg = show_screenshot_toast(board, ui, view.footer_bar)
                     if smsg:
                         status_msg = smsg
@@ -1376,7 +1377,7 @@ def ui_loop(sel_action=0):
                     board.beep(1250, 10)
                     status_msg = "Mouse mode: Phase 6"
                     status_kind = "info"
-                    from ui.menu import show_toast_dialog
+                    from ui.widgets import show_toast_dialog
                     show_toast_dialog(
                         board, ui,
                         title="POINTER / MOUSE",
