@@ -2,7 +2,7 @@
 
 **A modular, dual-UI MicroPython operating system and portable field cyberdeck platform for the ClockworkPi PicoCalc & Raspberry Pi Pico 2W (RP2350).**
 
-> 🚀 **Current Pre-Release: `v1.0.0-alpha.5.0`** — Phases 1–4.x + **Phase 5 Batch 1** (Theme Schema v2, selectable `6×8` fonts, `Obsidian Amber`, standardized `F1`–`F10` keybar, `L/R` quick-strip, simultaneous telemetry & periodic RTC/NTP) complete & verified **12/12 Self-Test + Deep Stress** on real PicoCalc (RP2350) hardware. Next up: SoftAP/Async Wi-Fi, Signed SHA-256 OTA & App Store.
+> 🚀 **Current Pre-Release: `v1.0.0-alpha.5.0`** — Phases 1–4.x + **Phase 5 Batch 1** (Theme Schema v2, selectable `6×8` fonts, `Obsidian Amber`, standardized `F1`–`F10` keybar + `[F1]` Help, `L/R` quick-strip, simultaneous telemetry, periodic RTC/NTP, Two-Stage Soft+Hard Watchdog & **MemGuard** SRAM reclaimer) complete & verified **12/12 Self-Test + Deep Stress** on real PicoCalc (RP2350) hardware. Next up: SoftAP/Async Wi-Fi, Signed SHA-256 OTA & App Store.
 
 | Desktop Home | App Drawer | Settings & Menus | System Telemetry |
 | :---: | :---: | :---: | :---: |
@@ -14,7 +14,7 @@
 
 ## Key Features
 * **Dual-UI & Theme Schema v2 (`ui/`, `themes/`):** Live `[F3]`/`[TAB]` switching between an Android-style Desktop Home (with `LEFT`/`RIGHT` quick-strip category navigation) / 3×2 GUI Mosaic and high-density TUI mode with zero full-screen Python framebuffers, 5 hot-swappable JSON themes (`[F2]`, including **Obsidian Amber**), selectable `570 B` `6x8` bitmap fonts (`default`, `bold`, `retro`, or `/sd/pinhos/fonts/*.bin`), configurable widget chrome, and `[CTRL+P]` 320×320 BMP screenshots.
-* **Resilient RP2350 Kernel (`core/`, `main.py`):** 3-Strike Boot Guard with Safe Recovery & BSOD, configurable RP2350 Hardware Watchdog (`wdt.log` surfaced in `CTRL+L`), sandboxed `APP_META` app runner (`< 2 KB` SRAM delta), quota-managed SD `.swap/`, and pre-compiled `.mpy` (`-O2`, `v6.3`) core OS deployment.
+* **Resilient RP2350 Kernel (`core/`, `main.py`):** 3-Strike Boot Guard with Safe Recovery & BSOD, Two-Stage Soft + Hard RP2350 Watchdog (`15s`/`30s`/`60s`/`OFF` + **"Not Responding"** Wait/Abort/Reboot dialog & `wdt.log` in `CTRL+L`), **MemGuard** idle/pre-flight SRAM reclaimer with lazy GUI/TUI backends, sandboxed `APP_META` app runner (`< 2 KB` SRAM delta), quota-managed SD `.swap/`, and 33-module pre-compiled `.mpy` (`-O2`, `v6.3`) core OS deployment.
 * **Built-In Field Tooling (`tools/`):** BusyBox-style CLI shell, streaming text/JSON editor, SD & flash file commander, DNS/TCP/subnet/WoL network probes, HAL-routed `UART1` serial console, and live SRAM/CPU/SD benchmark monitor.
 * **Hardened WebPortal Browser IDE (`web/`):** Non-blocking `uasyncio` HTTP/REST server + zero-dependency Browser IDE over Wi-Fi (live screen capture, virtual keyboard, SD explorer, code/theme editor, remote app launch) secured with fail-closed 16-hex `X-PinhOS-Token` auth, sensitive-file denylist, and 5-fail `429` lockout.
 * **Wi-Fi, Persistent RTC & GitHub Sync (`net/`):** Multi-SSID CYW43439 STA manager with RX-pumped stability, automatic boot & periodic background NTP sync, periodic/sleep/reboot SD `rtc_state.json` retention, and direct GitHub theme/app sync.
