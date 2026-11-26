@@ -731,10 +731,16 @@ _REPL_KEEPALIVE = None
 
 
 def _start_repl_keepalive():
-    """After a deliberate serial Ctrl+C (dev/REPL mode), keep the un-disarmable WDT fed from a hw Timer."""
+    """After a deliberate serial Ctrl+C (dev/REPL mode), pause soft prompts while keeping Stage 2 HW WDT fed."""
     global _REPL_KEEPALIVE
     w = _WDT_OBJ or runtime_state.get("_wdt")
-    if w is None or _REPL_KEEPALIVE is not None:
+    if w is None:
+        return
+    if hasattr(w, "pause"):
+        w.pause()
+        bp("[WDT] Soft WDT paused for REPL (Stage 1 timer keeps HW WDT fed)")
+        return
+    if _REPL_KEEPALIVE is not None:
         return
     try:
         import machine
@@ -746,6 +752,9 @@ def _start_repl_keepalive():
 
 def _stop_repl_watcher():
     global _REPL_KEEPALIVE
+    w = _WDT_OBJ or runtime_state.get("_wdt")
+    if w is not None and hasattr(w, "resume"):
+        w.resume()
     if _REPL_KEEPALIVE is not None:
         try:
             _REPL_KEEPALIVE.deinit()
@@ -832,42 +841,59 @@ def feed_wdt():
             pass
 
 
-def enable_wdt(timeout_ms=8000):
-    """Enable RP2350 machine.WDT once after boot stabilization (max ~8388 ms; 0 disables)."""
+def enable_wdt(timeout_ms=8000, soft_timeout_s=30):
+    """Enable Two-Stage Soft (15/30/60s/OFF) + Hard (8s RP2350) Watchdog once after boot stabilization (#54)."""
     global _WDT_OBJ
     ms = int(timeout_ms or 0)
     if ms <= 0:
         return False
     ms = min(8388, max(1000, ms))
+    soft_s = max(0, int(soft_timeout_s or 0))
     try:
         existing = _WDT_OBJ or runtime_state.get("_wdt")
         if existing is None and builtins is not None:
             existing = getattr(builtins, "_pinhos_wdt", None)
         if existing is not None:
+            if hasattr(existing, "attach"):
+                existing.attach(
+                    board=runtime_state.get("board"),
+                    ui=runtime_state.get("ui"),
+                    logger=runtime_state.get("logger"),
+                )
+            if hasattr(existing, "set_soft_timeout_s"):
+                existing.set_soft_timeout_s(soft_s)
+            if hasattr(existing, "resume"):
+                existing.resume()
             existing.feed()
             return True
-        import machine
-        if hasattr(machine, "WDT"):
-            w = machine.WDT(timeout=ms)
-            _WDT_OBJ = w
-            runtime_state["_wdt"] = w
-            sys.modules["__pinhos_wdt__"] = w  # shared handle (builtins is read-only on RP2350)
-            if builtins is not None:
-                try:
-                    setattr(builtins, "_pinhos_wdt", w)
-                except Exception:
-                    pass
-            bp("[WDT] Enabled hardware watchdog ({}ms)".format(ms))
-            lg = runtime_state.get("logger")
-            if lg is not None:
-                try:
-                    if hasattr(lg, "log_wdt"):
-                        lg.log_wdt("ARMED ({}ms)".format(ms))
-                    else:
-                        lg.info("WDT: Armed ({}ms)".format(ms))
-                except Exception:
-                    pass
-            return True
+        from core.watchdog import TwoStageWatchdog
+        w = TwoStageWatchdog(
+            hw_timeout_ms=ms,
+            soft_timeout_s=soft_s,
+            board=runtime_state.get("board"),
+            ui=runtime_state.get("ui"),
+            logger=runtime_state.get("logger"),
+            arm_hw=True,
+        )
+        _WDT_OBJ = w
+        runtime_state["_wdt"] = w
+        sys.modules["__pinhos_wdt__"] = w  # shared handle (builtins is read-only on RP2350)
+        if builtins is not None:
+            try:
+                setattr(builtins, "_pinhos_wdt", w)
+            except Exception:
+                pass
+        bp("[WDT] Enabled Two-Stage Watchdog (soft={}s, hw={}ms)".format(soft_s, ms))
+        lg = runtime_state.get("logger")
+        if lg is not None:
+            try:
+                if hasattr(lg, "log_wdt"):
+                    lg.log_wdt("ARMED (soft={}s hw={}ms)".format(soft_s, ms))
+                else:
+                    lg.info("WDT: Armed (soft={}s hw={}ms)".format(soft_s, ms))
+            except Exception:
+                pass
+        return True
     except Exception as e:
         bp("[WDT_ERR]", repr(e))
     return False
@@ -954,6 +980,9 @@ def _enter_sleep_mode(board, ui, logger, countdown_s=5):
     board.clear_input()
     gc.collect()
 
+    wdt_ref = _WDT_OBJ or runtime_state.get("_wdt")
+    if wdt_ref is not None and hasattr(wdt_ref, "pause"):
+        wdt_ref.pause()
     try:
         ticks = 0
         while True:
@@ -966,6 +995,8 @@ def _enter_sleep_mode(board, ui, logger, countdown_s=5):
                 gc.collect()
             _sleep_ms(120)
     finally:
+        if wdt_ref is not None and hasattr(wdt_ref, "resume"):
+            wdt_ref.resume()
         board.set_backlight(max(20, orig_lcd))
         board.set_kb_backlight(orig_kb)
         board.clear_input()
@@ -999,7 +1030,10 @@ def _init_interactive_services(board, cfg, logger):
     runtime_state["wifi_bg_pending"] = True
     if runtime_state.get("_standalone_boot") and runtime_state.get("stabilized") and not runtime_state.get("serial_link"):
         try:
-            enable_wdt(int(cfg.get("wdt_timeout_ms", 8000)) if cfg else 8000)
+            enable_wdt(
+                int(cfg.get("wdt_timeout_ms", 8000)) if cfg else 8000,
+                soft_timeout_s=int(cfg.get("soft_wdt_s", 30)) if cfg else 30,
+            )
         except Exception:
             pass
     if cfg and cfg.get("webportal_autostart", False) and not runtime_state.get("web_active"):
@@ -1846,6 +1880,10 @@ def ui_loop(sel_action=0):
         if choice in ("RECOVER", "LOGS"):
             return ui_loop()
     except Exception as ui_exc:
+        if type(ui_exc).__name__ == "SoftWatchdogAbort":
+            bp("[WDT] SoftWatchdogAbort -> returning to Desktop Home")
+            theme_mgr._push_to_board(theme_mgr.active)
+            return ui_loop(sel_action=0)
         choice = show_bsod(
             board,
             "UI_LOOP_EXCEPTION",

@@ -64,6 +64,7 @@ $DeployManifest = @(
     @{ Local = "core\__init__.py";      Remote = "/sd/pinhos/core/__init__.py";     Mpy = $true },
     @{ Local = "core\config.py";        Remote = "/sd/pinhos/core/config.py";       Mpy = $true },
     @{ Local = "core\logger.py";        Remote = "/sd/pinhos/core/logger.py";       Mpy = $true },
+    @{ Local = "core\watchdog.py";      Remote = "/sd/pinhos/core/watchdog.py";     Mpy = $true },
     @{ Local = "core\memutil.py";       Remote = "/sd/pinhos/core/memutil.py";      Mpy = $true },
     @{ Local = "core\swap.py";          Remote = "/sd/pinhos/core/swap.py";         Mpy = $true },
     @{ Local = "core\sandbox.py";       Remote = "/sd/pinhos/core/sandbox.py";      Mpy = $true },

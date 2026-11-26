@@ -179,6 +179,7 @@ def test_hal_init(root="/sd/pinhos"):
         "main.py",
         "core/config.py",
         "core/logger.py",
+        "core/watchdog.py",
         "core/swap.py",
         "core/sandbox.py",
         "core/theme.py",
@@ -280,7 +281,30 @@ def test_swap_and_core(root="/sd/pinhos"):
     except Exception:
         pass
 
-    return "R/W + CRC + crash forensics OK"
+    # 6. Two-Stage Soft Watchdog (Wait / Abort / timeout config, without arming silicon WDT)
+    from core.watchdog import TwoStageWatchdog, SoftWatchdogAbort
+    from boards import get_board as _gb
+    _wb = _gb()
+    swdt = TwoStageWatchdog(hw_timeout_ms=8000, soft_timeout_s=15, board=_wb, logger=None, arm_hw=False)
+    _assert(swdt.get_soft_timeout_s() == 15, "Soft WDT initial timeout mismatch")
+    swdt.set_soft_timeout_s(30)
+    _assert(swdt.get_soft_timeout_s() == 30, "Soft WDT set_soft_timeout_s failed")
+    swdt.pause()
+    swdt.resume()
+    _wb.clear_input()
+    _wb.push_event({"type": "key", "key": "W", "modifiers": 0})
+    _assert(swdt.prompt_not_responding(30) == "wait", "Soft WDT [W] Wait failed")
+    _wb.clear_input()
+    _wb.push_event({"type": "key", "key": "ESC", "modifiers": 0})
+    aborted = False
+    try:
+        swdt.prompt_not_responding(30)
+    except SoftWatchdogAbort:
+        aborted = True
+    _assert(aborted, "Soft WDT [ESC] Abort did not raise SoftWatchdogAbort")
+    swdt.deinit()
+
+    return "R/W + CRC + crash + SoftWDT OK"
 
 
 def test_sandbox_isolation(root="/sd/pinhos"):

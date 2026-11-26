@@ -86,6 +86,7 @@ MENU_TREE = {
         {"id": "set:swap_kb", "label": "SD Swap Quota", "dyn": "swap_kb"},
         {"id": "act:swap_clr", "label": "Clear Swap Cache", "dyn": "swap_used"},
         {"id": "set:sleep_to", "label": "Auto-Sleep Timer", "dyn": "sleep_to"},
+        {"id": "set:soft_wdt", "label": "Soft Watchdog Timeout", "dyn": "soft_wdt"},
         {"id": "set:wdt_to", "label": "Hardware Watchdog", "dyn": "wdt_to"},
         {"id": "act:sleep", "label": "Sleep Now (5s)", "badge": "[^Z]"},
         {"id": "cfg:save_snap", "label": "Save Config Snapshot", "badge": "[SD]"},
@@ -292,6 +293,9 @@ def _dyn_badge(tag, board, ui, manifest, cfg=None):
     if tag == "sleep_to":
         sec = int(cfg.get("sleep_timeout_s", 300) if cfg else 300)
         return "OFF" if sec <= 0 else "{}m".format(sec // 60)
+    if tag == "soft_wdt":
+        sec = int(cfg.get("soft_wdt_s", 30) if cfg else 30)
+        return "OFF" if sec <= 0 else "{}s".format(sec)
     if tag == "wdt_to":
         ms = int(cfg.get("wdt_timeout_ms", 8000) if cfg else 8000)
         return "OFF" if ms <= 0 else "{}s".format(ms // 1000)
@@ -921,6 +925,22 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                         status_msg, status_kind = "CPU Clock: {} MHz ({})".format(nxt, tag), "warn" if nxt > 150 else "ok"
                     except Exception as e:
                         status_msg, status_kind = "CPU Clock err: " + str(e)[:20], "err"
+                    _sync(force=True)
+                elif aid == "set:soft_wdt":
+                    opts = (15, 30, 60, 0)
+                    cur = int(cfg.get("soft_wdt_s", 30) if cfg else 30)
+                    nxt = opts[(opts.index(cur) + 1) % len(opts)] if cur in opts else 30
+                    if cfg:
+                        cfg.set("soft_wdt_s", nxt, save_now=True)
+                    try:
+                        import sys as _sws
+                        _w = _sws.modules.get("__pinhos_wdt__")
+                        if _w is not None and hasattr(_w, "set_soft_timeout_s"):
+                            _w.set_soft_timeout_s(nxt)
+                    except Exception:
+                        pass
+                    lbl = "OFF" if nxt <= 0 else "{}s".format(nxt)
+                    status_msg, status_kind = "Soft Watchdog: " + lbl, ("warn" if nxt <= 0 else "ok")
                     _sync(force=True)
                 elif aid == "set:wdt_to":
                     opts = (8000, 6000, 4000, 0)

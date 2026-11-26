@@ -84,6 +84,7 @@ class Logger:
         self.max_ring = max(8, int(max_ring))
         self.max_file_bytes = max(4096, int(max_file_bytes))
         self._ring = []
+        self._wdt_reported = False
         _mkdir_p(self.log_dir)
 
     def _rotate_if_needed(self, path):
@@ -212,10 +213,12 @@ class Logger:
             prev = {}
 
         prev_op = str(prev.get("op", "IDLE"))
-        if (not is_wdt) and prev_op in ("IDLE", "CLEAN_EXIT", ""):
+        if ((not is_wdt) or self._wdt_reported) and prev_op in ("IDLE", "CLEAN_EXIT", ""):
             if not prev:
                 self.clear_breadcrumb("IDLE")
             return None
+        if is_wdt:
+            self._wdt_reported = True
 
         prev_detail = str(prev.get("detail", ""))
         prev_time = str(prev.get("time", "unknown"))
