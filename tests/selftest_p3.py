@@ -253,8 +253,8 @@ def test_phase3_field_tools(root="/sd/pinhos"):
 
 
 def test_desktop_home(root="/sd/pinhos"):
-    """Gate 11: Phase 3.1 Desktop Home (GUI+TUI), Quick Notes <= 1 KB roundtrip & 5-category Settings."""
-    # 1. Verify reorganized 5-category Settings tree FIRST on a clean heap, then unload ui.menu
+    """Gate 11: Desktop Home (GUI+TUI), L/R Quick-Strip, [F1] Help, Theme Schema v2 + 6x8 Fonts & Notes <= 1 KB."""
+    # 1. Verify 6-category Settings tree + NTP resync & WDT log picker on a clean heap, then unload ui.menu
     gc.collect(); gc.collect()
     from ui.menu import MENU_TREE
     set_entry = MENU_TREE.get("settings", ("", ()))
@@ -263,19 +263,36 @@ def test_desktop_home(root="/sd/pinhos"):
     for req in ("cat:set_conn", "cat:set_time", "cat:set_display", "cat:set_bar_snd", "cat:set_power", "cat:set_about"):
         _assert(req in set_ids, "Missing settings category: " + req)
     _assert(len(set_items) == 6, "Expected 6 settings categories, got {}".format(len(set_items)))
+    time_items = MENU_TREE.get("set_time", ("", ()))[1]
+    _assert(any(it.get("id") == "ntp:resync" for it in time_items), "Missing ntp:resync in set_time")
     MENU_TREE = None
     set_items = None
+    time_items = None
     sys.modules.pop("ui.menu", None)
+
+    import ui._log_view as _lv
+    log_names = [it.get("name") for it in _lv._list_logs(root.rstrip("/") + "/logs")]
+    _assert("wdt.log" in log_names, "wdt.log missing from _log_view._list_logs")
+    _lv = None
+    sys.modules.pop("ui._log_view", None)
     gc.collect(); gc.collect()
 
     from boards import get_board
     from core.config import ConfigManager
-    from core.theme import ThemeManager
+    from core.theme import Theme, ThemeManager
+    from ui.fonts import get_font, FONT_BYTES
     from ui.engine import UIEngine
-    from ui.desktop import DesktopHome, load_notes, save_notes, append_note, NOTES_MAX_BYTES
+    from ui.desktop import DesktopHome, show_help_dialog, load_notes, save_notes, append_note, NOTES_MAX_BYTES
 
     board = get_board()
     board.ensure_serial_repl()
+
+    # Verify all 3 built-in 6x8 fonts are exact 570 B & missing .bin falls back safely
+    for fname in ("default", "bold", "retro"):
+        mv, rname = get_font(fname, fonts_dir=root.rstrip("/") + "/fonts")
+        _assert(rname == fname and len(mv) == FONT_BYTES, "Font '{}' invalid size {}".format(fname, len(mv)))
+    mv_fb, r_fb = get_font("nonexistent_custom_font", fonts_dir=root.rstrip("/") + "/fonts")
+    _assert(r_fb == "default" and len(mv_fb) == FONT_BYTES, "Missing font did not fall back to default")
 
     # 2. Quick Notes streaming R/W roundtrip + <= 1 KB cap enforcement
     tmp_notes = root.rstrip("/") + "/logs/_gate11_notes.txt"
@@ -295,20 +312,63 @@ def test_desktop_home(root="/sd/pinhos"):
         capped = load_notes(path=tmp_notes)
         _assert(len(capped) >= 5 and "Note line 24" in capped[-1], "newest note lost under cap")
 
-        # 3. DesktopHome GUI + TUI rendering & SRAM delta gate (< 2048 B)
+        # 3. DesktopHome GUI + TUI, L/R Quick-Strip partial redraw, [F1] Help & Theme Schema v2 (< 2048 B delta)
         def _render_once():
             cfg = ConfigManager(config_path=tmp_cfg)
-            tm = ThemeManager(config=cfg, board=board)
+            tm = ThemeManager(themes_dir=root.rstrip("/") + "/themes", config=cfg, board=board)
             ui = UIEngine(board=board, theme_manager=tm, config=cfg)
             dh = DesktopHome(0, 22, 320, 252, notes_path=tmp_notes)
             ui.add_widget(dh)
             ui.set_focus(dh)
-            dh.sync_telemetry(board, ui_mode="GUI", drawer_layout="GRID", stabilized=True)
+
+            # Render both WEB ON and WEB OFF telemetry states in GUI & TUI
+            dh.sync_telemetry(board, ui_mode="GUI", drawer_layout="GRID", stabilized=True, web_active=True)
             ui.set_mode("gui", persist=False)
             ui.render(force=True)
-            dh.sync_telemetry(board, ui_mode="TUI", drawer_layout="LIST", stabilized=True)
+
+            # Exercise LEFT/RIGHT quick-strip cycling (0 <-> 5 wrap-around) + partial strip redraw
+            _assert(dh.strip_sel is None, "Initial strip_sel must be None")
+            _assert(ui.handle_key("RIGHT", allow_hotkeys=False) == "handled" and dh.strip_sel == 0, "RIGHT->0 failed")
+            ui.render(force=False)
+            _assert(not ui.last_render_full and dh.last_partial_strip, "Quick-strip RIGHT did not partial-redraw")
+            _assert(dh.get_selected_action() == "cat:toolkit", "Pill 0 action mismatch")
+            _assert(ui.handle_key("LEFT", allow_hotkeys=False) == "handled" and dh.strip_sel == 5, "LEFT wrap 0->5 failed")
+            ui.render(force=False)
+            _assert(not ui.last_render_full and dh.get_selected_action() == "cat:set_conn", "Pill 5 wrap mismatch")
+            _assert(ui.handle_key("RIGHT", allow_hotkeys=False) == "handled" and dh.strip_sel == 0, "RIGHT wrap 5->0 failed")
+            _assert(ui.handle_key("DOWN", allow_hotkeys=False) == "handled" and dh.strip_sel is None, "DOWN unselect failed")
+            ui.render(force=False)
+
+            # Exercise [F1] Help dialog open + dismiss via queued F1 key
+            board.clear_input()
+            board.push_event({"type": "key", "key": "F1", "modifiers": 0})
+            _assert(show_help_dialog(board, ui), "show_help_dialog failed")
+            ui.render(force=False)
+
+            # Exercise Theme Schema v2 (Obsidian Amber bold font + custom retro/rounded/banner theme)
+            tm.apply("obsidian_amber", persist=False)
+            ui.render(force=False)
+            custom_v2 = Theme({
+                "id": "retro_test",
+                "name": "Retro Test",
+                "version": 2,
+                "font": "retro",
+                "uppercase_headers": True,
+                "colors": {"bg": "#090A0D", "surface": "#111318", "text": "#F4F5F7", "accent": "#10B981"},
+                "style": {"border_style": "rounded", "bar_style": "striped", "card_header": "tinted", "quick_strip": "tabs"},
+                "banner": ["=== PINHOS V2 ===", "RETRO BANNER OK"],
+            })
+            tm.active = custom_v2
+            tm._push_to_board(custom_v2)
+            dh.set_strip_sel(2)
+            ui.mark_all_dirty(True)
+            ui.render(force=True)
+
+            dh.sync_telemetry(board, ui_mode="TUI", drawer_layout="LIST", stabilized=True, web_active=False)
             ui.set_mode("tui", persist=False)
             ui.render(force=True)
+
+            tm.apply("cyber_amber", persist=False)
             ui.deinit()
 
         _render_once()
@@ -327,4 +387,4 @@ def test_desktop_home(root="/sd/pinhos"):
                 pass
         board.ensure_serial_repl()
 
-    return "Home GUI+TUI + 5-cat Settings + Notes<=1KB (d={}B)".format(delta)
+    return "Home+L/R+F1+SchemaV2+Notes<=1KB (d={}B)".format(delta)

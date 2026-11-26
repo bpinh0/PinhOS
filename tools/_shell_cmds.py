@@ -87,11 +87,16 @@ def cmd_uptime(sh, a, inp):
 
 def cmd_dmesg(sh, a, inp):
     fl, pos = sh.opts(a, "n", "dmesg")
-    kind = "crash" if ("c" in fl or (pos and pos[0] == "crash")) else "system"
+    if "w" in fl or (pos and pos[0] == "wdt"):
+        kind = "wdt"
+    elif "c" in fl or (pos and pos[0] == "crash"):
+        kind = "crash"
+    else:
+        kind = "system"
     lines = sh.read_tail(sh.log_path(kind), sh.int_opt(fl, "n", 20, "dmesg"))
     if not lines:
         return [("m", "(no entries in {}.log)".format(kind))]
-    return [("e" if ("[ERROR]" in s or "[CRASH]" in s) else ("w" if "[WARN]" in s else " "), s) for s in lines]
+    return [("e" if ("[ERROR]" in s or "[CRASH]" in s) else ("w" if ("[WARN]" in s or "[WDT" in s) else " "), s) for s in lines]
 
 
 def cmd_uname(sh, a, inp):
@@ -196,6 +201,11 @@ def cmd_date(sh, a, inp):
 
 
 def cmd_reboot(sh, a, inp):
+    try:
+        from core.config import save_rtc_state
+        save_rtc_state(sh.board)
+    except Exception:
+        pass
     if sh.logger:
         try:
             sh.logger.info("SHELL: reboot")

@@ -174,7 +174,11 @@ class GenericSPIBoard(BoardBase):
 
     def text(self, s, x, y, color=15):
         if self._fb is not None:
-            self._fb.text(str(s), int(x), int(y), int(color) & 0x0F)
+            if self._font_mv is not None and self._font_name != "default":
+                from ui.fonts import draw_text_6x8
+                draw_text_6x8(self._fb, str(s), int(x), int(y), int(color) & 0x0F, self._font_mv)
+            else:
+                self._fb.text(str(s), int(x), int(y), int(color) & 0x0F)
 
     def blit(self, buf, x, y, w, h, fmt="RGB565"):
         if self._fb is not None and framebuf is not None:

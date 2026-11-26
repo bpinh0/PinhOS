@@ -69,6 +69,7 @@ $DeployManifest = @(
     @{ Local = "core\sandbox.py";       Remote = "/sd/pinhos/core/sandbox.py";      Mpy = $true },
     @{ Local = "core\theme.py";         Remote = "/sd/pinhos/core/theme.py";        Mpy = $true },
     @{ Local = "ui\__init__.py";        Remote = "/sd/pinhos/ui/__init__.py";       Mpy = $true },
+    @{ Local = "ui\fonts.py";           Remote = "/sd/pinhos/ui/fonts.py";          Mpy = $true },
     @{ Local = "ui\widgets.py";         Remote = "/sd/pinhos/ui/widgets.py";        Mpy = $true },
     @{ Local = "ui\gui.py";             Remote = "/sd/pinhos/ui/gui.py";            Mpy = $true },
     @{ Local = "ui\tui.py";             Remote = "/sd/pinhos/ui/tui.py";            Mpy = $true },
@@ -663,6 +664,31 @@ function Upload-SdFile($sp, [byte[]]$rawBytes, [string]$remotePath, [int]$pct = 
     throw "[ERROR] File verification failed while writing $remotePath ($lastErr)."
 }
 
+# Offline build & bytecode/JSON verification target (no serial port required)
+if ($Action -in @("build", "compile", "mpy")) {
+    $resolved = Resolve-MpyManifest $DeployManifest
+    if (-not $script:MpyActive) {
+        throw "[ERROR] mpy-cross bytecode build did not complete."
+    }
+    $mpyFiles = $resolved | Where-Object { $_.LocalFull -and $_.LocalFull.EndsWith(".mpy") }
+    foreach ($mf in $mpyFiles) {
+        $hdr = [System.IO.File]::ReadAllBytes($mf.LocalFull)
+        if ($hdr.Length -lt 4 -or $hdr[0] -ne 0x4D -or $hdr[1] -ne 6 -or $hdr[3] -ne 31) {
+            throw "[ERROR] Unexpected .mpy header in $($mf.Local): expected v6.3 (got $($hdr[0]), $($hdr[1]), $($hdr[2]), $($hdr[3]))"
+        }
+    }
+    $jsonFiles = @(Join-Path $ProjectRoot "version.json") + (Get-ChildItem -Path (Join-Path $ProjectRoot "themes") -Filter "*.json" | ForEach-Object { $_.FullName })
+    foreach ($jf in $jsonFiles) {
+        $rawJ = [System.IO.File]::ReadAllText($jf, [System.Text.Encoding]::UTF8)
+        $null = ConvertFrom-Json $rawJ
+        if ($jf -match "\\themes\\" -and ([System.Text.Encoding]::UTF8.GetByteCount($rawJ) -gt 1024)) {
+            throw "[ERROR] Theme file exceeds 1024 B atomic write cap: $jf"
+        }
+    }
+    Write-Host ("[PinhOS] Build OK: {0} .mpy modules (v6.3, -O2) & {1} JSON files verified." -f $mpyFiles.Count, $jsonFiles.Count) -ForegroundColor Green
+    exit 0
+}
+
 # Primary fast transport if mpremote is installed on PATH
 $mpremoteCmd = Get-Command mpremote -ErrorAction SilentlyContinue
 if ((-not $NoMpremote) -and $mpremoteCmd) {
@@ -673,7 +699,7 @@ if ((-not $NoMpremote) -and $mpremoteCmd) {
         $tmpMain = Join-Path $env:TEMP "pinhos_main_stub.py"
         [System.IO.File]::WriteAllText($tmpBoot, $FlashBootStub)
         [System.IO.File]::WriteAllText($tmpMain, $FlashMainStub)
-        & $mp connect $ResolvedPort exec "import os; [os.mkdir(d) for d in ('/sd/pinhos','/sd/pinhos/boards','/sd/pinhos/core','/sd/pinhos/ui','/sd/pinhos/net','/sd/pinhos/web','/sd/pinhos/web/static','/sd/pinhos/tools','/sd/pinhos/apps','/sd/pinhos/themes','/sd/pinhos/.swap','/sd/pinhos/logs','/sd/pinhos/screenshots','/sd/pinhos/tests') if d.split('/')[-1] not in os.listdir('/'.join(d.split('/')[:-1]) or '/')]"
+        & $mp connect $ResolvedPort exec "import os; [os.mkdir(d) for d in ('/sd/pinhos','/sd/pinhos/boards','/sd/pinhos/core','/sd/pinhos/ui','/sd/pinhos/net','/sd/pinhos/web','/sd/pinhos/web/static','/sd/pinhos/tools','/sd/pinhos/apps','/sd/pinhos/themes','/sd/pinhos/fonts','/sd/pinhos/banners','/sd/pinhos/.swap','/sd/pinhos/logs','/sd/pinhos/screenshots','/sd/pinhos/tests') if d.split('/')[-1] not in os.listdir('/'.join(d.split('/')[:-1]) or '/')]"
         & $mp connect $ResolvedPort fs cp $tmpBoot ":/boot.py"
         & $mp connect $ResolvedPort fs cp $tmpMain ":/main.py"
         $totalFiles = $DeployManifest.Count
@@ -792,7 +818,7 @@ try:
     machine.RTC().datetime($rtcTuple)
 except Exception:
     pass
-for _d in ('/sd/pinhos','/sd/pinhos/boards','/sd/pinhos/core','/sd/pinhos/ui','/sd/pinhos/net','/sd/pinhos/web','/sd/pinhos/web/static','/sd/pinhos/tools','/sd/pinhos/apps','/sd/pinhos/themes','/sd/pinhos/.swap','/sd/pinhos/logs','/sd/pinhos/screenshots','/sd/pinhos/tests'):
+for _d in ('/sd/pinhos','/sd/pinhos/boards','/sd/pinhos/core','/sd/pinhos/ui','/sd/pinhos/net','/sd/pinhos/web','/sd/pinhos/web/static','/sd/pinhos/tools','/sd/pinhos/apps','/sd/pinhos/themes','/sd/pinhos/fonts','/sd/pinhos/banners','/sd/pinhos/.swap','/sd/pinhos/logs','/sd/pinhos/screenshots','/sd/pinhos/tests'):
     try:
         os.mkdir(_d)
     except Exception:

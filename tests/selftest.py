@@ -140,6 +140,10 @@ def test_hal_init(root="/sd/pinhos"):
         _assert(k_ctrl == "C" and (m_ctrl & MOD_CTRL), "Failed Ctrl+C modifier decode")
         k_sh, m_sh = board._decode_raw_key(b"A")
         _assert(k_sh == "A" and (m_sh & MOD_SHIFT), "Failed Shift modifier decode")
+        k_f6, m_f6 = board._decode_raw_key(b"\x86")
+        _assert(k_f6 == "F6" and (m_f6 & MOD_SHIFT), "Failed STM32 Shift+F6 decode")
+        k_f10, m_f10 = board._decode_raw_key(b"\x8a")
+        _assert(k_f10 == "F10" and (m_f10 & MOD_SHIFT), "Failed STM32 Shift+F10 decode")
 
     # Battery telemetry check
     bat = board.get_battery()
@@ -178,6 +182,7 @@ def test_hal_init(root="/sd/pinhos"):
         "core/swap.py",
         "core/sandbox.py",
         "core/theme.py",
+        "ui/fonts.py",
         "ui/widgets.py",
         "ui/gui.py",
         "ui/tui.py",
@@ -578,13 +583,14 @@ def test_input_and_boot_router(root="/sd/pinhos"):
 
 def test_theme_engine(root="/sd/pinhos"):
     """
-    Gate 7: Load and strictly validate all 4 JSON themes in /sd/pinhos/themes/,
-    verify semantic color token resolution, safe fallback on missing SD/file,
-    and runtime hot-swap persistence via ConfigManager.
+    Gate 7: Load and strictly validate all canonical JSON themes in /sd/pinhos/themes/
+    (Schema v1 & Schema v2 including Obsidian Amber), verify deep-merged defaults,
+    6x8 font resolution, pre-computed RGB565 ints, safe fallback, and hot-swap persistence.
     """
     from boards import get_board
     from core.config import ConfigManager
     from core.theme import (
+        Theme,
         ThemeManager,
         CANONICAL_THEME_IDS,
         REQUIRED_TOKENS,
@@ -604,21 +610,29 @@ def test_theme_engine(root="/sd/pinhos"):
         cfg = ConfigManager(config_path=cfg_path)
         tm = ThemeManager(themes_dir=themes_dir, config=cfg, board=board)
 
-        # 1. Strictly validate all 4 canonical JSON themes
+        # 1. Strictly validate all canonical JSON themes (v1 + v2)
         validated = tm.validate_all()
         for tid in CANONICAL_THEME_IDS:
             _assert(tid in validated, "Missing canonical theme file: " + tid)
             ok, info = validated[tid]
             _assert(ok, "Theme '{}' failed validation: {}".format(tid, info))
 
-            # Verify every required semantic token resolves to a valid palette index & hex
             t = tm.load(tid, strict=True)
             _assert(len(t.lut) == 16, "Theme '{}' LUT must have 16 entries".format(tid))
             for tok in REQUIRED_TOKENS:
                 idx = t.color(tok)
                 hx = t.hex(tok)
+                r565 = t.rgb565(tok)
                 _assert(isinstance(idx, int) and 0 <= idx <= 15, "Invalid palette idx for {}.{}".format(tid, tok))
                 _assert(isinstance(hx, str) and hx.startswith("#") and len(hx) == 7, "Invalid hex for {}.{}".format(tid, tok))
+                _assert(isinstance(r565, int) and 0 <= r565 <= 0xFFFF, "Invalid rgb565 int for {}.{}".format(tid, tok))
+
+        # Verify Obsidian Amber Schema v2 fields & Legacy flat theme deep-merge
+        obs = tm.load("obsidian_amber", strict=True)
+        _assert(obs.schema_version == 2 and obs.font == "bold" and obs.uppercase_headers, "Obsidian Amber v2 metadata mismatch")
+        _assert(obs.style_token("bar_style") == "blocks" and obs.style_token("card_header") == "filled", "Obsidian Amber style mismatch")
+        flat_t = Theme({"name": "Legacy Flat", "bg": "#08090C", "fg": "#FFB000", "accent": "#00E5FF"})
+        _assert(flat_t.id == "legacy_flat" and len(flat_t.lut) == 16 and flat_t.font == "default", "Flat theme merge failed")
 
         # 2. Verify safe built-in fallback when file is missing
         fb = load_theme_file(themes_dir + "/_nonexistent_theme.json", strict=False)
@@ -627,9 +641,11 @@ def test_theme_engine(root="/sd/pinhos"):
         # 3. Verify runtime hot-swap + config.json persistence + listener callback
         events = []
         tm.register_listener(lambda th: events.append(th.id))
+        tm.apply("obsidian_amber", persist=True)
+        _assert(tm.active.id == "obsidian_amber" and board.get_font_name() == "bold", "apply('obsidian_amber') did not activate bold font")
         tm.apply("synthwave_pulse", persist=True)
-        _assert(tm.active.id == "synthwave_pulse", "apply('synthwave_pulse') did not activate")
-        _assert("synthwave_pulse" in events, "Theme listener not notified on apply")
+        _assert(tm.active.id == "synthwave_pulse" and board.get_font_name() == "default", "apply('synthwave_pulse') did not restore default font")
+        _assert("obsidian_amber" in events and "synthwave_pulse" in events, "Theme listener not notified on apply")
 
         cfg_reload = ConfigManager(config_path=cfg_path)
         _assert(cfg_reload.get("theme") == "synthwave_pulse", "Theme not persisted to config.json")
@@ -642,7 +658,7 @@ def test_theme_engine(root="/sd/pinhos"):
         except Exception:
             pass
 
-    return "4/4 JSON themes valid + hot-swap OK"
+    return "{}/{} JSON themes (v2+fonts) OK".format(len(CANONICAL_THEME_IDS), len(CANONICAL_THEME_IDS))
 
 
 def test_dual_ui_engine(root="/sd/pinhos"):
@@ -811,7 +827,7 @@ def run_all(root="/sd/pinhos", interactive_wait=False):
         ("4. Sandbox Isolation & SRAM Gate", test_sandbox_isolation),
         ("5. 3-Strike Boot Guard & Recovery", test_boot_guard),
         ("6. Input & Boot Router Integrity", test_input_and_boot_router),
-        ("7. Unified Theme Engine (4 JSON)", test_theme_engine),
+        ("7. Unified Theme Engine (v2 JSON)", test_theme_engine),
         ("8. Dual-UI Dirty-Redraw & SRAM", test_dual_ui_engine),
         ("9. BusyBox Shell & Streaming FS", test_busybox_shell),
         ("10. Field Tools & Sandbox Meta", test_phase3_field_tools),

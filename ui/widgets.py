@@ -75,6 +75,100 @@ def draw_battery_icon(board, x, y, pct, charging, col_fg, col_fill, col_bg, phas
             board.fill_rect(x0 + 2, y0 + 2, min(10, fw), 5, col_fill)
 
 
+def draw_styled_frame(board, x, y, w, h, col, bg_col=None, style="single"):
+    """Render card/dialog border frame according to Theme Schema v2 'border_style'."""
+    x0, y0, w0, h0 = int(x), int(y), int(w), int(h)
+    if w0 <= 2 or h0 <= 2 or style == "none":
+        return
+    if style == "double":
+        board.rect(x0, y0, w0, h0, col)
+        if w0 > 6 and h0 > 6:
+            board.rect(x0 + 2, y0 + 2, w0 - 4, h0 - 4, col)
+        return
+    if style == "rounded" and w0 >= 6 and h0 >= 6:
+        if bg_col is not None:
+            board.pixel(x0, y0, bg_col)
+            board.pixel(x0 + w0 - 1, y0, bg_col)
+            board.pixel(x0, y0 + h0 - 1, bg_col)
+            board.pixel(x0 + w0 - 1, y0 + h0 - 1, bg_col)
+        board.hline(x0 + 2, y0, w0 - 4, col)
+        board.hline(x0 + 2, y0 + h0 - 1, w0 - 4, col)
+        board.vline(x0, y0 + 2, h0 - 4, col)
+        board.vline(x0 + w0 - 1, y0 + 2, h0 - 4, col)
+        board.pixel(x0 + 1, y0 + 1, col)
+        board.pixel(x0 + w0 - 2, y0 + 1, col)
+        board.pixel(x0 + 1, y0 + h0 - 2, col)
+        board.pixel(x0 + w0 - 2, y0 + h0 - 2, col)
+        return
+    board.rect(x0, y0, w0, h0, col)
+
+
+def draw_styled_bar(board, x, y, w, h, pct, col_fill, col_bg, col_bdr, style="solid", is_tui=False):
+    """Render telemetry/progress bar according to Theme Schema v2 'bar_style'."""
+    p = max(0, min(100, int(pct)))
+    if is_tui:
+        slots = max(4, (int(w) // 6) - 2)
+        filled = (slots * p) // 100
+        ch_on = "=" if style == "striped" else "#"
+        ch_off = "-" if style == "striped" else "."
+        board.text("[" + (ch_on * filled) + (ch_off * (slots - filled)) + "]", int(x), int(y), col_fill)
+        return
+    x0, y0, w0, h0 = int(x), int(y), int(w), int(h)
+    board.fill_rect(x0, y0, w0, h0, col_bg)
+    board.rect(x0, y0, w0, h0, col_bdr)
+    iw = max(0, w0 - 2)
+    ih = max(1, h0 - 2)
+    fw = (iw * p) // 100
+    if fw <= 0:
+        return
+    ix, iy = x0 + 1, y0 + 1
+    if style == "blocks":
+        bx = ix
+        end_x = ix + fw
+        while bx < end_x:
+            cw = min(3, end_x - bx)
+            board.fill_rect(bx, iy, cw, ih, col_fill)
+            bx += 4
+    elif style == "striped":
+        bx = ix
+        end_x = ix + fw
+        while bx < end_x:
+            cw = min(2, end_x - bx)
+            board.fill_rect(bx, iy, cw, ih, col_fill)
+            bx += 3
+    else:
+        board.fill_rect(ix, iy, fw, ih, col_fill)
+
+
+def draw_card_header(board, x, y, w, h_hdr, title, theme, style="filled", right_tag="", is_tui=False):
+    """Render card header bar ('filled', 'tinted', or 'underline') with optional right badge."""
+    t_str = theme.format_header(title) if hasattr(theme, "format_header") else str(title)
+    c_acc = theme.color("accent")
+    c_bdr = theme.color("border")
+    if is_tui:
+        max_ch = max(1, (int(w) - 12) // 6)
+        board.text(("== " + t_str + " ==")[:max_ch], int(x) + 6, int(y) + 4, c_acc)
+        board.hline(int(x) + 2, int(y) + h_hdr - 1, int(w) - 4, c_bdr)
+        return
+    ty = int(y) + max(2, (h_hdr - 6) // 2)
+    max_t = max(1, (int(w) - 12 - (len(right_tag) * 6 + 4 if right_tag else 0)) // 6)
+    if style == "tinted":
+        c_tnt = theme.color("surface_alt")
+        board.fill_rect(int(x) + 1, int(y) + 1, int(w) - 2, h_hdr, c_tnt)
+        board.hline(int(x) + 1, int(y) + h_hdr, int(w) - 2, c_bdr)
+        fg = c_acc
+    elif style == "underline":
+        board.hline(int(x) + 4, int(y) + h_hdr, int(w) - 8, c_acc)
+        fg = c_acc
+    else:
+        c_hbg = theme.color("header_bg", default="accent")
+        fg = theme.color("header_fg", default="accent_fg")
+        board.fill_rect(int(x) + 1, int(y) + 1, int(w) - 2, h_hdr, c_hbg)
+    board.text(t_str[:max_t], int(x) + 6, ty, fg)
+    if right_tag:
+        board.text(right_tag, int(x) + int(w) - len(right_tag) * 6 - 4, ty, fg)
+
+
 class Widget:
     """Base dirty-tracked UI widget with geometry and focus state."""
 
