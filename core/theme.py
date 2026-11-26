@@ -366,21 +366,19 @@ class Theme:
         rc = _extract_raw_colors(data)
         self.colors = _normalize_colors(rc, strict_required=False)
 
-        # Precompute RGB tuples, standard RGB565 ints, and swapped RGB565 ints once on load
-        self._rgb = {}
+        # Precompute standard RGB565 ints and build 16-entry swapped LUT without retaining extra dicts
         self._rgb565 = {}
-        self._swapped = {}
+        swapped = {}
         for tok, hx in self.colors.items():
             r, g, b = parse_hex_color(hx)
-            self._rgb[tok] = (r, g, b)
             self._rgb565[tok] = rgb565(r, g, b)
-            self._swapped[tok] = rgb565_swap(r, g, b)
+            swapped[tok] = rgb565_swap(r, g, b)
 
         self._slot_map = dict(PALETTE_INDEX)
-        self.lut = self._build_lut()
+        self.lut = self._build_lut(swapped)
 
-    def _build_lut(self):
-        slot_tokens = [
+    def _build_lut(self, swapped):
+        slot_tokens = (
             "bg",            # 0
             "surface",       # 1
             "border",        # 2
@@ -397,8 +395,8 @@ class Theme:
             "border_focus",  # 13
             "info",          # 14
             "text",          # 15
-        ]
-        entries = [self._swapped[tok] for tok in slot_tokens]
+        )
+        entries = [swapped[tok] for tok in slot_tokens]
         if entries[0] == entries[15] or entries[0] == entries[3]:
             raise ThemeError("Theme foreground/accent matches background (invisible palette)")
 
@@ -414,7 +412,7 @@ class Theme:
             free_aux.append(13)
 
         for extra_tok, fb_slot in (("footer_bg", 12), ("header_fg", 4), ("footer_fg", 4)):
-            sw = self._swapped[extra_tok]
+            sw = swapped[extra_tok]
             matched = -1
             for idx in range(16):
                 if entries[idx] == sw:
@@ -585,6 +583,7 @@ class ThemeManager:
         Load and activate a theme by ID, pushing its 16-entry RGB565 LUT and 6x8
         bitmap font to the board HAL, persisting to config.json, and notifying listeners.
         """
+        gc.collect()
         tid = self._normalize_id(theme_id)
         theme = self.load(tid, strict=False)
         self.active = theme

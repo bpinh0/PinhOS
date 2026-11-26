@@ -172,7 +172,7 @@ def main(ctx):
                 mods = board.get_modifiers()
                 ctrl = bool(mods & MOD_CTRL)
                 if (ctrl and len(k) == 1 and k.upper() == "P") or getattr(board, "pending_screenshot", None):
-                    from ui.menu import show_screenshot_toast
+                    from ui.widgets import show_screenshot_toast
                     show_screenshot_toast(board, ui, fb)
                     refresh(force=True)
                     continue

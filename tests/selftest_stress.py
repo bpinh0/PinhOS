@@ -178,18 +178,27 @@ def test_stress_menu_walk(root="/sd/pinhos"):
             blk = largest_free(CAP_96K)
             if blk < min_blk:
                 min_blk = blk
-        for _ in range(4):
-            tm.cycle(step=1, persist=False)
+        for _ in range(5):
+            tm.cycle(step=1, persist=True)
             ui.toggle_mode(persist=False)
         _assert(min_blk >= 16384, "menu walk largest_free {}B < 16KB".format(min_blk))
     finally:
         board.poll_key = orig_poll
         import sys
-        for _m in ("ui.menu", "ui._menu_net", "ui._log_view"):
+        um = None
+        for _m in ("ui.menu", "ui._menu_net", "ui._log_view", "net.sync"):
             sys.modules.pop(_m, None)
         gc.collect()
         gc.collect()
-    return "7 menus+4x theme/mode OK (min_blk={}KB)".format(min_blk // 1024)
+    # Verify App Drawer / DASHBOARD_ACTIONS & theme toggle after menu unload do NOT re-import ui.menu
+    import sys as _s2
+    from ui.widgets import DASHBOARD_ACTIONS
+    _assert(len(DASHBOARD_ACTIONS) == 6 and "ui.menu" not in _s2.modules, "DASHBOARD_ACTIONS leaked ui.menu")
+    for _ in range(5):
+        ui.cycle_theme(step=1, persist=True)
+        ui.render(force=True)
+    tm.apply("cyber_amber", persist=True)
+    return "7 menus+5x theme/mode OK (min_blk={}KB)".format(min_blk // 1024)
 
 
 def run_stress(root="/sd/pinhos", deep=False):

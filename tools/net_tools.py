@@ -117,7 +117,7 @@ def _prompt(board, ui, fb, label, default=""):
             _sleep_ms(30)
             continue
         if getattr(board, "pending_screenshot", None):
-            from ui.menu import show_screenshot_toast
+            from ui.widgets import show_screenshot_toast
             show_screenshot_toast(board, ui, fb)
             continue
         if k == "ESC":
@@ -184,7 +184,7 @@ def main(ctx):
             except Exception:
                 ctrl = False
             if (ctrl and ku == "P") or getattr(board, "pending_screenshot", None):
-                from ui.menu import show_screenshot_toast
+                from ui.widgets import show_screenshot_toast
                 _, smsg = show_screenshot_toast(board, ui, fb)
                 if smsg:
                     sync_hdr(smsg, "ok")

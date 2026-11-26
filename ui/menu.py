@@ -14,13 +14,12 @@ def _sleep_ms(ms):
         time.sleep(ms / 1000.0)
 
 
-DASHBOARD_ACTIONS = (
-    {"id": "cat:toolkit", "short": "TOOLKIT", "label": "TERMINAL & TOOLKIT", "icon": "term", "badge": "[1]", "tui_badge": "[SH >]"},
-    {"id": "cat:files", "short": "FILES & EDIT", "label": "FILES & EDITOR", "icon": "files", "badge": "[2]", "tui_badge": "[/sd >]"},
-    {"id": "cat:apps", "short": "APPS & STUDIO", "label": "APPS & STUDIO", "icon": "apps", "badge": "[3]", "tui_badge": "[APPS >]"},
-    {"id": "cat:system", "short": "SYS & DIAG", "label": "SYSTEM & DIAGNOSTICS", "icon": "dash", "badge": "[4]", "tui_badge": "[DIAG >]"},
-    {"id": "cat:settings", "short": "SETTINGS", "label": "SETTINGS", "icon": "sys", "badge": "[5]", "tui_badge": "[CFG >]"},
-    {"id": "cat:set_conn", "short": "WI-FI & NET", "label": "WI-FI & NETWORK", "icon": "net", "badge": "[6]", "tui_badge": "[NET >]"},
+from ui.widgets import (
+    DASHBOARD_ACTIONS,
+    TOOL_MAP,
+    confirm_dialog,
+    show_screenshot_toast,
+    show_toast_dialog,
 )
 
 MENU_TREE = {
@@ -86,6 +85,7 @@ MENU_TREE = {
         {"id": "set:swap_kb", "label": "SD Swap Quota", "dyn": "swap_kb"},
         {"id": "act:swap_clr", "label": "Clear Swap Cache", "dyn": "swap_used"},
         {"id": "set:sleep_to", "label": "Auto-Sleep Timer", "dyn": "sleep_to"},
+        {"id": "set:soft_wdt", "label": "Soft Watchdog Timeout", "dyn": "soft_wdt"},
         {"id": "set:wdt_to", "label": "Hardware Watchdog", "dyn": "wdt_to"},
         {"id": "act:sleep", "label": "Sleep Now (5s)", "badge": "[^Z]"},
         {"id": "cfg:save_snap", "label": "Save Config Snapshot", "badge": "[SD]"},
@@ -100,16 +100,6 @@ MENU_TREE = {
     )),
 }
 
-TOOL_MAP = {
-    "shell": ("/sd/pinhos/tools/shell.py", "BusyBox Shell", False),
-    "editor": ("/sd/pinhos/tools/editor.py", "Text Editor", False),
-    "files": ("/sd/pinhos/tools/files.py", "File Manager", False),
-    "net": ("/sd/pinhos/tools/net_tools.py", "Net Probes", False),
-    "uart": ("/sd/pinhos/tools/uart_term.py", "UART Console", False),
-    "sysmon": ("/sd/pinhos/tools/sysmon.py", "SysMon", False),
-}
-
-
 def _idle_wait(ms=30):
     try:
         import sys
@@ -123,33 +113,6 @@ def _idle_wait(ms=30):
     except Exception:
         pass
     _sleep_ms(ms)
-
-
-def confirm_dialog(board, ui, title, lines, footer="[Y/ENTER] Yes  [N/ESC] No", kind="warn"):
-    """Lightweight modal confirmation Dialog. Polls board.poll_key() only."""
-    from ui.widgets import Dialog
-    dlg = Dialog(20, 96, 280, 120, title=title, lines=lines, footer=footer, kind=kind)
-    ui.add_widget(dlg)
-    ui.render(force=False)
-    board.clear_input()
-    poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
-    ans = False
-    try:
-        while True:
-            k = poll_fn() if poll_fn else None
-            if k:
-                ku = str(k).upper()
-                if ku in ("Y", "ENTER"):
-                    ans = True; break
-                if ku in ("N", "ESC", "Q", "BACK", "BACKSPACE"):
-                    break
-            _idle_wait(30)
-    except KeyboardInterrupt:
-        ans = False
-    ui.remove_widget(dlg)
-    ui.mark_all_dirty(True)
-    board.clear_input()
-    return ans
 
 
 def show_info_dialog(board, ui, title, lines, kind="info"):
@@ -171,9 +134,6 @@ def show_info_dialog(board, ui, title, lines, kind="info"):
     ui.remove_widget(dlg)
     ui.mark_all_dirty(True)
     board.clear_input()
-
-
-from ui.widgets import show_screenshot_toast, show_toast_dialog
 
 
 def open_log_viewer(board, ui, logger, kind="system"):
@@ -292,6 +252,9 @@ def _dyn_badge(tag, board, ui, manifest, cfg=None):
     if tag == "sleep_to":
         sec = int(cfg.get("sleep_timeout_s", 300) if cfg else 300)
         return "OFF" if sec <= 0 else "{}m".format(sec // 60)
+    if tag == "soft_wdt":
+        sec = int(cfg.get("soft_wdt_s", 30) if cfg else 30)
+        return "OFF" if sec <= 0 else "{}s".format(sec)
     if tag == "wdt_to":
         ms = int(cfg.get("wdt_timeout_ms", 8000) if cfg else 8000)
         return "OFF" if ms <= 0 else "{}s".format(ms // 1000)
@@ -625,11 +588,7 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                 elif aid == "act:logs":
                     open_log_viewer(board, ui, logger, kind="system"); _sync(force=True)
                 elif aid == "act:selftest":
-                    import tests.selftest as _st
-                    res = _st.run_all(interactive_wait=True)
-                    board.set_lut(theme_mgr.active.lut)
-                    status_msg = "Self-Test {}/{} {}".format(res.get("passed", 0), res.get("total", 10), "PASS" if res.get("ok") else "FAIL")
-                    status_kind = "ok" if res.get("ok") else "err"; _sync(force=True)
+                    return "RUN_SELFTEST"
                 elif aid == "act:reboot":
                     if confirm_dialog(board, ui, "REBOOT PINHOS?", ["Write clean breadcrumb and", "perform hardware reset?"]):
                         try:
@@ -921,6 +880,22 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                         status_msg, status_kind = "CPU Clock: {} MHz ({})".format(nxt, tag), "warn" if nxt > 150 else "ok"
                     except Exception as e:
                         status_msg, status_kind = "CPU Clock err: " + str(e)[:20], "err"
+                    _sync(force=True)
+                elif aid == "set:soft_wdt":
+                    opts = (15, 30, 60, 0)
+                    cur = int(cfg.get("soft_wdt_s", 30) if cfg else 30)
+                    nxt = opts[(opts.index(cur) + 1) % len(opts)] if cur in opts else 30
+                    if cfg:
+                        cfg.set("soft_wdt_s", nxt, save_now=True)
+                    try:
+                        import sys as _sws
+                        _w = _sws.modules.get("__pinhos_wdt__")
+                        if _w is not None and hasattr(_w, "set_soft_timeout_s"):
+                            _w.set_soft_timeout_s(nxt)
+                    except Exception:
+                        pass
+                    lbl = "OFF" if nxt <= 0 else "{}s".format(nxt)
+                    status_msg, status_kind = "Soft Watchdog: " + lbl, ("warn" if nxt <= 0 else "ok")
                     _sync(force=True)
                 elif aid == "set:wdt_to":
                     opts = (8000, 6000, 4000, 0)

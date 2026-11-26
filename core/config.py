@@ -68,6 +68,7 @@ DEFAULT_CONFIG = {
     "boot_strike_limit": 3,
     "boot_stable_ms": 5000,
     "wdt_timeout_ms": 8000,
+    "soft_wdt_s": 30,
     "webportal_autostart": False,
     "webportal_port": 8080,
 }

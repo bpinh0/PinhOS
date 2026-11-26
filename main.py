@@ -490,8 +490,14 @@ def show_bsod(board, title, exc, context="", interactive=True):
 
 
 def open_log_viewer(board, ui, logger, kind="system"):
-    from ui.menu import open_log_viewer as _olv
-    return _olv(board, ui, logger, kind=kind)
+    gc.collect()
+    import ui._log_view as _lv
+    try:
+        return _lv.open_log_viewer(board, ui, logger, kind=kind)
+    finally:
+        _lv = None
+        sys.modules.pop("ui._log_view", None)
+        gc.collect()
 
 
 _DESKTOP_HINTS = "F1:Help F2:Thm F3:Mode F4:Cfg F5:Notes"
@@ -499,7 +505,7 @@ _DASHBOARD_HINTS = "F1:Help F2:Thm F3:Mode F4:Cfg F5:Notes"
 
 
 def confirm_dialog(board, ui, title, lines, footer="[Y/ENTER] Yes  [N/ESC] No", kind="warn"):
-    from ui.menu import confirm_dialog as _cd
+    from ui.widgets import confirm_dialog as _cd
     return _cd(board, ui, title, lines, footer=footer, kind=kind)
 
 
@@ -639,8 +645,7 @@ class _DashboardView:
     """Phase 3.1 App Drawer: 3x2 GUI Mosaic / 1-6 TUI List + Dual RAM/CPU Sparkline Strip."""
 
     def __init__(self, ui, manifest, sel_action=0, layout="grid"):
-        from ui.widgets import StatusBar, MosaicGrid, TelemetryStrip, FooterBar
-        from ui.menu import DASHBOARD_ACTIONS
+        from ui.widgets import StatusBar, MosaicGrid, TelemetryStrip, FooterBar, DASHBOARD_ACTIONS
 
         self.ui = ui
         self.screen = "drawer"
@@ -722,7 +727,7 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
         return _um.open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_cat, run_tool_cb)
     finally:
         _um = None
-        for _m in ("ui.menu", "ui._menu_net", "ui._log_view"):
+        for _m in ("ui.menu", "ui._menu_net", "ui._log_view", "net.sync"):
             sys.modules.pop(_m, None)
         gc.collect()
 
@@ -731,10 +736,16 @@ _REPL_KEEPALIVE = None
 
 
 def _start_repl_keepalive():
-    """After a deliberate serial Ctrl+C (dev/REPL mode), keep the un-disarmable WDT fed from a hw Timer."""
+    """After a deliberate serial Ctrl+C (dev/REPL mode), pause soft prompts while keeping Stage 2 HW WDT fed."""
     global _REPL_KEEPALIVE
     w = _WDT_OBJ or runtime_state.get("_wdt")
-    if w is None or _REPL_KEEPALIVE is not None:
+    if w is None:
+        return
+    if hasattr(w, "pause"):
+        w.pause()
+        bp("[WDT] Soft WDT paused for REPL (Stage 1 timer keeps HW WDT fed)")
+        return
+    if _REPL_KEEPALIVE is not None:
         return
     try:
         import machine
@@ -746,6 +757,9 @@ def _start_repl_keepalive():
 
 def _stop_repl_watcher():
     global _REPL_KEEPALIVE
+    w = _WDT_OBJ or runtime_state.get("_wdt")
+    if w is not None and hasattr(w, "resume"):
+        w.resume()
     if _REPL_KEEPALIVE is not None:
         try:
             _REPL_KEEPALIVE.deinit()
@@ -832,42 +846,60 @@ def feed_wdt():
             pass
 
 
-def enable_wdt(timeout_ms=8000):
-    """Enable RP2350 machine.WDT once after boot stabilization (max ~8388 ms; 0 disables)."""
+def enable_wdt(timeout_ms=8000, soft_timeout_s=30):
+    """Enable Two-Stage Soft (15/30/60s/OFF) + Hard (8s RP2350) Watchdog once after boot stabilization (#54)."""
     global _WDT_OBJ
     ms = int(timeout_ms or 0)
     if ms <= 0:
         return False
     ms = min(8388, max(1000, ms))
+    soft_s = max(0, int(soft_timeout_s or 0))
     try:
         existing = _WDT_OBJ or runtime_state.get("_wdt")
         if existing is None and builtins is not None:
             existing = getattr(builtins, "_pinhos_wdt", None)
         if existing is not None:
+            if hasattr(existing, "attach"):
+                existing.attach(
+                    board=runtime_state.get("board"),
+                    ui=runtime_state.get("ui"),
+                    logger=runtime_state.get("logger"),
+                )
+            if hasattr(existing, "set_soft_timeout_s"):
+                existing.set_soft_timeout_s(soft_s)
+            if hasattr(existing, "resume"):
+                existing.resume()
             existing.feed()
             return True
-        import machine
-        if hasattr(machine, "WDT"):
-            w = machine.WDT(timeout=ms)
-            _WDT_OBJ = w
-            runtime_state["_wdt"] = w
-            sys.modules["__pinhos_wdt__"] = w  # shared handle (builtins is read-only on RP2350)
-            if builtins is not None:
-                try:
-                    setattr(builtins, "_pinhos_wdt", w)
-                except Exception:
-                    pass
-            bp("[WDT] Enabled hardware watchdog ({}ms)".format(ms))
-            lg = runtime_state.get("logger")
-            if lg is not None:
-                try:
-                    if hasattr(lg, "log_wdt"):
-                        lg.log_wdt("ARMED ({}ms)".format(ms))
-                    else:
-                        lg.info("WDT: Armed ({}ms)".format(ms))
-                except Exception:
-                    pass
-            return True
+        from core.watchdog import TwoStageWatchdog
+        w = TwoStageWatchdog(
+            hw_timeout_ms=ms,
+            soft_timeout_s=soft_s,
+            board=runtime_state.get("board"),
+            ui=runtime_state.get("ui"),
+            logger=runtime_state.get("logger"),
+            arm_hw=True,
+        )
+        _WDT_OBJ = w
+        runtime_state["_wdt"] = w
+        sys.modules["__pinhos_wdt__"] = w  # shared handle (builtins is read-only on RP2350)
+        if builtins is not None:
+            try:
+                setattr(builtins, "_pinhos_wdt", w)
+            except Exception:
+                pass
+        _tmode = "timer" if getattr(w, "_timer", None) is not None else "coop"
+        bp("[WDT] Enabled Two-Stage Watchdog (soft={}s, hw={}ms, {})".format(soft_s, ms, _tmode))
+        lg = runtime_state.get("logger")
+        if lg is not None:
+            try:
+                if hasattr(lg, "log_wdt"):
+                    lg.log_wdt("ARMED (soft={}s hw={}ms {})".format(soft_s, ms, _tmode))
+                else:
+                    lg.info("WDT: Armed (soft={}s hw={}ms {})".format(soft_s, ms, _tmode))
+            except Exception:
+                pass
+        return True
     except Exception as e:
         bp("[WDT_ERR]", repr(e))
     return False
@@ -954,6 +986,9 @@ def _enter_sleep_mode(board, ui, logger, countdown_s=5):
     board.clear_input()
     gc.collect()
 
+    wdt_ref = _WDT_OBJ or runtime_state.get("_wdt")
+    if wdt_ref is not None and hasattr(wdt_ref, "pause"):
+        wdt_ref.pause()
     try:
         ticks = 0
         while True:
@@ -966,6 +1001,8 @@ def _enter_sleep_mode(board, ui, logger, countdown_s=5):
                 gc.collect()
             _sleep_ms(120)
     finally:
+        if wdt_ref is not None and hasattr(wdt_ref, "resume"):
+            wdt_ref.resume()
         board.set_backlight(max(20, orig_lcd))
         board.set_kb_backlight(orig_kb)
         board.clear_input()
@@ -999,7 +1036,10 @@ def _init_interactive_services(board, cfg, logger):
     runtime_state["wifi_bg_pending"] = True
     if runtime_state.get("_standalone_boot") and runtime_state.get("stabilized") and not runtime_state.get("serial_link"):
         try:
-            enable_wdt(int(cfg.get("wdt_timeout_ms", 8000)) if cfg else 8000)
+            enable_wdt(
+                int(cfg.get("wdt_timeout_ms", 8000)) if cfg else 8000,
+                soft_timeout_s=int(cfg.get("soft_wdt_s", 30)) if cfg else 30,
+            )
         except Exception:
             pass
     if cfg and cfg.get("webportal_autostart", False) and not runtime_state.get("web_active"):
@@ -1032,7 +1072,27 @@ def ui_loop(sel_action=0):
         )
 
     cfg = runtime_state.get("config")
+    if cfg is None:
+        try:
+            from core.config import ConfigManager
+            cfg = ConfigManager()
+            runtime_state["config"] = cfg
+        except Exception:
+            cfg = None
     logger = runtime_state.get("logger")
+    if logger is None:
+        try:
+            from core.logger import get_logger
+            logger = get_logger()
+            runtime_state["logger"] = logger
+        except Exception:
+            logger = None
+    if runtime_state.get("swap") is None:
+        try:
+            from core.swap import get_swap_manager
+            runtime_state["swap"] = get_swap_manager()
+        except Exception:
+            pass
     _init_interactive_services(board, cfg, logger)
     theme_mgr, ui = _ensure_ui_services(board, cfg=cfg)
     manifest = _ensure_manifest()
@@ -1186,7 +1246,12 @@ def ui_loop(sel_action=0):
         return active
 
     def _run_action(act_id):
-        nonlocal status_msg, status_kind, view, drawer_sel
+        nonlocal status_msg, status_kind, view, drawer_sel, theme_mgr, ui
+        if act_id != "refresh":
+            from core.memutil import ensure_heap
+            _pf_free, _pf_ok = ensure_heap(runtime_state)
+            if not _pf_ok and logger:
+                logger.warn("MEMGUARD: low heap before {} (free={}B)".format(act_id, _pf_free))
         if screen == "drawer" and hasattr(view, "action_menu"):
             drawer_sel = view.action_menu.selected
 
@@ -1202,6 +1267,8 @@ def ui_loop(sel_action=0):
                 return "EXIT_REPL"
             if res == "SLEEP_NOW":
                 return "SLEEP_NOW"
+            if res == "RUN_SELFTEST":
+                return _run_action("selftest")
             if res == "TOGGLE_WEBPORTAL":
                 # ui.menu has already been purged & GC'd -> ~35 KB extra contiguous SRAM for uasyncio + lwIP!
                 _toggle_webportal_ui()
@@ -1214,7 +1281,7 @@ def ui_loop(sel_action=0):
         if act_id.startswith("tool:"):
             act_id = act_id[5:]
 
-        from ui.menu import TOOL_MAP
+        from ui.widgets import TOOL_MAP
         if act_id in TOOL_MAP:
             path, label, wait_after = TOOL_MAP[act_id]
             board.beep(1400, 15)
@@ -1228,8 +1295,34 @@ def ui_loop(sel_action=0):
             _drain_keys(120)
             if logger:
                 logger.set_breadcrumb("SELFTEST", "run_all")
+            _saved_rs = dict(runtime_state)
+            _this_mod = sys.modules.get(__name__) or sys.modules.get("main") or sys.modules.get("_pinhos_main")
+            view = None
+            if ui is not None:
+                ui.deinit()
+            ui = None
+            theme_mgr = None
+            runtime_state["ui"] = None
+            runtime_state["theme"] = None
+            gc.collect()
             import tests.selftest as _st
-            res = _st.run_all(interactive_wait=True)
+            try:
+                res = _st.run_all(interactive_wait=True)
+            finally:
+                _st = None
+                for _tm in ("tests.selftest", "tests.selftest_p3", "tests.selftest_p4", "tests.selftest_stress", "tests", "boards.generic_spi"):
+                    sys.modules.pop(_tm, None)
+                runtime_state.update(_saved_rs)
+                runtime_state["ui"] = None
+                runtime_state["theme"] = None
+                if _this_mod is not None:
+                    sys.modules["main"] = _this_mod
+                _saved_rs = None
+                gc.collect()
+                gc.collect()
+                theme_mgr, ui = _ensure_ui_services(board, cfg=cfg)
+                if _WDT_OBJ is not None and hasattr(_WDT_OBJ, "attach"):
+                    _WDT_OBJ.attach(board=board, ui=ui, logger=logger)
             if logger:
                 logger.info("SELFTEST: {}/{} {}".format(
                     res.get("passed", 0), res.get("total", 12), "PASS" if res.get("ok") else "FAIL"
@@ -1306,6 +1399,7 @@ def ui_loop(sel_action=0):
 
     idle_ticks = 0
     anim_ticks = 0
+    mg_level = 0
     chg_phase = 0
     last_act_ms = _ticks_ms()
     last_rtc_save_ms = _ticks_ms()
@@ -1420,6 +1514,8 @@ def ui_loop(sel_action=0):
                     view.render(force=True)
 
                 elif (k == "F2" and not (ctrl or alt or shift)) or (ctrl and k == "T"):
+                    from core.memutil import ensure_heap
+                    ensure_heap(runtime_state, min_free=65536, min_blk=16384)
                     new_theme = ui.cycle_theme(step=1, persist=True)
                     if logger:
                         logger.info("UI: Theme -> {}".format(new_theme.id))
@@ -1636,6 +1732,27 @@ def ui_loop(sel_action=0):
                 idle_ticks = 0
                 now_idle_ms = _ticks_ms()
                 gc.collect()
+                # MemGuard: reclaim stale modules / idle WebPortal before heap starvation (safe point: no tool active)
+                _mf = gc.mem_free() if hasattr(gc, "mem_free") else 262144
+                if _mf < 100000:
+                    from core.memutil import reclaim
+                    _lvl = 1
+                    _fr = reclaim(1, runtime_state)
+                    _mf = gc.mem_free()
+                    if _mf < 60000:
+                        _lvl = 2
+                        _fr += reclaim(2, runtime_state)
+                        _mf = gc.mem_free()
+                    if _lvl != mg_level:
+                        mg_level = _lvl
+                        if logger:
+                            logger.warn("MEMGUARD L{}: freed {}B -> free={}B".format(_lvl, _fr, _mf))
+                    if _mf < 40000:
+                        status_msg = "LOW MEMORY ({}KB) - close tools".format(_mf // 1024)
+                        status_kind = "warn"
+                elif _mf > 120000:
+                    mg_level = 0
+                    runtime_state["_mem_retry"] = False
                 # Non-blocking background Wi-Fi auto-connect state machine (#8, #24, #47, #55)
                 if runtime_state.get("wifi_bg_pending"):
                     runtime_state["wifi_bg_pending"] = False
@@ -1824,16 +1941,20 @@ def ui_loop(sel_action=0):
         bp("[UI] Interrupted via serial Ctrl+C; returning to REPL.")
     except MemoryError as mem_exc:
         gc.collect(); gc.collect()
-        if runtime_state.get("web_active") and not runtime_state.get("_mem_retry"):
+        if not runtime_state.get("_mem_retry"):
             runtime_state["_mem_retry"] = True
-            stop_webportal(logger=logger)
+            try:
+                from core.memutil import reclaim
+                _fr = reclaim(2, runtime_state)
+            except Exception:
+                _fr = 0
             gc.collect(); gc.collect()
             if logger:
                 try:
-                    logger.warn("UI: MemoryError recovered by pausing WebPortal")
+                    logger.warn("UI: MemoryError recovered by MemGuard (freed {}B)".format(_fr))
                 except Exception:
                     pass
-            bp("[UI] MemoryError caught -> WebPortal paused, recovering UI")
+            bp("[UI] MemoryError caught -> MemGuard reclaimed {}B, recovering UI".format(_fr))
             return ui_loop()
         runtime_state["_mem_retry"] = False
         choice = show_bsod(
@@ -1846,6 +1967,10 @@ def ui_loop(sel_action=0):
         if choice in ("RECOVER", "LOGS"):
             return ui_loop()
     except Exception as ui_exc:
+        if type(ui_exc).__name__ == "SoftWatchdogAbort":
+            bp("[WDT] SoftWatchdogAbort -> returning to Desktop Home")
+            theme_mgr._push_to_board(theme_mgr.active)
+            return ui_loop(sel_action=0)
         choice = show_bsod(
             board,
             "UI_LOOP_EXCEPTION",

@@ -308,7 +308,7 @@ class Editor:
             ctrl = bool(mods & MOD_CTRL)
             shift = bool(mods & MOD_SHIFT)
             if (ctrl and len(k) == 1 and k.upper() == "P") or getattr(self.board, "pending_screenshot", None):
-                from ui.menu import show_screenshot_toast
+                from ui.widgets import show_screenshot_toast
                 _, smsg = show_screenshot_toast(self.board, self.ui, self.fb)
                 if smsg:
                     self._set(smsg, "ok")

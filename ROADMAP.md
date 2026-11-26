@@ -178,7 +178,7 @@ def main(ctx):
   - [ ] Curated catalog browser (`store_index.json`) with category filters, version tags, `min_sram` compatibility badges, SHA-256 verification, and one-click install/update/remove into `/sd/pinhos/apps/` and `/sd/pinhos/themes/`.
 - [ ] **5.4 Optional Bytecode & Diagnostics Polish:**
   - [x] Surface RP2350 Watchdog (`WDT`) diagnostics & reset-cause log entries (`wdt.log` + friendly `WATCHDOG RESET RECOVERED` notice) directly in the on-device **Logs** menu (`CTRL+L` / `ui/_log_view.py`, `v1.0.0-alpha.4.4`, `#48`).
-  - [ ] Implement **Two-Stage Soft + Hard Watchdog (`#54`):** 2s `machine.Timer` supervisor keeping the 8s silicon WDT fed for true deadlocks while enforcing a configurable soft timeout (`15s`/`30s`/`60s`/`OFF`) with a Windows-style **"Not Responding"** dialog (`[W] Wait`, `[ESC] Abort`, `[R] Reboot`).
+  - [x] Implement **Two-Stage Soft + Hard Watchdog (`#54`):** 2s `machine.Timer` supervisor keeping the 8s silicon WDT fed for true deadlocks while enforcing a configurable soft timeout (`15s`/`30s`/`60s`/`OFF`) with a Windows-style **"Not Responding"** dialog (`[W] Wait`, `[ESC] Abort`, `[R] Reboot`).
   - [x] Standardize the `F1`–`F5` (`F1:Help`, `F2:Thm`, `F3:Mode`, `F4:Cfg`, `F5:Notes`) & `Shift+F6`–`F10` (`WEB`, `COM`, `Mouse` hook, `Notes Edit`, `Self-Test`) function-key bar with an `[F1]` Help popup on Desktop Home & App Drawer (`#64`, `#66`).
   - [x] Always render all 3 status rows (`IP`/`Offline`, `SIG` + `GUI`/`TUI`, and `WEB ON`/`WEB OFF`) in `DesktopHome` `SYS TELEMETRY` (`#56`).
   - [ ] Evaluate pre-compiling `tools/shell.py` (or splitting command parser) if low-memory launch fragmentation is observed under heavy WebPortal + TLS workloads.

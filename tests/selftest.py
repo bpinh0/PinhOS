@@ -53,7 +53,7 @@ def _clear_main_refs():
 
 
 _KEEP_MODS = (
-    "boards", "boards.base", "boards.picocalc", "core", "core.config",
+    "boards", "boards.base", "boards.picocalc", "core.config",
     "tests", "tests.selftest", "picocalc", "picocalcdisplay", "vtterminal",
 )
 
@@ -171,6 +171,7 @@ def test_hal_init(root="/sd/pinhos"):
     gen_board.text("Generic SPI OK", 10, 10, 15)
     gen_board.deinit()
     del gen_board
+    sys.modules.pop("boards.generic_spi", None)
     gc.collect()
     board.ensure_serial_repl()
 
@@ -179,6 +180,7 @@ def test_hal_init(root="/sd/pinhos"):
         "main.py",
         "core/config.py",
         "core/logger.py",
+        "core/watchdog.py",
         "core/swap.py",
         "core/sandbox.py",
         "core/theme.py",
@@ -280,7 +282,39 @@ def test_swap_and_core(root="/sd/pinhos"):
     except Exception:
         pass
 
-    return "R/W + CRC + crash forensics OK"
+    # 6. Two-Stage Soft Watchdog (Wait / Abort / timeout config, without arming silicon WDT)
+    from core.watchdog import TwoStageWatchdog, SoftWatchdogAbort
+    from boards import get_board as _gb
+    _wb = _gb()
+    swdt = TwoStageWatchdog(hw_timeout_ms=8000, soft_timeout_s=15, board=_wb, logger=None, arm_hw=False)
+    _assert(swdt.get_soft_timeout_s() == 15, "Soft WDT initial timeout mismatch")
+    swdt.set_soft_timeout_s(30)
+    _assert(swdt.get_soft_timeout_s() == 30, "Soft WDT set_soft_timeout_s failed")
+    swdt.pause()
+    swdt.resume()
+    _wb.clear_input()
+    _wb.push_event({"type": "key", "key": "W", "modifiers": 0})
+    _assert(swdt.prompt_not_responding(30) == "wait", "Soft WDT [W] Wait failed")
+    _wb.clear_input()
+    _wb.push_event({"type": "key", "key": "ESC", "modifiers": 0})
+    aborted = False
+    try:
+        swdt.prompt_not_responding(30)
+    except SoftWatchdogAbort:
+        aborted = True
+    _assert(aborted, "Soft WDT [ESC] Abort did not raise SoftWatchdogAbort")
+    swdt.deinit()
+
+    # 7. MemGuard: reclaim() unloads stale transient modules; ensure_heap() pre-flight passes
+    from core.memutil import reclaim, ensure_heap
+    sys.modules["ui._menu_net"] = sys
+    sys.modules["ui._log_view"] = sys
+    reclaim(1, None, keep=("tests.selftest",))
+    _assert("ui._menu_net" not in sys.modules and "ui._log_view" not in sys.modules, "MemGuard reclaim() left stale modules")
+    mg_free, mg_ok = ensure_heap(None, min_free=1024, min_blk=1024, keep=("tests.selftest",))
+    _assert(mg_ok and mg_free > 1024, "MemGuard ensure_heap pre-flight failed")
+
+    return "R/W + CRC + crash + SoftWDT + MemGuard OK"
 
 
 def test_sandbox_isolation(root="/sd/pinhos"):
@@ -669,7 +703,8 @@ def test_dual_ui_engine(root="/sd/pinhos"):
     from boards import get_board
     from core.config import ConfigManager
     from core.theme import ThemeManager, CANONICAL_THEME_IDS
-    from ui import UIEngine, StatusBar, FooterBar, Panel, ListMenu, ProgressBar, Dialog, TextView
+    from ui.engine import UIEngine
+    from ui.widgets import StatusBar, FooterBar, Panel, ListMenu, ProgressBar, Dialog, TextView
 
     board = get_board()
     themes_dir = root.rstrip("/") + "/themes"
