@@ -36,7 +36,7 @@ MENU_TREE = {
     "system": ("System & Diag", (
         {"id": "tool:sysmon", "label": "System Monitor", "badge": "[S]"},
         {"id": "act:logs", "label": "System & Web Logs", "badge": "[L]"},
-        {"id": "act:selftest", "label": "Run Self-Test", "badge": "[F2]"},
+        {"id": "act:selftest", "label": "Run Self-Test", "badge": "[S-F10]"},
     )),
     "settings": ("Settings", (
         {"id": "cat:set_conn", "label": "Wi-Fi & Connectivity", "dyn": "conn_badge"},
@@ -63,6 +63,7 @@ MENU_TREE = {
     "set_time": ("Date, Time & NTP", (
         {"id": "ntp:sync", "label": "Sync NTP Clock Now", "badge": "[NTP]"},
         {"id": "ntp:auto", "label": "Auto-NTP on Wi-Fi", "dyn": "ntp_auto"},
+        {"id": "ntp:resync", "label": "NTP Resync Interval", "dyn": "ntp_resync"},
         {"id": "ntp:tz", "label": "Timezone Offset", "dyn": "tz_off"},
         {"id": "rtc:date", "label": "Set Date (Manual)", "dyn": "rtc_date"},
         {"id": "rtc:time", "label": "Set Time (Manual)", "dyn": "rtc_time"},
@@ -172,49 +173,7 @@ def show_info_dialog(board, ui, title, lines, kind="info"):
     board.clear_input()
 
 
-def show_screenshot_toast(board, ui, fb=None, path=None, timeout_ticks=30):
-    """
-    Brief confirmation toast Dialog shown after CTRL+P captures a clean 320x320 4-bit BMP.
-    Returns (fname, status_msg) or (None, None) on failure.
-    """
-    from ui.widgets import Dialog
-    p = path
-    if p is None and hasattr(board, "pop_pending_screenshot"):
-        p = board.pop_pending_screenshot()
-    if p is None and hasattr(board, "screenshot"):
-        p = board.screenshot()
-    if not p:
-        if fb is not None:
-            fb.update(status="Screenshot failed (check SD)", status_kind="err")
-        return None, None
-    fname = str(p).rstrip("/").rpartition("/")[2] or str(p)
-    smsg = "Saved: " + fname
-    if fb is not None:
-        fb.update(status=smsg, status_kind="ok")
-    if ui is not None:
-        dlg = Dialog(
-            18, 92, 284, 128,
-            title="SCREENSHOT SAVED",
-            lines=[
-                "320x320 4-bit Indexed BMP:",
-                "  " + fname[:36],
-                "Dir: /sd/pinhos/screenshots/",
-            ],
-            footer="[ANY KEY / 1s] Continue",
-            kind="ok",
-        )
-        ui.add_widget(dlg)
-        ui.render(force=False)
-        poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
-        for _ in range(int(timeout_ticks)):
-            if poll_fn and poll_fn() is not None:
-                break
-            _sleep_ms(30)
-        ui.remove_widget(dlg)
-        ui.mark_all_dirty(True)
-        board.clear_input()
-        ui.render(force=True)
-    return fname, smsg
+from ui.widgets import show_screenshot_toast, show_toast_dialog
 
 
 def open_log_viewer(board, ui, logger, kind="system"):
@@ -290,7 +249,7 @@ def _dyn_badge(tag, board, ui, manifest, cfg=None):
     if tag == "bat_pct":
         return "{}%".format(board.get_battery().get("percent", 0))
     if tag == "os_ver":
-        return "v" + str(manifest.get("version", "1.0.0-alpha.4.4"))[:11]
+        return "v" + str(manifest.get("version", "1.0.0-alpha.5.0"))[:11]
     if tag == "theme_name":
         return ui.theme.name.split()[0][:10] + " >"
     if tag == "ui_mode":
@@ -306,6 +265,11 @@ def _dyn_badge(tag, board, ui, manifest, cfg=None):
         return "XX!" if (len(cc) != 2 or cc == "XX") else cc
     if tag == "ntp_auto":
         return "ON" if (cfg.get("ntp_auto", True) if cfg else True) else "OFF"
+    if tag == "ntp_resync":
+        sec = int(cfg.get("ntp_resync_s", 3600) if cfg else 3600)
+        if sec <= 0:
+            return "OFF"
+        return "{}h".format(sec // 3600) if sec >= 3600 else "{}m".format(sec // 60)
     if tag == "tz_off":
         tz = int(cfg.get("tz_offset_h", 0) if cfg else 0)
         return "UTC{}{}".format("+" if tz >= 0 else "", tz)
@@ -641,7 +605,7 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                     ]); _sync(force=True)
                 elif aid == "info:version":
                     show_info_dialog(board, ui, "ABOUT PINHOS", [
-                        "OS Ver  : v{}".format(manifest.get("version", "1.0.0-alpha.4.4")),
+                        "OS Ver  : v{}".format(manifest.get("version", "1.0.0-alpha.5.0")),
                         "UF2 Fw  : {}".format(manifest.get("firmware_version", "?")),
                         "Arch/MCU: {} / {}".format(manifest.get("arch", "?"), manifest.get("mcu", "RP2350")),
                         "Build   : {}".format(manifest.get("build_id", "?")),
@@ -740,6 +704,14 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                     if cfg:
                         cfg.set("ntp_auto", nxt, save_now=True)
                     status_msg, status_kind = "Auto-NTP: " + ("ON" if nxt else "OFF"), "ok"; _sync(force=True)
+                elif aid == "ntp:resync":
+                    opts = (0, 1800, 3600, 10800, 21600)
+                    cur = int(cfg.get("ntp_resync_s", 3600) if cfg else 3600)
+                    nxt = opts[(opts.index(cur) + 1) % len(opts)] if cur in opts else 3600
+                    if cfg:
+                        cfg.set("ntp_resync_s", nxt, save_now=True)
+                    lbl = "OFF" if nxt <= 0 else ("{}h".format(nxt // 3600) if nxt >= 3600 else "{}m".format(nxt // 60))
+                    status_msg, status_kind = "NTP Resync: " + lbl, "ok"; _sync(force=True)
                 elif aid == "ntp:tz":
                     cur = int(cfg.get("tz_offset_h", 0) if cfg else 0)
                     nxt = -12 if cur >= 14 else (cur + 1)

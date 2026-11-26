@@ -1,0 +1,430 @@
+# PinhOS Phase 5 — Compact Multi-Font 6x8 Bitmap Engine (ui/fonts.py)
+# Bundles three 570 B (95 printable ASCII chars x 6 column-major bytes) 6x8 fonts
+# ("default", "bold", "retro") plus optional 570 B /sd/pinhos/fonts/<name>.bin loading
+# with zero per-frame heap allocations and automatic safe fallback.
+# Zero hardcoded GPIO pins; zero full-screen framebuffers.
+
+import os
+from core.config import PINHOS_ROOT
+
+FONTS_DIR = PINHOS_ROOT + "/fonts"
+FONT_BYTES = 570  # 95 printable ASCII chars (32..126) x 6 bytes per 6x8 cell
+
+# Standard 6x8 font ("default"): 5x7 classic terminal glyphs + 1px spacing column (570 B)
+FONT_DEFAULT = (
+    b"\x00\x00\x00\x00\x00\x00"  # 32 ' '
+    b"\x00\x00\x5f\x00\x00\x00"  # 33 '!'
+    b"\x00\x07\x00\x07\x00\x00"  # 34 '"'
+    b"\x14\x7f\x14\x7f\x14\x00"  # 35 '#'
+    b"\x24\x2a\x7f\x2a\x12\x00"  # 36 '$'
+    b"\x23\x13\x08\x64\x62\x00"  # 37 '%'
+    b"\x36\x49\x55\x22\x50\x00"  # 38 '&'
+    b"\x00\x05\x03\x00\x00\x00"  # 39 "'"
+    b"\x00\x1c\x22\x41\x00\x00"  # 40 '('
+    b"\x00\x41\x22\x1c\x00\x00"  # 41 ')'
+    b"\x14\x08\x3e\x08\x14\x00"  # 42 '*'
+    b"\x08\x08\x3e\x08\x08\x00"  # 43 '+'
+    b"\x00\x50\x30\x00\x00\x00"  # 44 ','
+    b"\x08\x08\x08\x08\x08\x00"  # 45 '-'
+    b"\x00\x60\x60\x00\x00\x00"  # 46 '.'
+    b"\x20\x10\x08\x04\x02\x00"  # 47 '/'
+    b"\x3e\x51\x49\x45\x3e\x00"  # 48 '0'
+    b"\x00\x42\x7f\x40\x00\x00"  # 49 '1'
+    b"\x42\x61\x51\x49\x46\x00"  # 50 '2'
+    b"\x21\x41\x45\x4b\x31\x00"  # 51 '3'
+    b"\x18\x14\x12\x7f\x10\x00"  # 52 '4'
+    b"\x27\x45\x45\x45\x39\x00"  # 53 '5'
+    b"\x3c\x4a\x49\x49\x30\x00"  # 54 '6'
+    b"\x01\x71\x09\x05\x03\x00"  # 55 '7'
+    b"\x36\x49\x49\x49\x36\x00"  # 56 '8'
+    b"\x06\x49\x49\x29\x1e\x00"  # 57 '9'
+    b"\x00\x36\x36\x00\x00\x00"  # 58 ':'
+    b"\x00\x56\x36\x00\x00\x00"  # 59 ';'
+    b"\x08\x14\x22\x41\x00\x00"  # 60 '<'
+    b"\x14\x14\x14\x14\x14\x00"  # 61 '='
+    b"\x00\x41\x22\x14\x08\x00"  # 62 '>'
+    b"\x02\x01\x51\x09\x06\x00"  # 63 '?'
+    b"\x32\x49\x79\x41\x3e\x00"  # 64 '@'
+    b"\x7e\x11\x11\x11\x7e\x00"  # 65 'A'
+    b"\x7f\x49\x49\x49\x36\x00"  # 66 'B'
+    b"\x3e\x41\x41\x41\x22\x00"  # 67 'C'
+    b"\x7f\x41\x41\x22\x1c\x00"  # 68 'D'
+    b"\x7f\x49\x49\x49\x41\x00"  # 69 'E'
+    b"\x7f\x09\x09\x09\x01\x00"  # 70 'F'
+    b"\x3e\x41\x49\x49\x7a\x00"  # 71 'G'
+    b"\x7f\x08\x08\x08\x7f\x00"  # 72 'H'
+    b"\x00\x41\x7f\x41\x00\x00"  # 73 'I'
+    b"\x20\x40\x41\x3f\x01\x00"  # 74 'J'
+    b"\x7f\x08\x14\x22\x41\x00"  # 75 'K'
+    b"\x7f\x40\x40\x40\x40\x00"  # 76 'L'
+    b"\x7f\x02\x0c\x02\x7f\x00"  # 77 'M'
+    b"\x7f\x04\x08\x10\x7f\x00"  # 78 'N'
+    b"\x3e\x41\x41\x41\x3e\x00"  # 79 'O'
+    b"\x7f\x09\x09\x09\x06\x00"  # 80 'P'
+    b"\x3e\x41\x51\x21\x5e\x00"  # 81 'Q'
+    b"\x7f\x09\x19\x29\x46\x00"  # 82 'R'
+    b"\x46\x49\x49\x49\x31\x00"  # 83 'S'
+    b"\x01\x01\x7f\x01\x01\x00"  # 84 'T'
+    b"\x3f\x40\x40\x40\x3f\x00"  # 85 'U'
+    b"\x1f\x20\x40\x20\x1f\x00"  # 86 'V'
+    b"\x3f\x40\x38\x40\x3f\x00"  # 87 'W'
+    b"\x63\x14\x08\x14\x63\x00"  # 88 'X'
+    b"\x07\x08\x70\x08\x07\x00"  # 89 'Y'
+    b"\x61\x51\x49\x45\x43\x00"  # 90 'Z'
+    b"\x00\x7f\x41\x41\x00\x00"  # 91 '['
+    b"\x02\x04\x08\x10\x20\x00"  # 92 '\\'
+    b"\x00\x41\x41\x7f\x00\x00"  # 93 ']'
+    b"\x04\x02\x01\x02\x04\x00"  # 94 '^'
+    b"\x40\x40\x40\x40\x40\x00"  # 95 '_'
+    b"\x00\x01\x02\x04\x00\x00"  # 96 '`'
+    b"\x20\x54\x54\x54\x78\x00"  # 97 'a'
+    b"\x7f\x48\x44\x44\x38\x00"  # 98 'b'
+    b"\x38\x44\x44\x44\x20\x00"  # 99 'c'
+    b"\x38\x44\x44\x48\x7f\x00"  # 100 'd'
+    b"\x38\x54\x54\x54\x18\x00"  # 101 'e'
+    b"\x08\x7e\x09\x01\x02\x00"  # 102 'f'
+    b"\x0c\x52\x52\x52\x3e\x00"  # 103 'g'
+    b"\x7f\x08\x04\x04\x78\x00"  # 104 'h'
+    b"\x00\x44\x7d\x40\x00\x00"  # 105 'i'
+    b"\x20\x40\x44\x3d\x00\x00"  # 106 'j'
+    b"\x7f\x10\x28\x44\x00\x00"  # 107 'k'
+    b"\x00\x41\x7f\x40\x00\x00"  # 108 'l'
+    b"\x7c\x04\x18\x04\x78\x00"  # 109 'm'
+    b"\x7c\x08\x04\x04\x78\x00"  # 110 'n'
+    b"\x38\x44\x44\x44\x38\x00"  # 111 'o'
+    b"\x7c\x14\x14\x14\x08\x00"  # 112 'p'
+    b"\x08\x14\x14\x18\x7c\x00"  # 113 'q'
+    b"\x7c\x08\x04\x04\x08\x00"  # 114 'r'
+    b"\x48\x54\x54\x54\x20\x00"  # 115 's'
+    b"\x04\x3f\x44\x40\x20\x00"  # 116 't'
+    b"\x3c\x40\x40\x20\x7c\x00"  # 117 'u'
+    b"\x1c\x20\x40\x20\x1c\x00"  # 118 'v'
+    b"\x3c\x40\x30\x40\x3c\x00"  # 119 'w'
+    b"\x44\x28\x10\x28\x44\x00"  # 120 'x'
+    b"\x0c\x50\x50\x50\x3c\x00"  # 121 'y'
+    b"\x44\x64\x54\x4c\x44\x00"  # 122 'z'
+    b"\x00\x08\x36\x41\x00\x00"  # 123 '{'
+    b"\x00\x00\x7f\x00\x00\x00"  # 124 '|'
+    b"\x00\x41\x36\x08\x00\x00"  # 125 '}'
+    b"\x10\x08\x08\x10\x08\x00"  # 126 '~'
+)
+
+# High-contrast bold 6x8 font ("bold"): 2px primary vertical stems with open counters + 1px gap (570 B)
+FONT_BOLD = (
+    b"\x00\x00\x00\x00\x00\x00"  # 32 ' '
+    b"\x00\x5f\x5f\x00\x00\x00"  # 33 '!'
+    b"\x07\x07\x00\x07\x07\x00"  # 34 '"'
+    b"\x14\x7f\x14\x7f\x14\x00"  # 35 '#'
+    b"\x24\x2e\x7f\x2a\x12\x00"  # 36 '$'
+    b"\x63\x13\x08\x64\x63\x00"  # 37 '%'
+    b"\x36\x7f\x55\x22\x50\x00"  # 38 '&'
+    b"\x00\x07\x07\x00\x00\x00"  # 39 "'"
+    b"\x00\x1c\x3e\x63\x41\x00"  # 40 '('
+    b"\x41\x63\x3e\x1c\x00\x00"  # 41 ')'
+    b"\x14\x08\x3e\x08\x14\x00"  # 42 '*'
+    b"\x08\x1c\x3e\x1c\x08\x00"  # 43 '+'
+    b"\x00\x50\x70\x30\x00\x00"  # 44 ','
+    b"\x18\x18\x18\x18\x18\x00"  # 45 '-'
+    b"\x00\x60\x60\x60\x00\x00"  # 46 '.'
+    b"\x60\x30\x18\x0c\x06\x00"  # 47 '/'
+    b"\x3e\x7f\x41\x41\x3e\x00"  # 48 '0'
+    b"\x00\x42\x7f\x7f\x40\x00"  # 49 '1'
+    b"\x62\x71\x51\x49\x46\x00"  # 50 '2'
+    b"\x21\x41\x49\x7f\x36\x00"  # 51 '3'
+    b"\x18\x1c\x12\x7f\x7f\x00"  # 52 '4'
+    b"\x27\x47\x45\x7d\x39\x00"  # 53 '5'
+    b"\x3c\x7e\x49\x49\x30\x00"  # 54 '6'
+    b"\x01\x71\x79\x0d\x07\x00"  # 55 '7'
+    b"\x36\x7f\x49\x49\x36\x00"  # 56 '8'
+    b"\x06\x4f\x49\x7f\x3e\x00"  # 57 '9'
+    b"\x00\x36\x36\x36\x00\x00"  # 58 ':'
+    b"\x00\x56\x76\x36\x00\x00"  # 59 ';'
+    b"\x08\x1c\x36\x63\x41\x00"  # 60 '<'
+    b"\x14\x14\x14\x14\x14\x00"  # 61 '='
+    b"\x41\x63\x36\x1c\x08\x00"  # 62 '>'
+    b"\x02\x03\x51\x09\x06\x00"  # 63 '?'
+    b"\x3e\x7f\x59\x51\x3e\x00"  # 64 '@'
+    b"\x7e\x7f\x11\x11\x7e\x00"  # 65 'A'
+    b"\x7f\x7f\x49\x49\x36\x00"  # 66 'B'
+    b"\x3e\x7f\x41\x41\x22\x00"  # 67 'C'
+    b"\x7f\x7f\x41\x63\x3e\x00"  # 68 'D'
+    b"\x7f\x7f\x49\x49\x41\x00"  # 69 'E'
+    b"\x7f\x7f\x09\x09\x01\x00"  # 70 'F'
+    b"\x3e\x7f\x41\x49\x7a\x00"  # 71 'G'
+    b"\x7f\x7f\x08\x08\x7f\x00"  # 72 'H'
+    b"\x41\x7f\x7f\x41\x00\x00"  # 73 'I'
+    b"\x20\x60\x41\x7f\x3f\x00"  # 74 'J'
+    b"\x7f\x7f\x1c\x36\x63\x00"  # 75 'K'
+    b"\x7f\x7f\x40\x40\x40\x00"  # 76 'L'
+    b"\x7f\x7f\x0e\x02\x7f\x00"  # 77 'M'
+    b"\x7f\x7f\x0c\x18\x7f\x00"  # 78 'N'
+    b"\x3e\x7f\x41\x41\x3e\x00"  # 79 'O'
+    b"\x7f\x7f\x09\x09\x06\x00"  # 80 'P'
+    b"\x3e\x7f\x51\x21\x5e\x00"  # 81 'Q'
+    b"\x7f\x7f\x19\x29\x46\x00"  # 82 'R'
+    b"\x26\x6f\x49\x79\x32\x00"  # 83 'S'
+    b"\x01\x7f\x7f\x01\x01\x00"  # 84 'T'
+    b"\x3f\x7f\x40\x40\x3f\x00"  # 85 'U'
+    b"\x1f\x3f\x60\x20\x1f\x00"  # 86 'V'
+    b"\x7f\x40\x38\x40\x7f\x00"  # 87 'W'
+    b"\x63\x77\x1c\x77\x63\x00"  # 88 'X'
+    b"\x07\x0f\x78\x0f\x07\x00"  # 89 'Y'
+    b"\x61\x71\x59\x4d\x47\x00"  # 90 'Z'
+    b"\x00\x7f\x7f\x41\x41\x00"  # 91 '['
+    b"\x06\x0c\x18\x30\x60\x00"  # 92 '\\'
+    b"\x41\x41\x7f\x7f\x00\x00"  # 93 ']'
+    b"\x04\x06\x03\x06\x04\x00"  # 94 '^'
+    b"\x40\x40\x40\x40\x40\x00"  # 95 '_'
+    b"\x00\x03\x07\x04\x00\x00"  # 96 '`'
+    b"\x20\x74\x54\x7c\x78\x00"  # 97 'a'
+    b"\x7f\x7f\x44\x44\x38\x00"  # 98 'b'
+    b"\x38\x7c\x44\x44\x28\x00"  # 99 'c'
+    b"\x38\x44\x44\x7f\x7f\x00"  # 100 'd'
+    b"\x38\x7c\x54\x54\x18\x00"  # 101 'e'
+    b"\x08\x7e\x7f\x09\x02\x00"  # 102 'f'
+    b"\x0c\x5e\x52\x7e\x3e\x00"  # 103 'g'
+    b"\x7f\x7f\x04\x04\x78\x00"  # 104 'h'
+    b"\x00\x44\x7d\x7d\x40\x00"  # 105 'i'
+    b"\x20\x60\x44\x7d\x3d\x00"  # 106 'j'
+    b"\x7f\x7f\x10\x38\x6c\x00"  # 107 'k'
+    b"\x00\x41\x7f\x7f\x40\x00"  # 108 'l'
+    b"\x7c\x7c\x18\x04\x7c\x00"  # 109 'm'
+    b"\x7c\x7c\x04\x04\x78\x00"  # 110 'n'
+    b"\x38\x7c\x44\x44\x38\x00"  # 111 'o'
+    b"\x7c\x7c\x14\x14\x08\x00"  # 112 'p'
+    b"\x08\x14\x14\x7c\x7c\x00"  # 113 'q'
+    b"\x7c\x7c\x08\x04\x08\x00"  # 114 'r'
+    b"\x48\x5c\x54\x74\x20\x00"  # 115 's'
+    b"\x04\x3f\x7f\x44\x20\x00"  # 116 't'
+    b"\x3c\x7c\x40\x40\x7c\x00"  # 117 'u'
+    b"\x1c\x3c\x60\x20\x1c\x00"  # 118 'v'
+    b"\x7c\x40\x38\x40\x7c\x00"  # 119 'w'
+    b"\x44\x6c\x38\x6c\x44\x00"  # 120 'x'
+    b"\x0c\x5c\x50\x7c\x3c\x00"  # 121 'y'
+    b"\x44\x64\x74\x5c\x4c\x00"  # 122 'z'
+    b"\x08\x08\x3e\x77\x41\x00"  # 123 '{'
+    b"\x00\x00\x7f\x7f\x00\x00"  # 124 '|'
+    b"\x41\x77\x3e\x08\x08\x00"  # 125 '}'
+    b"\x10\x18\x08\x18\x08\x00"  # 126 '~'
+)
+
+# Cyberdeck / CRT squared 6x8 font ("retro"): geometric corners, dotted '0', serifs (570 B)
+FONT_RETRO = (
+    b"\x00\x00\x00\x00\x00\x00"  # 32 ' '
+    b"\x00\x06\x5f\x06\x00\x00"  # 33 '!'
+    b"\x00\x07\x00\x07\x00\x00"  # 34 '"'
+    b"\x24\x7e\x24\x7e\x24\x00"  # 35 '#'
+    b"\x2e\x2a\x7f\x2a\x3a\x00"  # 36 '$'
+    b"\x46\x26\x10\x32\x31\x00"  # 37 '%'
+    b"\x36\x49\x56\x20\x50\x00"  # 38 '&'
+    b"\x00\x00\x07\x00\x00\x00"  # 39 "'"
+    b"\x00\x3e\x41\x41\x00\x00"  # 40 '('
+    b"\x00\x41\x41\x3e\x00\x00"  # 41 ')'
+    b"\x2a\x1c\x3e\x1c\x2a\x00"  # 42 '*'
+    b"\x08\x08\x3e\x08\x08\x00"  # 43 '+'
+    b"\x00\x40\x60\x00\x00\x00"  # 44 ','
+    b"\x08\x08\x08\x08\x08\x00"  # 45 '-'
+    b"\x00\x60\x60\x00\x00\x00"  # 46 '.'
+    b"\x20\x10\x08\x04\x02\x00"  # 47 '/'
+    b"\x7f\x41\x49\x41\x7f\x00"  # 48 '0' (dotted geometric zero)
+    b"\x44\x42\x7f\x40\x40\x00"  # 49 '1'
+    b"\x79\x49\x49\x49\x4f\x00"  # 50 '2'
+    b"\x41\x49\x49\x49\x7f\x00"  # 51 '3'
+    b"\x0f\x08\x08\x7f\x08\x00"  # 52 '4'
+    b"\x4f\x49\x49\x49\x79\x00"  # 53 '5'
+    b"\x7f\x49\x49\x49\x79\x00"  # 54 '6'
+    b"\x03\x01\x71\x09\x07\x00"  # 55 '7'
+    b"\x7f\x49\x49\x49\x7f\x00"  # 56 '8'
+    b"\x4f\x49\x49\x49\x7f\x00"  # 57 '9'
+    b"\x00\x24\x24\x00\x00\x00"  # 58 ':'
+    b"\x00\x44\x24\x00\x00\x00"  # 59 ';'
+    b"\x08\x1c\x22\x41\x00\x00"  # 60 '<'
+    b"\x14\x14\x14\x14\x14\x00"  # 61 '='
+    b"\x00\x41\x22\x1c\x08\x00"  # 62 '>'
+    b"\x03\x01\x59\x09\x0f\x00"  # 63 '?'
+    b"\x7f\x41\x5d\x55\x5f\x00"  # 64 '@'
+    b"\x7f\x09\x09\x09\x7f\x00"  # 65 'A'
+    b"\x7f\x49\x49\x49\x3f\x00"  # 66 'B'
+    b"\x7f\x41\x41\x41\x63\x00"  # 67 'C'
+    b"\x7f\x41\x41\x41\x3e\x00"  # 68 'D'
+    b"\x7f\x49\x49\x41\x41\x00"  # 69 'E'
+    b"\x7f\x09\x09\x01\x01\x00"  # 70 'F'
+    b"\x7f\x41\x49\x49\x79\x00"  # 71 'G'
+    b"\x7f\x08\x08\x08\x7f\x00"  # 72 'H'
+    b"\x41\x41\x7f\x41\x41\x00"  # 73 'I'
+    b"\x60\x40\x41\x7f\x01\x00"  # 74 'J'
+    b"\x7f\x08\x08\x14\x63\x00"  # 75 'K'
+    b"\x7f\x40\x40\x40\x60\x00"  # 76 'L'
+    b"\x7f\x02\x0c\x02\x7f\x00"  # 77 'M'
+    b"\x7f\x06\x08\x30\x7f\x00"  # 78 'N'
+    b"\x7f\x41\x41\x41\x7f\x00"  # 79 'O'
+    b"\x7f\x09\x09\x09\x0f\x00"  # 80 'P'
+    b"\x3f\x21\x31\x21\x7f\x00"  # 81 'Q'
+    b"\x7f\x09\x19\x29\x4f\x00"  # 82 'R'
+    b"\x4f\x49\x49\x49\x79\x00"  # 83 'S'
+    b"\x03\x01\x7f\x01\x03\x00"  # 84 'T'
+    b"\x7f\x40\x40\x40\x7f\x00"  # 85 'U'
+    b"\x3f\x20\x40\x20\x3f\x00"  # 86 'V'
+    b"\x7f\x40\x38\x40\x7f\x00"  # 87 'W'
+    b"\x63\x14\x08\x14\x63\x00"  # 88 'X'
+    b"\x0f\x08\x70\x08\x0f\x00"  # 89 'Y'
+    b"\x63\x51\x49\x45\x63\x00"  # 90 'Z'
+    b"\x00\x7f\x41\x41\x00\x00"  # 91 '['
+    b"\x04\x08\x10\x20\x40\x00"  # 92 '\\'
+    b"\x00\x41\x41\x7f\x00\x00"  # 93 ']'
+    b"\x04\x02\x01\x02\x04\x00"  # 94 '^'
+    b"\x40\x40\x40\x40\x40\x00"  # 95 '_'
+    b"\x00\x01\x02\x00\x00\x00"  # 96 '`'
+    b"\x74\x54\x54\x54\x7c\x00"  # 97 'a'
+    b"\x7f\x44\x44\x44\x7c\x00"  # 98 'b'
+    b"\x7c\x44\x44\x44\x64\x00"  # 99 'c'
+    b"\x7c\x44\x44\x44\x7f\x00"  # 100 'd'
+    b"\x7c\x54\x54\x54\x5c\x00"  # 101 'e'
+    b"\x08\x7f\x09\x01\x03\x00"  # 102 'f'
+    b"\x1c\x54\x54\x54\x7c\x00"  # 103 'g'
+    b"\x7f\x04\x04\x04\x7c\x00"  # 104 'h'
+    b"\x44\x44\x7d\x40\x40\x00"  # 105 'i'
+    b"\x40\x40\x44\x7d\x00\x00"  # 106 'j'
+    b"\x7f\x10\x10\x28\x44\x00"  # 107 'k'
+    b"\x41\x41\x7f\x40\x40\x00"  # 108 'l'
+    b"\x7c\x04\x78\x04\x7c\x00"  # 109 'm'
+    b"\x7c\x04\x04\x04\x7c\x00"  # 110 'n'
+    b"\x7c\x44\x44\x44\x7c\x00"  # 111 'o'
+    b"\x7c\x14\x14\x14\x1c\x00"  # 112 'p'
+    b"\x1c\x14\x14\x14\x7c\x00"  # 113 'q'
+    b"\x7c\x04\x04\x04\x0c\x00"  # 114 'r'
+    b"\x5c\x54\x54\x54\x74\x00"  # 115 's'
+    b"\x04\x7f\x44\x40\x60\x00"  # 116 't'
+    b"\x7c\x40\x40\x40\x7c\x00"  # 117 'u'
+    b"\x3c\x20\x40\x20\x3c\x00"  # 118 'v'
+    b"\x7c\x40\x38\x40\x7c\x00"  # 119 'w'
+    b"\x44\x28\x10\x28\x44\x00"  # 120 'x'
+    b"\x1c\x50\x50\x50\x7c\x00"  # 121 'y'
+    b"\x64\x54\x54\x4c\x64\x00"  # 122 'z'
+    b"\x08\x08\x7f\x41\x41\x00"  # 123 '{'
+    b"\x00\x00\x7f\x00\x00\x00"  # 124 '|'
+    b"\x41\x41\x7f\x08\x08\x00"  # 125 '}'
+    b"\x10\x08\x10\x20\x10\x00"  # 126 '~'
+)
+
+BUILTIN_FONTS = {
+    "default": FONT_DEFAULT,
+    "bold": FONT_BOLD,
+    "retro": FONT_RETRO,
+}
+
+# Single reusable 570 B buffer for custom /sd/pinhos/fonts/<name>.bin sheets (zero heap churn)
+_custom_buf = None
+_custom_name = ""
+
+
+def _sanitize_name(name):
+    s = str(name or "default").strip().lower()
+    if s.endswith(".bin"):
+        s = s[:-4]
+    out = []
+    for ch in s:
+        if ("a" <= ch <= "z") or ("0" <= ch <= "9") or ch in ("_", "-"):
+            out.append(ch)
+    return "".join(out) or "default"
+
+
+def get_font(name="default", fonts_dir=None):
+    """
+    Resolve a 6x8 bitmap font by name ("default", "bold", "retro", or <fonts_dir>/<name>.bin).
+    Returns (memoryview_570b, resolved_name), safely falling back to "default" if missing/invalid.
+    """
+    global _custom_buf, _custom_name
+    nm = _sanitize_name(name)
+    if nm in BUILTIN_FONTS:
+        return memoryview(BUILTIN_FONTS[nm]), nm
+
+    fdir = (fonts_dir or FONTS_DIR).rstrip("/")
+    path = fdir + "/" + nm + ".bin"
+    if _custom_name == nm and _custom_buf is not None:
+        return memoryview(_custom_buf), nm
+
+    try:
+        st = os.stat(path)
+        if int(st[6]) != FONT_BYTES:
+            return memoryview(FONT_DEFAULT), "default"
+        if _custom_buf is None:
+            _custom_buf = bytearray(FONT_BYTES)
+        with open(path, "rb") as f:
+            n = f.readinto(_custom_buf)
+        if n != FONT_BYTES:
+            _custom_name = ""
+            return memoryview(FONT_DEFAULT), "default"
+        _custom_name = nm
+        return memoryview(_custom_buf), nm
+    except Exception:
+        return memoryview(FONT_DEFAULT), "default"
+
+
+def list_fonts(fonts_dir=None):
+    """List built-in font IDs plus any valid 570 B .bin fonts in /sd/pinhos/fonts/."""
+    names = ["default", "bold", "retro"]
+    fdir = (fonts_dir or FONTS_DIR).rstrip("/")
+    try:
+        for fn in sorted(os.listdir(fdir)):
+            if fn.endswith(".bin") and not fn.startswith("."):
+                stem = _sanitize_name(fn[:-4])
+                if stem and stem not in names:
+                    try:
+                        if int(os.stat(fdir + "/" + fn)[6]) == FONT_BYTES:
+                            names.append(stem)
+                    except OSError:
+                        pass
+    except OSError:
+        pass
+    return names
+
+
+def draw_text_6x8(target, text, x, y, color, font_mv):
+    """
+    Render `text` at `(x, y)` using a 570-byte column-major 6x8 glyph memoryview.
+    Uses zero per-frame allocations and clipped C vline/pixel primitives.
+    """
+    if not text or font_mv is None:
+        return
+    px = target.pixel
+    vl = target.vline
+    cx = int(x)
+    cy = int(y)
+    col = int(color)
+    for ch in str(text):
+        o = ord(ch) - 32
+        if o < 0 or o >= 95:
+            o = 31  # '?'
+        if o == 0:
+            cx += 6
+            continue
+        base = o * 6
+        for dx in range(6):
+            b = font_mv[base + dx]
+            if b:
+                xx = cx + dx
+                if b == 0x7F:
+                    vl(xx, cy, 7, col)
+                elif b == 0x3E:
+                    vl(xx, cy + 1, 5, col)
+                elif b == 0x7E:
+                    vl(xx, cy + 1, 6, col)
+                else:
+                    if b & 1:
+                        px(xx, cy, col)
+                    if b & 2:
+                        px(xx, cy + 1, col)
+                    if b & 4:
+                        px(xx, cy + 2, col)
+                    if b & 8:
+                        px(xx, cy + 3, col)
+                    if b & 16:
+                        px(xx, cy + 4, col)
+                    if b & 32:
+                        px(xx, cy + 5, col)
+                    if b & 64:
+                        px(xx, cy + 6, col)
+                    if b & 128:
+                        px(xx, cy + 7, col)
+        cx += 6

@@ -252,10 +252,24 @@ class Logger:
 
     def read_tail(self, kind="system", max_lines=60, max_bytes=4096):
         """
-        Memory-safe tail reader for system.log or crash.log.
+        Memory-safe tail reader for system.log, crash.log, or wdt.log.
         Reads at most max_bytes from the end of the file to protect RP2350 SRAM.
         """
-        path = self.crash_log_path if kind == "crash" else self.sys_log_path
+        if kind == "crash":
+            path = self.crash_log_path
+        elif kind == "wdt":
+            path = self.wdt_log_path
+            try:
+                os.stat(path)
+            except Exception:
+                alt = PINHOS_ROOT + "/wdt.log"
+                try:
+                    os.stat(alt)
+                    path = alt
+                except Exception:
+                    pass
+        else:
+            path = self.sys_log_path
         try:
             st = os.stat(path)
             size = int(st[6])
@@ -281,6 +295,8 @@ class Logger:
             self._ring.clear()
         if kind in ("all", "crash"):
             targets.append(self.crash_log_path)
+        if kind in ("all", "wdt"):
+            targets.append(self.wdt_log_path)
         for p in targets:
             try:
                 with open(p, "w") as f:

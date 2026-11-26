@@ -1,4 +1,4 @@
-# PinhOS Phase 4 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Cooperative uasyncio WebPortal HTTP Server (web/server.py)
+# PinhOS Phase 4 ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Cooperative uasyncio WebPortal HTTP Server (web/server.py)
 # Strict RP2350 SRAM discipline: max_conns=3, 5s timeout, <=1KB chunked SD streaming,
 # PINHOS_ROOT path-traversal guard, board.* HAL routing, gc.collect() per request.
 
@@ -31,6 +31,7 @@ _MIME = {
     ".png": "image/png",
     ".svg": "image/svg+xml",
     ".ico": "image/x-icon",
+    ".bin": "application/octet-stream",
 }
 
 _STAT = {
@@ -40,8 +41,8 @@ _STAT = {
 }
 
 WEB_LOG_MAX = 16384
-_WRITE_PREFIXES = ("apps/", "tools/", "themes/")
-_WRITE_EXACT = ("apps", "tools", "themes", "notes.txt", "config.json")
+_WRITE_PREFIXES = ("apps/", "tools/", "themes/", "fonts/", "banners/")
+_WRITE_EXACT = ("apps", "tools", "themes", "fonts", "banners", "notes.txt", "config.json")
 _READ_DENY_EXACT = ("wifi.json", "boot_state.json", "rtc_state.json", "logs/breadcrumb.json", ".swap")
 _READ_DENY_PREFIXES = (".swap/",)
 _AUTH_MAX_FAILS = 5
@@ -680,6 +681,11 @@ class WebServer:
             return
         if m == "POST" and rt == "/api/reboot":
             await self._drain(r, clen, extra)
+            try:
+                from core.config import save_rtc_state
+                save_rtc_state(self.board)
+            except Exception:
+                pass
             self.pending_reboot = True
             await self._json(w, 200, {"ok": True, "rebooting": True})
             return
@@ -720,7 +726,7 @@ class WebServer:
             "temp_c": b.get_cpu_temp_c() if (b and hasattr(b, "get_cpu_temp_c")) else 28.0,
             "battery": b.get_battery() if (b and hasattr(b, "get_battery")) else {"percent": 100, "voltage_mv": 4200, "charging": False},
             "wifi": wf,
-            "version": str(self.manifest.get("version", "1.0.0-alpha.4.4")),
+            "version": str(self.manifest.get("version", "1.0.0-alpha.5.0")),
             "firmware_version": str(self.manifest.get("firmware_version", "")),
             "board": str(b.id) if b else "unknown",
             "root": self.root,
@@ -920,12 +926,17 @@ class WebServer:
 
     async def _api_key(self, r, w, q, clen, extra=b""):
         b = await self._read_json(r, clen, extra)
-        key = q.get("k") or (b.get("key") if isinstance(b, dict) else "")
+        key = str(q.get("k") or (b.get("key") if isinstance(b, dict) else "")).strip()
         if not key or self.board is None or not hasattr(self.board, "push_event"):
             await self._err(w, 400, "Invalid key or HAL")
             return
-        self.board.push_event({"type": "key", "key": str(key)[:12], "modifiers": 0})
-        await self._json(w, 200, {"ok": True, "key": str(key)[:12]})
+        mods = int(b.get("modifiers", 0)) if isinstance(b, dict) and str(b.get("modifiers", "0")).isdigit() else 0
+        ku = key.upper()
+        if ku.startswith("SHIFT+") or ku.startswith("S-"):
+            key = key.split("+", 1)[1] if "+" in key else key[2:]
+            mods |= 1
+        self.board.push_event({"type": "key", "key": str(key)[:12], "modifiers": mods})
+        await self._json(w, 200, {"ok": True, "key": str(key)[:12], "modifiers": mods})
 
     async def _api_weblog(self, w):
         lines = []

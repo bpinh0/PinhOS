@@ -565,6 +565,8 @@ class Shell:
         lg = self.logger
         if kind == "crash":
             return lg.crash_log_path if lg else HOME + "/logs/crash.log"
+        if kind == "wdt":
+            return lg.wdt_log_path if lg else HOME + "/logs/wdt.log"
         return lg.sys_log_path if lg else HOME + "/logs/system.log"
 
 

@@ -1,6 +1,7 @@
 # PinhOS — On-Demand Log File Picker & Scrollable Viewer (ui/_log_view.py)
-# Lists /sd/pinhos/logs/*.log (system.log, crash.log, web.log, ...) in a ListMenu,
-# then opens the selected log in a scrollable Dual-UI TextView. Purged on exit.
+# Lists /sd/pinhos/logs/*.log (system.log, crash.log, wdt.log, web.log, ...) and
+# optional /sd/pinhos/wdt.log in a ListMenu, then streams the tail in <=1KB chunks
+# into a scrollable Dual-UI TextView. Purged cleanly on exit (#48).
 
 import os
 import gc
@@ -20,37 +21,74 @@ def _fmt_sz(n):
 
 
 def _list_logs(log_dir):
-    known = ["system.log", "crash.log", "wdt.log", "web.log"]
+    known = [
+        ("system.log", "system.log"),
+        ("crash.log", "crash.log"),
+        ("wdt.log", "wdt.log (Watchdog)"),
+        ("web.log", "web.log"),
+    ]
+    known_names = [k[0] for k in known]
     extra = []
     try:
         for fn in sorted(os.listdir(log_dir)):
-            if fn.endswith(".log") and fn not in known:
-                extra.append(fn)
+            if fn.endswith(".log") and fn not in known_names:
+                extra.append((fn, fn))
     except OSError:
         pass
+
     items = []
-    for fn in known + extra:
+    for fn, lbl in known + extra:
         full = log_dir + "/" + fn
+        sz = -1
         try:
             sz = int(os.stat(full)[6])
-            badge = _fmt_sz(sz) if sz > 0 else "empty"
         except OSError:
-            badge = "none"
-        items.append({"id": full, "name": fn, "label": fn, "badge": badge})
+            if fn == "wdt.log":
+                root_wdt = PINHOS_ROOT.rstrip("/") + "/wdt.log"
+                try:
+                    sz = int(os.stat(root_wdt)[6])
+                    full = root_wdt
+                except OSError:
+                    sz = -1
+        else:
+            if fn == "wdt.log" and sz == 0:
+                root_wdt = PINHOS_ROOT.rstrip("/") + "/wdt.log"
+                try:
+                    rsz = int(os.stat(root_wdt)[6])
+                    if rsz > 0:
+                        sz = rsz
+                        full = root_wdt
+                except OSError:
+                    pass
+        badge = "none" if sz < 0 else (_fmt_sz(sz) if sz > 0 else "empty")
+        items.append({"id": full, "name": fn, "label": lbl, "badge": badge})
     return items
 
 
-def _read_tail(path, max_lines=60):
-    lines = []
+def _read_tail(path, max_lines=60, max_bytes=4096):
+    """Stream tail of log file in <= 1 KB chunks without loading large files into SRAM."""
     try:
-        with open(path, "r") as f:
-            for ln in f:
-                lines.append(ln.rstrip())
-                if len(lines) > max_lines:
-                    lines.pop(0)
+        st = os.stat(path)
+        sz = int(st[6])
+        if sz <= 0:
+            return []
+        chunks = []
+        with open(path, "rb") as f:
+            if sz > max_bytes:
+                f.seek(sz - max_bytes)
+                f.readline()
+            while True:
+                ch = f.read(1024)
+                if not ch:
+                    break
+                chunks.append(ch)
+        raw = b"".join(chunks).decode("utf-8", "ignore")
+        lines = [ln.rstrip("\r") for ln in raw.split("\n") if ln.strip()]
+        return lines[-int(max_lines):]
     except OSError:
-        pass
-    return lines
+        return []
+    except Exception:
+        return []
 
 
 def _log_color(s):
@@ -83,13 +121,23 @@ def _view_file(board, ui, fpath, fname):
         tv.title = "{} ({} ln)".format(fname.upper(), len(wrapped))
         tv.set_lines(wrapped, reset_scroll=False)
         tv.scroll_offset = max(0, len(wrapped) - tv.visible_lines())
-        fb.update(status="Tail: " + fpath, status_kind="warn" if "crash" in fname else "ok")
+        fb.update(
+            status="Tail: " + fpath,
+            status_kind="warn" if ("crash" in fname or "wdt" in fname) else "ok",
+        )
 
     ui.clear_widgets(); ui.add_widget(sb); ui.add_widget(tv); ui.add_widget(fb); ui.set_focus(tv)
     _load(); ui.render(force=True); board.clear_input()
     poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
     try:
         while True:
+            try:
+                import sys as _sys
+                _w = _sys.modules.get("__pinhos_wdt__")
+                if _w is not None:
+                    _w.feed()
+            except Exception:
+                pass
             k = poll_fn() if poll_fn else None
             if k:
                 ku = str(k).upper()
@@ -116,7 +164,7 @@ def _view_file(board, ui, fpath, fname):
 
 
 def open_log_viewer(board, ui, logger, kind=None):
-    """Show a ListMenu of all log files in /sd/pinhos/logs/ (system, crash, web, ...)."""
+    """Show a ListMenu of all log files in /sd/pinhos/logs/ (system, crash, wdt, web, ...)."""
     from ui.widgets import StatusBar, ListMenu, FooterBar
     log_dir = (logger.log_dir if (logger and hasattr(logger, "log_dir")) else (PINHOS_ROOT + "/logs")).rstrip("/")
     sb = StatusBar(0, 0, 320, 20, title="Logs (/sd/pinhos/logs)", mode_label=ui.mode_badge)
@@ -124,7 +172,15 @@ def open_log_viewer(board, ui, logger, kind=None):
     fb = FooterBar(0, 276, 320, 44, status="Pick a log file to inspect", status_kind="info",
                    hints="UP/DN:Sel  ENT:View  R:Refr  ESC:Back")
 
+    target_fn = (str(kind).strip().lower() + ".log") if kind and not str(kind).endswith(".log") else str(kind or "")
     sel = 0
+    init_its = _list_logs(log_dir)
+    if target_fn:
+        for i, it in enumerate(init_its):
+            if it.get("name") == target_fn:
+                sel = i
+                break
+
     def _sync(force=True):
         nonlocal sel
         its = _list_logs(log_dir)
@@ -137,6 +193,13 @@ def open_log_viewer(board, ui, logger, kind=None):
     poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
     try:
         while True:
+            try:
+                import sys as _sys
+                _w = _sys.modules.get("__pinhos_wdt__")
+                if _w is not None:
+                    _w.feed()
+            except Exception:
+                pass
             k = poll_fn() if poll_fn else None
             if not k:
                 _sleep_ms(30); continue

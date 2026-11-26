@@ -1,0 +1,35 @@
+{
+  "id": "obsidian_amber",
+  "name": "Obsidian Amber",
+  "author": "bpinh0",
+  "version": 2,
+  "font": "bold",
+  "uppercase_headers": true,
+  "colors": {
+    "bg": "#090A0D",
+    "surface": "#111318",
+    "surface_alt": "#181B22",
+    "header_bg": "#F59E0B",
+    "header_fg": "#090A0D",
+    "footer_bg": "#F59E0B",
+    "footer_fg": "#090A0D",
+    "text": "#F4F5F7",
+    "text_muted": "#8E95A5",
+    "accent": "#F59E0B",
+    "accent_fg": "#090A0D",
+    "sel_bg": "#F59E0B",
+    "sel_fg": "#090A0D",
+    "border": "#262B36",
+    "border_focus": "#F59E0B",
+    "ok": "#10B981",
+    "warn": "#F59E0B",
+    "err": "#EF4444"
+  },
+  "style": {
+    "border_style": "single",
+    "bar_style": "blocks",
+    "card_header": "filled",
+    "quick_strip": "pills"
+  },
+  "banner": null
+}

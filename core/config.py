@@ -1,4 +1,4 @@
-# PinhOS Phase 1 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Canonical Layout & Persistent Configuration Manager (core/config.py)
+# PinhOS Phase 1 ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Canonical Layout & Persistent Configuration Manager (core/config.py)
 # Zero hardcoded GPIO pins or hardware bus dependencies.
 
 import os
@@ -16,6 +16,8 @@ CANONICAL_SUBDIRS = (
     "tools",
     "apps",
     "themes",
+    "fonts",
+    "banners",
     ".swap",
     "logs",
     "screenshots",
@@ -24,9 +26,9 @@ CANONICAL_SUBDIRS = (
 
 DEFAULT_VERSION_MANIFEST = {
     "name": "PinhOS",
-    "version": "1.0.0-alpha.4.4",
-    "phase": "4.1",
-    "codename": "WebPortal IDE & Stability",
+    "version": "1.0.0-alpha.5.0",
+    "phase": "5.1",
+    "codename": "Core UI, Theme v2 & RTC",
     "build_timestamp": "2026-11-24T11:55:00Z",
     "build_id": "20261124.1",
     "arch": "armv7emsp",
@@ -53,8 +55,10 @@ DEFAULT_CONFIG = {
     "wifi_indicator": "bars",
     "battery_indicator": "both",
     "sleep_timeout_s": 300,
+    "rtc_save_interval_s": 300,
     "tz_offset_h": 0,
     "ntp_auto": True,
+    "ntp_resync_s": 3600,
     "ntp_server": "162.159.200.1",
     "wifi_country": "XX",
     "cpu_freq_mhz": 150,
@@ -251,6 +255,7 @@ class ConfigManager:
                 for old_k, new_k in (
                     ("cpu_mhz", "cpu_freq_mhz"),
                     ("tz_offset", "tz_offset_h"),
+                    ("ntp_auto_sync", "ntp_auto"),
                     ("lcd_bright", "lcd_brightness"),
                     ("kb_bright", "kb_brightness"),
                     ("web_port", "webportal_port"),

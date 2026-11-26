@@ -38,8 +38,9 @@ class TUIBackend:
         lnk_w = 24 if lnk else 0
         web_w = 24 if web_on else 0
         max_left = max(1, (bar.w - left_x - right_w - bat_w - wf_w - lnk_w - web_w - 6) // 6)
+        t_title = theme.format_header(bar.title) if hasattr(theme, "format_header") else str(bar.title)
 
-        b.text(bar.title[:max_left], left_x, bar.y + 4, c_acc)
+        b.text(t_title[:max_left], left_x, bar.y + 4, c_acc)
         cur_x = bar.x + bar.w - 3
         if bi is not None:
             cur_x -= 17
@@ -176,10 +177,12 @@ class TUIBackend:
                 b.text(badge, bx, ry + 4, fg_col if is_sel else c_muted)
 
     def draw_progress_bar(self, pbar, theme):
+        from ui.widgets import draw_styled_bar
         b = self.board
         c_bg = theme.color("bg")
         c_fill = theme.color(pbar.color_token, default="accent")
         c_txt = theme.color("text")
+        bar_style = theme.style_token("bar_style", "solid") if hasattr(theme, "style_token") else "solid"
 
         b.fill_rect(pbar.x, pbar.y, pbar.w, pbar.h, c_bg)
         max_ch = max(8, pbar.w // 6)
@@ -187,23 +190,28 @@ class TUIBackend:
         prefix = (pbar.label + " ") if pbar.label else ""
         bar_slots = max(4, max_ch - len(prefix) - len(suffix) - 2)
         filled = (bar_slots * pbar.value) // 100
-        bar_str = "[" + ("#" * filled) + ("." * (bar_slots - filled)) + "]"
+        ch_on = "=" if bar_style == "striped" else "#"
+        ch_off = "-" if bar_style == "striped" else "."
+        bar_str = "[" + (ch_on * filled) + (ch_off * (bar_slots - filled)) + "]"
         line = (prefix + bar_str + suffix)[:max_ch]
         ty = pbar.y + max(0, (pbar.h - 8) // 2)
         b.text(line, pbar.x, ty, c_fill if pbar.value > 0 else c_txt)
 
     def draw_dialog(self, dlg, theme):
+        from ui.widgets import draw_styled_frame
         b = self.board
         c_bg = theme.color("bg")
         c_hdr = theme.color(dlg.kind if dlg.kind in ("ok", "warn", "err") else "accent")
         c_txt = theme.color("text")
         c_muted = theme.color("text_muted")
+        bdr_style = theme.style_token("border_style", "single") if hasattr(theme, "style_token") else "single"
+        title_s = theme.format_header(dlg.title) if hasattr(theme, "format_header") else str(dlg.title)
 
         b.fill_rect(dlg.x, dlg.y, dlg.w, dlg.h, c_bg)
-        b.rect(dlg.x, dlg.y, dlg.w, dlg.h, c_hdr)
+        draw_styled_frame(b, dlg.x, dlg.y, dlg.w, dlg.h, c_hdr, bg_col=c_bg, style=bdr_style)
 
         max_ch = max(1, (dlg.w - 12) // 6)
-        b.text("[ " + dlg.title[:max(1, max_ch - 4)] + " ]", dlg.x + 6, dlg.y + 6, c_hdr)
+        b.text("[ " + title_s[:max(1, max_ch - 4)] + " ]", dlg.x + 6, dlg.y + 6, c_hdr)
         b.hline(dlg.x + 2, dlg.y + 18, dlg.w - 4, c_hdr)
 
         ly = dlg.y + 24

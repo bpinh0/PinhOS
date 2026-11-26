@@ -248,7 +248,9 @@ class PicoCalcBoard(BoardBase):
                 pass
 
     def reset_default_lut(self):
-        """Restore factory 16-entry RGB565 LUT (used by BSOD and Safe Recovery Mode)."""
+        """Restore factory 16-entry RGB565 LUT & native font (used by BSOD and Safe Recovery Mode)."""
+        self._font_name = "default"
+        self._font_mv = None
         self.set_lut(_build_default_lut())
 
     def stop_refresh(self):
@@ -321,6 +323,13 @@ class PicoCalcBoard(BoardBase):
 
     def text(self, s, x, y, color=15):
         text_str = str(s)
+        if self._font_mv is not None and self._font_name != "default":
+            from ui.fonts import draw_text_6x8
+            if self._disp is not None:
+                draw_text_6x8(self._disp, text_str, int(x), int(y), int(color), self._font_mv)
+            elif self._fb is not None:
+                draw_text_6x8(self._fb, text_str, int(x), int(y), int(color) & 0x0F, self._font_mv)
+            return
         if self._disp is not None:
             self._disp.text(text_str, int(x), int(y), color)
         elif self._fb is not None:
@@ -389,26 +398,47 @@ class PicoCalcBoard(BoardBase):
             self._modifiers = mods
             return (None, mods)
 
-        # Function keys F1..F10
+        # Function keys F1..F5 & PicoCalc Shifted F6..F10 (STM32 0x81..0x8A + VT100)
+        if b.startswith(b"\x1b[1;2P") or b.startswith(b"\x1b[11;2~") or b.startswith(b"\x1b[17;2~"):
+            return ("F6", mods | MOD_SHIFT)
+        if b.startswith(b"\x1b[1;2Q") or b.startswith(b"\x1b[12;2~") or b.startswith(b"\x1b[18;2~"):
+            return ("F7", mods | MOD_SHIFT)
+        if b.startswith(b"\x1b[1;2R") or b.startswith(b"\x1b[13;2~") or b.startswith(b"\x1b[19;2~"):
+            return ("F8", mods | MOD_SHIFT)
+        if b.startswith(b"\x1b[1;2S") or b.startswith(b"\x1b[14;2~") or b.startswith(b"\x1b[20;2~"):
+            return ("F9", mods | MOD_SHIFT)
+        if b.startswith(b"\x1b[15;2~") or b.startswith(b"\x1b[21;2~"):
+            return ("F10", mods | MOD_SHIFT)
+
         if b"\x81" in b or b.startswith(b"\x1bOP") or b.startswith(b"\x1b[11~"):
-            return ("F1", mods)
+            return ("F6", mods) if (mods & MOD_SHIFT) else ("F1", mods)
         if b"\x82" in b or b.startswith(b"\x1bOQ") or b.startswith(b"\x1b[12~"):
-            return ("F2", mods)
+            return ("F7", mods) if (mods & MOD_SHIFT) else ("F2", mods)
         if b"\x83" in b or b.startswith(b"\x1bOR") or b.startswith(b"\x1b[13~"):
-            return ("F3", mods)
+            return ("F8", mods) if (mods & MOD_SHIFT) else ("F3", mods)
         if b"\x84" in b or b.startswith(b"\x1bOS") or b.startswith(b"\x1b[14~"):
-            return ("F4", mods)
+            return ("F9", mods) if (mods & MOD_SHIFT) else ("F4", mods)
         if b"\x85" in b or b.startswith(b"\x1b[15~"):
-            return ("F5", mods)
-        if b"\x86" in b or b.startswith(b"\x1b[17~"):
+            return ("F10", mods) if (mods & MOD_SHIFT) else ("F5", mods)
+        if b"\x86" in b:
+            return ("F6", mods | MOD_SHIFT)
+        if b.startswith(b"\x1b[17~"):
             return ("F6", mods)
-        if b"\x87" in b or b.startswith(b"\x1b[18~"):
+        if b"\x87" in b:
+            return ("F7", mods | MOD_SHIFT)
+        if b.startswith(b"\x1b[18~"):
             return ("F7", mods)
-        if b"\x88" in b or b.startswith(b"\x1b[19~"):
+        if b"\x88" in b:
+            return ("F8", mods | MOD_SHIFT)
+        if b.startswith(b"\x1b[19~"):
             return ("F8", mods)
-        if b"\x89" in b or b.startswith(b"\x1b[20~"):
+        if b"\x89" in b:
+            return ("F9", mods | MOD_SHIFT)
+        if b.startswith(b"\x1b[20~"):
             return ("F9", mods)
-        if b"\x8a" in b or b"\x90" in b or b.startswith(b"\x1b[21~"):
+        if b"\x8a" in b or b"\x90" in b:
+            return ("F10", mods | MOD_SHIFT)
+        if b.startswith(b"\x1b[21~"):
             return ("F10", mods)
 
         # Directional D-Pad / Arrow / Page keys

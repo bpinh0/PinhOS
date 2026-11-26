@@ -82,6 +82,8 @@ class BoardBase:
         self._kb_backlight_pct = int(self.config.get("kb_brightness", 60))
         self._sd_mounted = False
         self._sd_mount_point = "/sd"
+        self._font_name = "default"
+        self._font_mv = None
 
     # --- Lifecycle & Capabilities ---
 
@@ -160,7 +162,17 @@ class BoardBase:
 
     def reset_default_lut(self):
         """Restore built-in factory 16-entry RGB565 LUT (e.g. for BSOD/Recovery)."""
-        pass
+        self._font_name = "default"
+        self._font_mv = None
+
+    def set_font(self, font_name="default", font_mv=None):
+        """Set active 6x8 bitmap font ('default', 'bold', 'retro', or custom 570B memoryview)."""
+        self._font_name = str(font_name or "default").strip().lower()
+        self._font_mv = font_mv
+        return self._font_name
+
+    def get_font_name(self):
+        return self._font_name
 
     def show(self):
         """Flush framebuffer to physical display if manual refresh is active."""
@@ -193,7 +205,10 @@ class BoardBase:
         if not self._input_queue:
             self.poll_input()
         if self._input_queue:
-            return self._input_queue.pop(0)
+            evt = self._input_queue.pop(0)
+            if isinstance(evt, dict) and "modifiers" in evt:
+                self._modifiers = int(evt["modifiers"])
+            return evt
         return None
 
     def read_key(self):
@@ -327,7 +342,12 @@ class BoardBase:
         return None
 
     def reboot(self):
-        """Perform a clean hardware reset via board HAL."""
+        """Persist RTC state if mounted and perform a clean hardware reset via board HAL."""
+        try:
+            from core.config import save_rtc_state
+            save_rtc_state(self)
+        except Exception:
+            pass
         try:
             import machine
             machine.reset()
