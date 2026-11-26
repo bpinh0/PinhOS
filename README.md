@@ -2,7 +2,7 @@
 
 **A modular, dual-UI MicroPython operating system and portable field cyberdeck platform for the ClockworkPi PicoCalc & Raspberry Pi Pico 2W (RP2350).**
 
-> 🚀 **Current Pre-Release: `v1.0.0-alpha.4.4`** — Phases 1–4.x complete & verified **12/12 Self-Test + Deep Stress** on real PicoCalc (RP2350) hardware (`~220–240 KB` free SRAM / `96 KB` contiguous block on boot). **Phase 5** (Async Wi-Fi/SoftAP, Signed SHA-256 OTA & App Store) is next.
+> 🚀 **Current Pre-Release: `v1.0.0-alpha.5.0`** — Phases 1–4.x + **Phase 5 Batch 1** (Theme Schema v2, selectable `6×8` fonts, `Obsidian Amber`, standardized `F1`–`F10` keybar, `L/R` quick-strip, simultaneous telemetry & periodic RTC/NTP) complete & verified **12/12 Self-Test + Deep Stress** on real PicoCalc (RP2350) hardware. Next up: SoftAP/Async Wi-Fi, Signed SHA-256 OTA & App Store.
 
 | Desktop Home | App Drawer | Settings & Menus | System Telemetry |
 | :---: | :---: | :---: | :---: |
