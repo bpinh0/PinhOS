@@ -940,7 +940,7 @@ if picocalc and hasattr(picocalc, 'display'):
         _d = picocalc.display
         _d.fill(0)
         _d.rect(18, 118, 284, 64, 15)
-        _d.text('DEPLOYING PinhOS v1.0.0-alpha.5.1.1', 28, 134, 15)
+        _d.text('DEPLOYING PinhOS v1.0.0-alpha.5.1.2', 28, 134, 15)
         _d.rect(40, 154, 240, 12, 15)
         _d.show()
     except Exception:
