@@ -502,6 +502,7 @@ def open_log_viewer(board, ui, logger, kind="system"):
 
 _DESKTOP_HINTS = "F1:Help F2:Thm F3:Mode F4:Cfg F5:Notes"
 _DASHBOARD_HINTS = "F1:Help F2:Thm F3:Mode F4:Cfg F5:Notes"
+_SHIFT_HINTS = "F6:Web F7:LNK F8:Mouse F9:Edit F10:Test"
 
 
 def confirm_dialog(board, ui, title, lines, footer="[Y/ENTER] Yes  [N/ESC] No", kind="warn"):
@@ -621,7 +622,7 @@ class _DesktopView:
         ui.add_widget(self.footer_bar)
         ui.set_focus(self.desktop)
 
-    def sync(self, board, boot_state, elapsed_ms, stabilized, status_msg="", status_kind="info", chg_phase=0):
+    def sync(self, board, boot_state, elapsed_ms, stabilized, status_msg="", status_kind="info", chg_phase=0, hints=None):
         _sync_status_bar(self.status_bar, self.ui, board, self.manifest, chg_phase=chg_phase)
         cfg = runtime_state.get("config")
         drawer_layout = str(cfg.get("launcher_layout", "grid") if cfg else "grid").upper()
@@ -635,7 +636,7 @@ class _DesktopView:
         if not status_msg:
             status_msg = "Home | Theme: {} [{}]".format(self.ui.theme.name, self.ui.mode_badge)
             status_kind = "info"
-        self.footer_bar.update(status=status_msg, status_kind=status_kind, hints=_DESKTOP_HINTS)
+        self.footer_bar.update(status=status_msg, status_kind=status_kind, hints=(hints if hints is not None else _DESKTOP_HINTS))
 
     def render(self, force=False):
         return self.ui.render(force=force)
@@ -668,7 +669,7 @@ class _DashboardView:
         ui.add_widget(self.footer_bar)
         ui.set_focus(self.action_menu)
 
-    def sync(self, board, boot_state, elapsed_ms, stabilized, status_msg="", status_kind="info", chg_phase=0):
+    def sync(self, board, boot_state, elapsed_ms, stabilized, status_msg="", status_kind="info", chg_phase=0, hints=None):
         free_kb = (gc.mem_free() // 1024) if hasattr(gc, "mem_free") else 256
         theme_name = self.ui.theme.name
         cfg = runtime_state.get("config")
@@ -682,7 +683,7 @@ class _DashboardView:
         if not status_msg:
             status_msg = "App Drawer | {} [{}]".format(theme_name, self.ui.mode_badge)
             status_kind = "info"
-        self.footer_bar.update(status=status_msg, status_kind=status_kind, hints=_DASHBOARD_HINTS)
+        self.footer_bar.update(status=status_msg, status_kind=status_kind, hints=(hints if hints is not None else _DASHBOARD_HINTS))
 
     def render(self, force=False):
         return self.ui.render(force=force)
@@ -1451,6 +1452,7 @@ def ui_loop(sel_action=0):
     anim_ticks = 0
     mg_level = 0
     chg_phase = 0
+    last_shift_bar = False
     last_act_ms = _ticks_ms()
     last_rtc_save_ms = _ticks_ms()
     last_ntp_sync_ms = _ticks_ms()
@@ -1460,6 +1462,12 @@ def ui_loop(sel_action=0):
         while True:
             poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
             key = poll_fn() if poll_fn else None
+            # Live SHIFT keybar toggle (F1-F5 <-> F6-F10) using partial FooterBar-only redraw
+            _sh_now = bool(board.get_modifiers() & MOD_SHIFT)
+            if _sh_now != last_shift_bar:
+                last_shift_bar = _sh_now
+                view.footer_bar.update(hints=_SHIFT_HINTS if _sh_now else _DESKTOP_HINTS)
+                view.render(force=False)
             if key:
                 idle_ticks = 0
                 last_act_ms = _ticks_ms()
@@ -1902,7 +1910,10 @@ def ui_loop(sel_action=0):
                         pass
 
                 # Refresh live top-bar clock & telemetry strip (dirty-only, zero flicker)
-                view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind, chg_phase=chg_phase)
+                view.sync(
+                    board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind,
+                    chg_phase=chg_phase, hints=_SHIFT_HINTS if last_shift_bar else _DESKTOP_HINTS,
+                )
                 view.render(force=False)
                 # Check configurable auto-sleep timeout (suppressed when LNK or WebPortal WEB is active)
                 st_s = int(cfg.get("sleep_timeout_s", 300) if cfg else 300)
