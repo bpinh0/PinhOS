@@ -938,11 +938,11 @@ except Exception as _he:
 if picocalc and hasattr(picocalc, 'display'):
     try:
         _d = picocalc.display
-        _d.recoverRefresh()
         _d.fill(0)
-        _d.rect(18, 118, 284, 64, 3)
-        _d.text('DEPLOYING PinhOS v1.0.0-alpha.5.1.1', 36, 134, 3)
-        _d.rect(40, 154, 240, 12, 3)
+        _d.rect(18, 118, 284, 64, 15)
+        _d.text('DEPLOYING PinhOS v1.0.0-alpha.5.1.1', 28, 134, 15)
+        _d.rect(40, 154, 240, 12, 15)
+        _d.show()
     except Exception:
         pass
 gc.collect()
