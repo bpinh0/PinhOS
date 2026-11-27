@@ -14,6 +14,11 @@ from ui.widgets import Widget, Dialog, draw_styled_frame, draw_styled_bar, draw_
 NOTES_PATH = PINHOS_ROOT + "/notes.txt"
 NOTES_MAX_BYTES = 1024
 
+# Shared bounded sparkline rings (<= 22 small ints each, ~176 B total) so history
+# survives menu/drawer/tool transitions with zero extra heap growth.
+_RAM_HIST = []
+_CPU_HIST = []
+
 QUICK_STRIP = (
     ("1", "TOOL", "cat:toolkit"),
     ("2", "FILE", "cat:files"),
@@ -221,9 +226,12 @@ class DesktopHome(Widget):
         self.notes_path = notes_path or NOTES_PATH
         self.strip_sel = None  # None (unselected / App Drawer focus) or 0..5
         self._strip_dirty = False
+        self._telem_dirty = False
         self.last_partial_strip = False
-        self.ram_hist = []
-        self.cpu_hist = []
+        self.last_partial_telem = False
+        self._prev_telem = {}
+        self.ram_hist = _RAM_HIST
+        self.cpu_hist = _CPU_HIST
         self.max_samples = 22
         self.free_kb = 256
         self.used_kb = 64
@@ -290,6 +298,7 @@ class DesktopHome(Widget):
     def clear_dirty(self):
         super().clear_dirty()
         self._strip_dirty = False
+        self._telem_dirty = False
 
     def reload_notes(self):
         self.notes = load_notes(path=self.notes_path)
@@ -385,9 +394,13 @@ class DesktopHome(Widget):
             self.web_on = w_on
 
         self.ui_mode = str(ui_mode).upper()
-        self.drawer_layout = str(drawer_layout).upper()
+        new_layout = str(drawer_layout).upper()
+        if new_layout != self.drawer_layout:
+            self.drawer_layout = new_layout
+            self._strip_dirty = True
         self.stabilized = bool(stabilized)
-        self.mark_dirty(full=True)
+        self._telem_dirty = True
+        self.mark_dirty(full=False)
 
     def _draw_quick_strip(self, b, theme, is_tui):
         c_bg = theme.color("bg")
@@ -468,19 +481,16 @@ class DesktopHome(Widget):
         cx_t = self.x + max(8, (self.w - len(call_txt) * 6) // 2)
         b.text(call_txt[:50], cx_t, ay + max(2, (ah - 8) // 2), fg)
 
-    def _render(self, backend, theme, full=True):
-        b = backend.board
-        is_tui = (getattr(backend, "mode", "gui") == "tui")
-        cy = self.y + 25
-        ch = max(140, self.h - 50)
-
-        if (not full) and self._strip_dirty:
-            self.last_partial_strip = True
-            self._draw_quick_strip(b, theme, is_tui)
-            self._draw_callout(b, theme, is_tui, cy, ch)
+    def _draw_telem_row(self, b, key, text, x, y, w, col, c_surf, full):
+        val = (text, col)
+        if (not full) and self._prev_telem.get(key) == val:
             return
+        self._prev_telem[key] = val
+        if not full:
+            b.fill_rect(x - 1, y, w, 9, c_surf)
+        b.text(text, x, y, col)
 
-        self.last_partial_strip = False
+    def _draw_telemetry_body(self, b, theme, is_tui, lx, cy, lw, ch, full=True):
         c_bg = theme.color("bg")
         c_surf = theme.color("bg" if is_tui else "surface")
         c_bdr = theme.color("border")
@@ -490,32 +500,18 @@ class DesktopHome(Widget):
         c_ok = theme.color("ok")
         c_inf = theme.color("info")
         c_wrn = theme.color("warn")
-        bdr_style = theme.style_token("border_style", "single") if hasattr(theme, "style_token") else "single"
         bar_style = theme.style_token("bar_style", "solid") if hasattr(theme, "style_token") else "solid"
-        hdr_style = theme.style_token("card_header", "filled") if hasattr(theme, "style_token") else "filled"
-
-        b.fill_rect(self.x, self.y, self.w, self.h, c_bg)
-
-        # 1. Top Quick Category Strip
-        self._draw_quick_strip(b, theme, is_tui)
-
-        # 2. Split Home Cards (y = self.y + 25 .. self.y + 227, ch = 202)
-        lw = 154
-        rw = 154
-        lx = self.x + 4
-        rx = self.x + 162
-
-        # --- Left Card: SYS TELEMETRY ---
-        b.fill_rect(lx, cy, lw, ch, c_surf)
-        draw_card_header(b, lx, cy, lw, 15, "SYS TELEMETRY", theme, style=hdr_style, is_tui=is_tui)
-        draw_styled_frame(b, lx, cy, lw, ch, c_bdr, bg_col=c_bg, style=bdr_style)
+        row_w = lw - 10
 
         # SRAM text + compact 20px sparkline
         y0 = cy + 18
-        b.text("SRAM {}K/{}K".format(self.free_kb, self.used_kb)[:23], lx + 6, y0, c_inf)
+        self._draw_telem_row(b, "sram", "SRAM {}K/{}K".format(self.free_kb, self.used_kb)[:23], lx + 6, y0, row_w, c_inf, c_surf, full)
         sp_x, sp_y, sp_w, sp_h = lx + 6, y0 + 9, lw - 12, 20
-        b.fill_rect(sp_x, sp_y, sp_w, sp_h, c_bg)
-        b.rect(sp_x, sp_y, sp_w, sp_h, c_bdr)
+        if full:
+            b.fill_rect(sp_x, sp_y, sp_w, sp_h, c_bg)
+            b.rect(sp_x, sp_y, sp_w, sp_h, c_bdr)
+        else:
+            b.fill_rect(sp_x + 1, sp_y + 1, sp_w - 2, sp_h - 2, c_bg)
         if self.ram_hist:
             bw = max(3, (sp_w - 4) // max(1, self.max_samples))
             for i, v in enumerate(self.ram_hist):
@@ -527,10 +523,13 @@ class DesktopHome(Widget):
         # CPU MHz + Temp + compact 20px sparkline
         y1 = sp_y + sp_h + 3
         temp_i = int(round(self.cpu_temp))
-        b.text("CPU {}MHz {}C".format(self.cpu_mhz, temp_i)[:23], lx + 6, y1, c_txt)
+        self._draw_telem_row(b, "cpu", "CPU {}MHz {}C".format(self.cpu_mhz, temp_i)[:23], lx + 6, y1, row_w, c_txt, c_surf, full)
         csp_y, csp_h = y1 + 9, 20
-        b.fill_rect(sp_x, csp_y, sp_w, csp_h, c_bg)
-        b.rect(sp_x, csp_y, sp_w, csp_h, c_bdr)
+        if full:
+            b.fill_rect(sp_x, csp_y, sp_w, csp_h, c_bg)
+            b.rect(sp_x, csp_y, sp_w, csp_h, c_bdr)
+        else:
+            b.fill_rect(sp_x + 1, csp_y + 1, sp_w - 2, csp_h - 2, c_bg)
         if self.cpu_hist:
             bw = max(3, (sp_w - 4) // max(1, self.max_samples))
             c_cpu = c_wrn if self.cpu_mhz > 150 else c_inf
@@ -543,38 +542,86 @@ class DesktopHome(Widget):
         # SD Swap usage bar
         y_sw = csp_y + csp_h + 4
         sw_lbl = "SWAP {}K/{}K".format(self.swap_used_kb, self.swap_max_kb) if self.swap_max_kb > 0 else "SWAP OFF"
-        b.text(sw_lbl[:23], lx + 6, y_sw, c_acc if self.swap_max_kb > 0 else c_mut)
-        draw_styled_bar(b, lx + 6, y_sw + 9, lw - 12, 7, self.swap_pct, c_acc if self.swap_pct < 80 else c_wrn, c_bg, c_bdr, style=bar_style, is_tui=is_tui)
+        self._draw_telem_row(b, "swap", sw_lbl[:23], lx + 6, y_sw, row_w, c_acc if self.swap_max_kb > 0 else c_mut, c_surf, full)
+        sw_bar_key = (self.swap_pct, c_acc if self.swap_pct < 80 else c_wrn, bar_style)
+        if full or self._prev_telem.get("sw_bar") != sw_bar_key:
+            self._prev_telem["sw_bar"] = sw_bar_key
+            draw_styled_bar(b, lx + 6, y_sw + 9, lw - 12, 7, self.swap_pct, sw_bar_key[1], c_bg, c_bdr, style=bar_style, is_tui=is_tui)
 
         # Battery % + Voltage bar
         y2 = y_sw + 19
         bat_lbl = "BAT {}% {}".format(self.bat_pct, "CHG" if self.bat_chg else "{:.1f}V".format(self.bat_mv / 1000.0))
-        b.text(bat_lbl[:23], lx + 6, y2, c_ok if (self.bat_chg or self.bat_pct > 25) else c_wrn)
-        draw_styled_bar(b, lx + 6, y2 + 9, lw - 12, 7, self.bat_pct, c_ok if self.bat_pct > 25 else c_wrn, c_bg, c_bdr, style=bar_style, is_tui=is_tui)
+        self._draw_telem_row(b, "bat", bat_lbl[:23], lx + 6, y2, row_w, c_ok if (self.bat_chg or self.bat_pct > 25) else c_wrn, c_surf, full)
+        bat_bar_key = (self.bat_pct, c_ok if self.bat_pct > 25 else c_wrn, bar_style)
+        if full or self._prev_telem.get("bat_bar") != bat_bar_key:
+            self._prev_telem["bat_bar"] = bat_bar_key
+            draw_styled_bar(b, lx + 6, y2 + 9, lw - 12, 7, self.bat_pct, bat_bar_key[1], c_bg, c_bdr, style=bar_style, is_tui=is_tui)
 
         # Simultaneous Status Rows below Battery Bar (Row 1: IP, Row 2: SIG/GUARD + Mode, Row 3: WEB, Row 4: BL/SD)
-        b.hline(lx + 4, y2 + 19, lw - 8, c_bdr)
+        if full:
+            b.hline(lx + 4, y2 + 19, lw - 8, c_bdr)
         y3 = y2 + 23
         wf_lbl = "IP: {}".format(self.wifi_ip) if self.wifi_ok else "Offline"
-        b.text(wf_lbl[:23], lx + 6, y3, c_ok if self.wifi_ok else c_mut)
+        self._draw_telem_row(b, "ip", wf_lbl[:23], lx + 6, y3, row_w, c_ok if self.wifi_ok else c_mut, c_surf, full)
 
         y4 = y3 + 12
         if self.wifi_ok and self.wifi_rssi:
             sig_lbl = "SIG {}dBm | {}".format(self.wifi_rssi, self.ui_mode)
         else:
             sig_lbl = "GUARD {} | {}".format("OK" if self.stabilized else "ARM", self.ui_mode)
-        b.text(sig_lbl[:23], lx + 6, y4, c_mut)
+        self._draw_telem_row(b, "sig", sig_lbl[:23], lx + 6, y4, row_w, c_mut, c_surf, full)
 
         y5 = y4 + 12
-        if self.web_on:
-            b.text("WEB ON [S-F6]", lx + 6, y5, c_ok)
-        else:
-            b.text("WEB OFF [S-F6]", lx + 6, y5, c_mut)
+        self._draw_telem_row(b, "web", "WEB ON [S-F6]" if self.web_on else "WEB OFF [S-F6]", lx + 6, y5, row_w, c_ok if self.web_on else c_mut, c_surf, full)
 
         y6 = y5 + 12
         if y6 + 10 <= cy + ch:
             bl_sd = "BL:{}% | SD:{}".format(self.lcd_bl, self.sd_free_lbl)
-            b.text(bl_sd[:23], lx + 6, y6, c_mut)
+            self._draw_telem_row(b, "bl_sd", bl_sd[:23], lx + 6, y6, row_w, c_mut, c_surf, full)
+
+    def _render(self, backend, theme, full=True):
+        b = backend.board
+        is_tui = (getattr(backend, "mode", "gui") == "tui")
+        cy = self.y + 25
+        ch = max(140, self.h - 50)
+        lw = 154
+        rw = 154
+        lx = self.x + 4
+        rx = self.x + 162
+
+        if (not full) and (self._strip_dirty or self._telem_dirty):
+            self.last_partial_strip = bool(self._strip_dirty)
+            self.last_partial_telem = bool(self._telem_dirty)
+            if self._strip_dirty:
+                self._draw_quick_strip(b, theme, is_tui)
+                self._draw_callout(b, theme, is_tui, cy, ch)
+            if self._telem_dirty:
+                self._draw_telemetry_body(b, theme, is_tui, lx, cy, lw, ch, full=False)
+            return
+
+        self.last_partial_strip = False
+        self.last_partial_telem = False
+        self._prev_telem.clear()
+        c_bg = theme.color("bg")
+        c_surf = theme.color("bg" if is_tui else "surface")
+        c_bdr = theme.color("border")
+        c_acc = theme.color("accent")
+        c_txt = theme.color("text")
+        c_mut = theme.color("text_muted")
+        bdr_style = theme.style_token("border_style", "single") if hasattr(theme, "style_token") else "single"
+        hdr_style = theme.style_token("card_header", "filled") if hasattr(theme, "style_token") else "filled"
+
+        b.fill_rect(self.x, self.y, self.w, self.h, c_bg)
+
+        # 1. Top Quick Category Strip
+        self._draw_quick_strip(b, theme, is_tui)
+
+        # 2. Split Home Cards (y = self.y + 25 .. self.y + 227, ch = 202)
+        # --- Left Card: SYS TELEMETRY ---
+        b.fill_rect(lx, cy, lw, ch, c_surf)
+        draw_card_header(b, lx, cy, lw, 15, "SYS TELEMETRY", theme, style=hdr_style, is_tui=is_tui)
+        draw_styled_frame(b, lx, cy, lw, ch, c_bdr, bg_col=c_bg, style=bdr_style)
+        self._draw_telemetry_body(b, theme, is_tui, lx, cy, lw, ch, full=True)
 
         # --- Right Card: QUICK NOTES or Theme Schema v2 Custom Banner ---
         banner_lines = getattr(theme, "banner_lines", ())

@@ -380,6 +380,10 @@ class BoardBase:
         """Ensure board serial REPL bridge (dupterm) is active. Subclasses override."""
         return None
 
+    def set_serial_link(self, enabled):
+        """Enable or lock the board's host serial link (COM4 UART0 dupterm). Subclasses override."""
+        return bool(enabled)
+
     def serial_print(self, *args):
         """Write diagnostic line to board serial console cleanly."""
         print(" ".join(str(a) for a in args))

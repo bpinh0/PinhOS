@@ -502,6 +502,7 @@ def open_log_viewer(board, ui, logger, kind="system"):
 
 _DESKTOP_HINTS = "F1:Help F2:Thm F3:Mode F4:Cfg F5:Notes"
 _DASHBOARD_HINTS = "F1:Help F2:Thm F3:Mode F4:Cfg F5:Notes"
+_SHIFT_HINTS = "F6:Web F7:LNK F8:Mouse F9:Edit F10:Test"
 
 
 def confirm_dialog(board, ui, title, lines, footer="[Y/ENTER] Yes  [N/ESC] No", kind="warn"):
@@ -621,7 +622,7 @@ class _DesktopView:
         ui.add_widget(self.footer_bar)
         ui.set_focus(self.desktop)
 
-    def sync(self, board, boot_state, elapsed_ms, stabilized, status_msg="", status_kind="info", chg_phase=0):
+    def sync(self, board, boot_state, elapsed_ms, stabilized, status_msg="", status_kind="info", chg_phase=0, hints=None):
         _sync_status_bar(self.status_bar, self.ui, board, self.manifest, chg_phase=chg_phase)
         cfg = runtime_state.get("config")
         drawer_layout = str(cfg.get("launcher_layout", "grid") if cfg else "grid").upper()
@@ -635,7 +636,7 @@ class _DesktopView:
         if not status_msg:
             status_msg = "Home | Theme: {} [{}]".format(self.ui.theme.name, self.ui.mode_badge)
             status_kind = "info"
-        self.footer_bar.update(status=status_msg, status_kind=status_kind, hints=_DESKTOP_HINTS)
+        self.footer_bar.update(status=status_msg, status_kind=status_kind, hints=(hints if hints is not None else _DESKTOP_HINTS))
 
     def render(self, force=False):
         return self.ui.render(force=force)
@@ -668,7 +669,7 @@ class _DashboardView:
         ui.add_widget(self.footer_bar)
         ui.set_focus(self.action_menu)
 
-    def sync(self, board, boot_state, elapsed_ms, stabilized, status_msg="", status_kind="info", chg_phase=0):
+    def sync(self, board, boot_state, elapsed_ms, stabilized, status_msg="", status_kind="info", chg_phase=0, hints=None):
         free_kb = (gc.mem_free() // 1024) if hasattr(gc, "mem_free") else 256
         theme_name = self.ui.theme.name
         cfg = runtime_state.get("config")
@@ -682,7 +683,7 @@ class _DashboardView:
         if not status_msg:
             status_msg = "App Drawer | {} [{}]".format(theme_name, self.ui.mode_badge)
             status_kind = "info"
-        self.footer_bar.update(status=status_msg, status_kind=status_kind, hints=_DASHBOARD_HINTS)
+        self.footer_bar.update(status=status_msg, status_kind=status_kind, hints=(hints if hints is not None else _DASHBOARD_HINTS))
 
     def render(self, force=False):
         return self.ui.render(force=force)
@@ -781,10 +782,9 @@ def _stop_repl_watcher():
 
 def toggle_serial_link(board=None, logger=None, enable=None):
     """
-    Non-blocking COM4 Serial Link (LNK) toggle:
-    - Keeps board.init_uart_bridge() / ensure_serial_repl() active
-    - Toggles runtime_state["serial_link"] and shows LNK badge in StatusBar
-    - Keeps PinhOS UI/menus 100% responsive while suppressing auto-sleep
+    COM4 Serial Link (LNK) gate & toggle:
+    - When ON: attaches UART0 @ 115200 to os.dupterm(0), accepts COM4 Ctrl+C/REPL, shows LNK badge, suppresses sleep.
+    - When OFF: detaches os.dupterm(None, 0) and ignores COM4 RX until explicitly re-enabled.
     Returns (active_bool, status_msg).
     """
     if board is None:
@@ -794,20 +794,68 @@ def toggle_serial_link(board=None, logger=None, enable=None):
     cur = bool(runtime_state.get("serial_link", False))
     nxt = (not cur) if enable is None else bool(enable)
     runtime_state["serial_link"] = nxt
+    msg = "COM4 Serial Link: LNK ON (sleep off)" if nxt else "COM4 Serial Link: OFF (locked)"
     if board is not None:
-        if hasattr(board, "init_uart_bridge"):
-            board.init_uart_bridge(rebind=False)
-        if hasattr(board, "ensure_serial_repl"):
-            board.ensure_serial_repl()
+        if nxt:
+            if hasattr(board, "set_serial_link"):
+                board.set_serial_link(True)
+            elif hasattr(board, "init_uart_bridge"):
+                board.init_uart_bridge(rebind=True)
+            bp("[SERIAL_LINK]", msg)
+        else:
+            bp("[SERIAL_LINK]", msg)
+            if hasattr(board, "set_serial_link"):
+                board.set_serial_link(False)
         board.beep(1400 if nxt else 950, 12)
-    msg = "COM4 Serial Link: LNK ON (sleep off)" if nxt else "COM4 Serial Link: OFF"
+    else:
+        bp("[SERIAL_LINK]", msg)
     if logger is not None:
         try:
             logger.info("SERIAL_LINK: " + ("ON" if nxt else "OFF"))
         except Exception:
             pass
-    bp("[SERIAL_LINK]", msg)
     return nxt, msg
+
+
+def show_serial_link_dialog(board, ui):
+    """Show confirmation Dialog popup when COM4 Serial Link (LNK) is enabled."""
+    if board is None or ui is None:
+        return
+    from ui.widgets import Dialog
+    dlg = Dialog(
+        14, 76, 292, 152,
+        title="COM4 SERIAL LINK ACTIVE",
+        lines=[
+            "Port  : UART0 115200 8N1 (COM4)",
+            "REPL  : Host sync & Ctrl+C open",
+            "Sleep : Suppressed while LNK ON",
+            "Lock again: [Shift+F7 / CTRL+Q]",
+        ],
+        footer="[ENT / ESC] Continue",
+        kind="ok",
+    )
+    ui.add_widget(dlg)
+    ui.render(force=True)
+    board.clear_input()
+    pf = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
+    try:
+        while True:
+            feed_wdt()
+            k = pf() if pf else None
+            if k and str(k).upper() in ("ENTER", "RETURN", "ESC", "SPACE", " ", "Q", "BACK", "BACKSPACE"):
+                board.beep(1100, 10)
+                break
+            if runtime_state.get("web_active"):
+                step_webportal(20)
+            else:
+                _sleep_ms(30)
+    except KeyboardInterrupt:
+        ui.remove_widget(dlg)
+        ui.mark_all_dirty(True)
+        raise
+    ui.remove_widget(dlg)
+    ui.mark_all_dirty(True)
+    board.clear_input()
 
 
 def start_webportal(board=None, cfg=None, logger=None, host="0.0.0.0", port=None):
@@ -1396,11 +1444,15 @@ def ui_loop(sel_action=0):
     if not runtime_state.get("_heap_idle_logged"):
         runtime_state["_heap_idle_logged"] = True
         _log_heap_stage(logger, "IDLE_DESKTOP")
+    # Enforce COM4 Serial Link lock state on UI entry (default OFF -> press Shift+F7 / CTRL+Q to open)
+    if hasattr(board, "set_serial_link"):
+        board.set_serial_link(bool(runtime_state.get("serial_link", False)))
 
     idle_ticks = 0
     anim_ticks = 0
     mg_level = 0
     chg_phase = 0
+    last_shift_bar = False
     last_act_ms = _ticks_ms()
     last_rtc_save_ms = _ticks_ms()
     last_ntp_sync_ms = _ticks_ms()
@@ -1410,6 +1462,12 @@ def ui_loop(sel_action=0):
         while True:
             poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
             key = poll_fn() if poll_fn else None
+            # Live SHIFT keybar toggle (F1-F5 <-> F6-F10) using partial FooterBar-only redraw
+            _sh_now = bool(board.get_modifiers() & MOD_SHIFT)
+            if _sh_now != last_shift_bar:
+                last_shift_bar = _sh_now
+                view.footer_bar.update(hints=_SHIFT_HINTS if _sh_now else _DESKTOP_HINTS)
+                view.render(force=False)
             if key:
                 idle_ticks = 0
                 last_act_ms = _ticks_ms()
@@ -1449,13 +1507,17 @@ def ui_loop(sel_action=0):
                     view.render(force=True)
 
                 elif (ctrl and k == "Q") or (shift and k == "F7"):
-                    # Non-blocking COM4 Serial Link (LNK) toggle: keeps UI 100% responsive & suppresses sleep
+                    # COM4 Serial Link (LNK) toggle: gates UART0 dupterm/Ctrl+C & shows popup when ON
                     on, smsg = toggle_serial_link(board, logger)
                     last_act_ms = _ticks_ms()
                     status_msg = smsg
                     status_kind = "ok" if on else "info"
                     view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind, chg_phase=chg_phase)
                     view.render(force=False)
+                    if on:
+                        show_serial_link_dialog(board, ui)
+                        view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind, chg_phase=chg_phase)
+                        view.render(force=True)
                     continue
 
                 elif shift and k == "F6":
@@ -1848,7 +1910,10 @@ def ui_loop(sel_action=0):
                         pass
 
                 # Refresh live top-bar clock & telemetry strip (dirty-only, zero flicker)
-                view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind, chg_phase=chg_phase)
+                view.sync(
+                    board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind,
+                    chg_phase=chg_phase, hints=_SHIFT_HINTS if last_shift_bar else _DESKTOP_HINTS,
+                )
                 view.render(force=False)
                 # Check configurable auto-sleep timeout (suppressed when LNK or WebPortal WEB is active)
                 st_s = int(cfg.get("sleep_timeout_s", 300) if cfg else 300)
@@ -1937,7 +2002,13 @@ def ui_loop(sel_action=0):
             except Exception:
                 pass
         if hasattr(board, "init_uart_bridge"):
-            board.init_uart_bridge()
+            board.init_uart_bridge(rebind=True)
+        try:
+            board.fill_rect(0, 294, 320, 26, 3)
+            board.text("COM4 REPL ACTIVE (>>>) | Host Ready", 20, 303, 0)
+            board.show()
+        except Exception:
+            pass
         bp("[UI] Interrupted via serial Ctrl+C; returning to REPL.")
     except MemoryError as mem_exc:
         gc.collect(); gc.collect()
@@ -1992,7 +2063,7 @@ def ui_loop(sel_action=0):
         if choice == "SAFE_MODE":
             return enter_safe_recovery_mode(board=board, state=boot_state, reason=repr(ui_exc), interactive=True)
         if hasattr(board, "init_uart_bridge"):
-            board.init_uart_bridge()
+            board.init_uart_bridge(rebind=True)
 
 
 _boot_splash_active = False
