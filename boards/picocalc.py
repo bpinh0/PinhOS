@@ -173,6 +173,9 @@ class PicoCalcBoard(BoardBase):
             "present": True,
         }
         self._last_bat_ms = 0
+        self._last_bl_set_ms = 0
+        self._last_bl_poll_ms = 0
+        self._last_hw_bl = None
 
     def init(self):
         """Initialize PicoCalc display, STM32 I2C southbridge, backlights, and SD card."""
@@ -940,6 +943,25 @@ class PicoCalcBoard(BoardBase):
 
     # --- Screen & Keyboard Backlight PWM (0..100%) ---
 
+    def _read_hw_backlight(self):
+        """Read raw LCD backlight level from STM32 southbridge (returns (val, scale) or None)."""
+        if self._kb is not None and hasattr(self._kb, "backlight"):
+            try:
+                v = self._kb.backlight()
+                if isinstance(v, (int, float)):
+                    iv = int(round(v))
+                    return (iv, 255 if iv > 100 else 100)
+            except Exception:
+                pass
+        if self._i2c is not None:
+            try:
+                raw = self._i2c.readfrom_mem(SB_I2C_ADDR, REG_SB_LCD_BKL, 2)
+                if isinstance(raw, (bytes, bytearray)) and len(raw) >= 2:
+                    return (int(raw[1]), 255)
+            except Exception:
+                pass
+        return None
+
     def set_backlight(self, percent):
         """
         Set LCD backlight brightness (0..100%).
@@ -948,22 +970,36 @@ class PicoCalcBoard(BoardBase):
         """
         pct = max(0, min(100, int(round(percent))))
         self._backlight_pct = pct
+        self._last_bl_set_ms = time.ticks_ms() if hasattr(time, "ticks_ms") else int(time.time() * 1000)
         if self._kb is not None and hasattr(self._kb, "setBacklight"):
             try:
                 self._kb.setBacklight(pct)
+                self._last_hw_bl = self._read_hw_backlight()
                 return True
             except Exception:
                 pass
         if self._i2c is not None:
             try:
                 self._i2c.writeto_mem(SB_I2C_ADDR, REG_SB_LCD_BKL, bytes([pct]))
+                self._last_hw_bl = self._read_hw_backlight()
                 return True
             except Exception:
                 pass
         return True
 
     def get_backlight(self):
-        """Return active LCD backlight percentage (0..100%)."""
+        """Return active LCD backlight percentage (0..100%), syncing live STM32 hardware shortcut changes (#82)."""
+        now_ms = time.ticks_ms() if hasattr(time, "ticks_ms") else int(time.time() * 1000)
+        since_set = time.ticks_diff(now_ms, self._last_bl_set_ms) if hasattr(time, "ticks_diff") else (now_ms - self._last_bl_set_ms)
+        since_poll = time.ticks_diff(now_ms, self._last_bl_poll_ms) if hasattr(time, "ticks_diff") else (now_ms - self._last_bl_poll_ms)
+        if (self._last_bl_set_ms == 0 or since_set > 1500) and (self._last_bl_poll_ms == 0 or since_poll > 1000):
+            self._last_bl_poll_ms = now_ms
+            hw = self._read_hw_backlight()
+            if hw is not None:
+                if self._last_hw_bl is not None and hw[0] != self._last_hw_bl[0]:
+                    val, scale = hw
+                    self._backlight_pct = max(0, min(100, int(round((val * 100.0) / max(1, scale)))))
+                self._last_hw_bl = hw
         return int(self._backlight_pct)
 
     def set_kb_backlight(self, percent):

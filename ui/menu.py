@@ -76,6 +76,13 @@ MENU_TREE = {
         {"id": "set:boot_scr", "label": "Boot Screen", "dyn": "boot_scr"},
         {"id": "set:lcd_bl", "label": "LCD Backlight", "dyn": "lcd_bl"},
         {"id": "set:kb_bl", "label": "KB Backlight", "dyn": "kb_bl"},
+        {"id": "cat:set_telem", "label": "Telemetry Thresholds", "badge": "[% >]"},
+    )),
+    "set_telem": ("Telemetry Thresholds", (
+        {"id": "set:ram_warn", "label": "RAM Warn (Amber <)", "dyn": "ram_warn"},
+        {"id": "set:ram_crit", "label": "RAM Crit (Red <)", "dyn": "ram_crit"},
+        {"id": "set:cpu_warn", "label": "CPU Warn (Amber >=)", "dyn": "cpu_warn"},
+        {"id": "set:cpu_crit", "label": "CPU Crit (Red >=)", "dyn": "cpu_crit"},
     )),
     "set_bar_snd": ("Status Bar & Sound", (
         {"id": "set:wifi_ind", "label": "Wi-Fi Indicator", "dyn": "wifi_ind"},
@@ -269,6 +276,14 @@ def _dyn_badge(tag, board, ui, manifest, cfg=None):
         return "{}%".format(board.get_backlight())
     if tag == "kb_bl":
         return "{}%".format(board.get_kb_backlight())
+    if tag == "ram_warn":
+        return "{}%".format(int(cfg.get("ram_warn_pct", 40) if cfg else 40))
+    if tag == "ram_crit":
+        return "{}%".format(int(cfg.get("ram_crit_pct", 25) if cfg else 25))
+    if tag == "cpu_warn":
+        return "{}%".format(int(cfg.get("cpu_warn_pct", 50) if cfg else 50))
+    if tag == "cpu_crit":
+        return "{}%".format(int(cfg.get("cpu_crit_pct", 80) if cfg else 80))
     if tag == "sram_kb":
         return "{}KB free".format((gc.mem_free() // 1024) if hasattr(gc, "mem_free") else 256)
     if tag == "serial_link":
@@ -572,6 +587,42 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                     if cfg:
                         cfg.set("kb_brightness", nv, save_now=True)
                     status_msg, status_kind = "KB Backlight: {}%".format(nv), "ok"; _sync(force=True)
+                elif aid == "set:ram_warn":
+                    opts = (30, 35, 40, 45, 50, 60)
+                    cur = int(cfg.get("ram_warn_pct", 40) if cfg else 40)
+                    nv = opts[(opts.index(cur) + 1) % len(opts)] if cur in opts else 40
+                    if cfg:
+                        cfg.set("ram_warn_pct", nv, save_now=True)
+                        if int(cfg.get("ram_crit_pct", 25)) >= nv:
+                            cfg.set("ram_crit_pct", max(10, nv - 10), save_now=True)
+                    status_msg, status_kind = "RAM Warn: <{}% free".format(nv), "ok"; _sync(force=True)
+                elif aid == "set:ram_crit":
+                    opts = (15, 20, 25, 30, 35)
+                    cur = int(cfg.get("ram_crit_pct", 25) if cfg else 25)
+                    nv = opts[(opts.index(cur) + 1) % len(opts)] if cur in opts else 25
+                    if cfg:
+                        if nv >= int(cfg.get("ram_warn_pct", 40)):
+                            nv = opts[0]
+                        cfg.set("ram_crit_pct", nv, save_now=True)
+                    status_msg, status_kind = "RAM Crit: <{}% free".format(nv), "ok"; _sync(force=True)
+                elif aid == "set:cpu_warn":
+                    opts = (30, 40, 50, 60, 70)
+                    cur = int(cfg.get("cpu_warn_pct", 50) if cfg else 50)
+                    nv = opts[(opts.index(cur) + 1) % len(opts)] if cur in opts else 50
+                    if cfg:
+                        cfg.set("cpu_warn_pct", nv, save_now=True)
+                        if int(cfg.get("cpu_crit_pct", 80)) <= nv:
+                            cfg.set("cpu_crit_pct", min(95, nv + 15), save_now=True)
+                    status_msg, status_kind = "CPU Warn: >={}%".format(nv), "ok"; _sync(force=True)
+                elif aid == "set:cpu_crit":
+                    opts = (60, 70, 80, 90)
+                    cur = int(cfg.get("cpu_crit_pct", 80) if cfg else 80)
+                    nv = opts[(opts.index(cur) + 1) % len(opts)] if cur in opts else 80
+                    if cfg:
+                        if nv <= int(cfg.get("cpu_warn_pct", 50)):
+                            nv = opts[-1]
+                        cfg.set("cpu_crit_pct", nv, save_now=True)
+                    status_msg, status_kind = "CPU Crit: >={}%".format(nv), "ok"; _sync(force=True)
                 elif aid == "info:bat_rtc":
                     from core.config import format_datetime
                     b = board.get_battery()

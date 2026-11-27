@@ -207,11 +207,12 @@ def test_webportal_loopback(root="/sd/pinhos"):
     # Verify #58 (Legal viewer), #62 (12h/24h + EU/US/ISO date), #75 (per-app logs), #77 (policy gate)
     import sys
     gc.collect()
-    from core.config import format_time, format_date
+    from core.config import format_time, format_date, DEFAULT_CONFIG
     _dt = (2026, 11, 27, 4, 15, 7, 9, 0)
     _assert(format_time(_dt, {"time_format": "24h"}) == "15:07" and format_time(_dt, {"time_format": "12h"}) == "3:07P", "time_fmt fail")
     _assert(format_time((2026, 1, 1, 0, 0, 5, 0, 0), {"time_format": "12h"}) == "12:05A", "12h midnight fail")
     _assert(format_date(_dt, {"date_format": "DMY"}) == "27/11/2026" and format_date(_dt, {"date_format": "MDY"}) == "11/27/2026", "date_fmt fail")
+    _assert(DEFAULT_CONFIG["ram_warn_pct"] == 40 and DEFAULT_CONFIG["cpu_crit_pct"] == 80, "telem threshold defaults fail")
     import ui._legal_view as _lv_t
     _ll = _lv_t.build_legal_lines(root=root, cols=49)
     _assert(len(_ll) >= 12 and any("PolyForm" in x[0] for x in _ll), "legal_view fail")

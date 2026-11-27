@@ -237,6 +237,11 @@ class DesktopHome(Widget):
         self.used_kb = 64
         self.cpu_mhz = 150
         self.cpu_temp = 28.0
+        self.cpu_pct = 0
+        self.ram_warn_pct = 40
+        self.ram_crit_pct = 25
+        self.cpu_warn_pct = 50
+        self.cpu_crit_pct = 80
         self.bat_pct = 100
         self.bat_mv = 4150
         self.bat_chg = False
@@ -326,13 +331,23 @@ class DesktopHome(Widget):
         except Exception:
             self.sd_free_lbl = "N/A"
 
-    def sync_telemetry(self, board, ui_mode="GUI", drawer_layout="GRID", stabilized=True, wifi_st=None, web_active=None):
+    def sync_telemetry(self, board, ui_mode="GUI", drawer_layout="GRID", stabilized=True, wifi_st=None, web_active=None, cpu_pct=None, cfg=None):
         free_b = gc.mem_free() if hasattr(gc, "mem_free") else 262144
         used_b = gc.mem_alloc() if hasattr(gc, "mem_alloc") else 65536
         fk, uk = free_b // 1024, used_b // 1024
         self.free_kb = fk
         self.used_kb = uk
-        # Store fine-grained free RAM (0.1% of total heap, portable across boards) & cpu_temp*10 (0.1C)
+        if cfg is not None:
+            try:
+                rw = max(10, min(90, int(cfg.get("ram_warn_pct", 40))))
+                rc = max(5, min(rw - 5, int(cfg.get("ram_crit_pct", 25))))
+                cw = max(10, min(90, int(cfg.get("cpu_warn_pct", 50))))
+                cc = max(cw + 5, min(99, int(cfg.get("cpu_crit_pct", 80))))
+                self.ram_warn_pct, self.ram_crit_pct = rw, rc
+                self.cpu_warn_pct, self.cpu_crit_pct = cw, cc
+            except Exception:
+                pass
+        # Store fine-grained free RAM (0.1% of total heap, portable across boards) & CPU usage (0.1%)
         ram_free_x10 = (free_b * 1000) // max(1, free_b + used_b)
         self.ram_hist.append(ram_free_x10)
         if len(self.ram_hist) > self.max_samples:
@@ -344,7 +359,9 @@ class DesktopHome(Widget):
         except Exception:
             self.cpu_mhz = 150
         self.cpu_temp = board.get_cpu_temp_c() if board else 28.0
-        self.cpu_hist.append(int(round(float(self.cpu_temp) * 10.0)))
+        if cpu_pct is not None:
+            self.cpu_pct = max(0, min(100, int(cpu_pct)))
+        self.cpu_hist.append(self.cpu_pct * 10)
         if len(self.cpu_hist) > self.max_samples:
             self.cpu_hist.pop(0)
 
@@ -529,18 +546,18 @@ class DesktopHome(Widget):
                         col = c_err if v >= err_th else (c_wrn if v >= warn_th else c_ok)
                     b.fill_rect(bx, y + h - 2 - bh, max(1, bw - 1), bh, col)
 
-        # SRAM text + dynamic Y-axis 20px sparkline (>=40% green, 25-39.9% amber, <25% red free)
+        # SRAM text + dynamic Y-axis 20px sparkline (configurable free % thresholds)
         y0 = cy + 18
         self._draw_telem_row(b, "sram", "SRAM {}K/{}K".format(self.free_kb, self.used_kb)[:23], lx + 6, y0, row_w, c_inf, c_surf, full)
         sp_x, sp_y, sp_w, sp_h = lx + 6, y0 + 9, lw - 12, 20
-        _draw_dyn_spark(self.ram_hist, sp_x, sp_y, sp_w, sp_h, 400, 250, 30, low_is_bad=True)
+        _draw_dyn_spark(self.ram_hist, sp_x, sp_y, sp_w, sp_h, self.ram_warn_pct * 10, self.ram_crit_pct * 10, 30, low_is_bad=True)
 
-        # CPU MHz + Temp + dynamic Y-axis 20px sparkline (green <45C, amber 45-58C, red >=58C)
+        # CPU MHz + Temp + Usage % + dynamic Y-axis 20px sparkline (configurable CPU % thresholds)
         y1 = sp_y + sp_h + 3
         temp_i = int(round(self.cpu_temp))
-        self._draw_telem_row(b, "cpu", "CPU {}MHz {}C".format(self.cpu_mhz, temp_i)[:23], lx + 6, y1, row_w, c_txt, c_surf, full)
+        self._draw_telem_row(b, "cpu", "CPU {}MHz {}C {}%".format(self.cpu_mhz, temp_i, self.cpu_pct)[:23], lx + 6, y1, row_w, c_txt, c_surf, full)
         csp_y, csp_h = y1 + 9, 20
-        _draw_dyn_spark(self.cpu_hist, sp_x, csp_y, sp_w, csp_h, 450, 580, 15)
+        _draw_dyn_spark(self.cpu_hist, sp_x, csp_y, sp_w, csp_h, self.cpu_warn_pct * 10, self.cpu_crit_pct * 10, 80, low_is_bad=False)
 
         # SD Swap usage bar
         y_sw = csp_y + csp_h + 4
