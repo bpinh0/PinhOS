@@ -20,7 +20,7 @@ def feed_pwm(buf, n: int, bits: int, ch: int, dt_us: int, top: int):
                 pwm_cc[0] = (s << 16) | s
                 i += 1
                 nxt += dt_us
-                while int(tim_lo[0] - nxt) < 0:
+                while (tim_lo[0] - nxt) < 0:
                     pass
         else:
             lim: int = n - 1
@@ -30,7 +30,7 @@ def feed_pwm(buf, n: int, bits: int, ch: int, dt_us: int, top: int):
                 pwm_cc[0] = (sr << 16) | sl
                 i += 2
                 nxt += dt_us
-                while int(tim_lo[0] - nxt) < 0:
+                while (tim_lo[0] - nxt) < 0:
                     pass
     else:
         if ch == 1:
@@ -41,7 +41,7 @@ def feed_pwm(buf, n: int, bits: int, ch: int, dt_us: int, top: int):
                 pwm_cc[0] = (s << 16) | s
                 i += 2
                 nxt += dt_us
-                while int(tim_lo[0] - nxt) < 0:
+                while (tim_lo[0] - nxt) < 0:
                     pass
         else:
             lim: int = n - 3
@@ -53,5 +53,5 @@ def feed_pwm(buf, n: int, bits: int, ch: int, dt_us: int, top: int):
                 pwm_cc[0] = (sr << 16) | sl
                 i += 4
                 nxt += dt_us
-                while int(tim_lo[0] - nxt) < 0:
+                while (tim_lo[0] - nxt) < 0:
                     pass

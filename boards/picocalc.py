@@ -193,6 +193,8 @@ class PicoCalcBoard(BoardBase):
         self._aud_ch = 1
         self._aud_bits = 8
         self._aud_rem = 0
+        self._aud_buf = None
+        self._aud_mv = None
         self._aud_total = 0
         self._aud_bps = 1
         self._aud_us = 125
@@ -1127,7 +1129,7 @@ class PicoCalcBoard(BoardBase):
                 f.close()
                 return False
             if self._aud_buf is None:
-                self._aud_buf = bytearray(1024)
+                self._aud_buf = bytearray(4096)
                 self._aud_mv = memoryview(self._aud_buf)
             self._aud_top = 0
             if machine is not None:
@@ -1171,7 +1173,7 @@ class PicoCalcBoard(BoardBase):
                 self.stop_audio()
             return False
         mv = self._aud_mv
-        want = 1024 if rem >= 1024 else rem
+        want = 4096 if rem >= 4096 else rem
         try:
             n = f.readinto(mv[:want])
         except Exception:
@@ -1266,6 +1268,8 @@ class PicoCalcBoard(BoardBase):
                 pass
             self._aud_f = None
         self._aud_rem = 0
+        self._aud_buf = None
+        self._aud_mv = None
         for attr in ("_aud_pwm_l", "_aud_pwm_r"):
             p = getattr(self, attr, None)
             if p is not None:
