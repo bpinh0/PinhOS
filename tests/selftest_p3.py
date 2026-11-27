@@ -326,6 +326,11 @@ def test_desktop_home(root="/sd/pinhos"):
             ui.set_mode("gui", persist=False)
             ui.render(force=True)
 
+            # Verify idle sync_telemetry() uses partial telemetry redraw (never clears Quick Notes / Quick Strip)
+            dh.sync_telemetry(board, ui_mode="GUI", drawer_layout="GRID", stabilized=True, web_active=True)
+            ui.render(force=False)
+            _assert(not ui.last_render_full and dh.last_partial_telem and not dh.last_partial_strip, "Telemetry tick did not partial-redraw")
+
             # Exercise LEFT/RIGHT quick-strip cycling (0 <-> 5 wrap-around) + partial strip redraw
             _assert(dh.strip_sel is None, "Initial strip_sel must be None")
             _assert(ui.handle_key("RIGHT", allow_hotkeys=False) == "handled" and dh.strip_sel == 0, "RIGHT->0 failed")
