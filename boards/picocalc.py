@@ -92,12 +92,6 @@ _RP2350_PWM5_CC  = 0x400A8070
 _RP2350_PWM5_TOP = 0x400A8074
 _RP2350_DMA_TMR0 = 0x50000420
 
-try:
-    from boards._audio_viper import feed_pwm as _viper_feed_pwm, pack_pwm as _viper_pack_pwm
-except Exception:
-    _viper_feed_pwm = None
-    _viper_pack_pwm = None
-
 # Serial Bridge: UART0 (COM4 dupterm) & Auxiliary Field Console: UART1 (side header)
 UART_BRIDGE_BUS = 0
 PIN_UART_TX     = 0
@@ -207,6 +201,8 @@ class PicoCalcBoard(BoardBase):
         self._aud_dma_bufs = None
         self._aud_cur = 0
         self._aud_next_cnt = 0
+        self._aud_pack = None
+        self._aud_feed = None
         self._aud_err = ""
 
     def init(self):
@@ -1236,8 +1232,17 @@ class PicoCalcBoard(BoardBase):
             self._aud_rem = data_sz
             self._aud_bps = max(1, rate * ch * (bits // 8))
             self._aud_us = max(40, 1000000 // rate)
+            # Lazy-load native ARM Thumb-2 @viper audio helpers (0 B SRAM when idle)
+            self._aud_pack = None
+            self._aud_feed = None
+            try:
+                from boards._audio_viper import feed_pwm, pack_pwm
+                self._aud_pack = pack_pwm
+                self._aud_feed = feed_pwm
+            except Exception:
+                pass
             # Engage RP2350 hardware rp2.DMA double-buffering (zero breaks, 1.000x exact pitch)
-            if machine is not None and self._aud_top > 0 and _viper_pack_pwm is not None:
+            if machine is not None and self._aud_top > 0 and self._aud_pack is not None:
                 try:
                     import rp2
                     if hasattr(rp2, "DMA"):
@@ -1299,7 +1304,7 @@ class PicoCalcBoard(BoardBase):
             self._aud_rem = 0
             return 0
         self._aud_rem = rem - n
-        return int(_viper_pack_pwm(self._aud_buf, self._aud_dma_bufs[slot], n, self._aud_bits, self._aud_ch, self._aud_top))
+        return int(self._aud_pack(self._aud_buf, self._aud_dma_bufs[slot], n, self._aud_bits, self._aud_ch, self._aud_top))
 
     def step_audio(self):
         """Feed one pre-allocated PCM chunk to GP26/GP27 PWM (non-blocking rp2.DMA double-buffer if active)."""
@@ -1346,58 +1351,17 @@ class PicoCalcBoard(BoardBase):
         pl = self._aud_pwm_l
         pr = self._aud_pwm_r
         if pl is not None and pr is not None:
-            if _viper_feed_pwm is not None and self._aud_top > 0:
-                _viper_feed_pwm(self._aud_buf, n, self._aud_bits, self._aud_ch, self._aud_us, self._aud_top)
+            if self._aud_feed is not None and self._aud_top > 0:
+                self._aud_feed(self._aud_buf, n, self._aud_bits, self._aud_ch, self._aud_us, self._aud_top)
             else:
-                dt_us = self._aud_us
-                ch = self._aud_ch
-                bits = self._aud_bits
-                t_us = time.ticks_us if hasattr(time, "ticks_us") else None
-                t_df = time.ticks_diff if hasattr(time, "ticks_diff") else None
-                dl = pl.duty_u16
-                dr = pr.duty_u16
+                # Minimal fallback if _audio_viper is unavailable
+                step = self._aud_ch * (self._aud_bits // 8)
                 i = 0
-                nxt = t_us() if t_us else 0
-                if bits == 8:
-                    if ch == 1:
-                        while i < n:
-                            d = mv[i] << 8
-                            dl(d); dr(d)
-                            i += 1
-                            if t_us:
-                                nxt += dt_us
-                                while t_df(t_us(), nxt) < 0:
-                                    pass
-                    else:
-                        lim = n - 1
-                        while i < lim:
-                            dl(mv[i] << 8); dr(mv[i + 1] << 8)
-                            i += 2
-                            if t_us:
-                                nxt += dt_us
-                                while t_df(t_us(), nxt) < 0:
-                                    pass
-                else:
-                    if ch == 1:
-                        lim = n - 1
-                        while i < lim:
-                            d = (mv[i] | (mv[i + 1] << 8)) ^ 0x8000
-                            dl(d); dr(d)
-                            i += 2
-                            if t_us:
-                                nxt += dt_us
-                                while t_df(t_us(), nxt) < 0:
-                                    pass
-                    else:
-                        lim = n - 3
-                        while i < lim:
-                            dl((mv[i] | (mv[i + 1] << 8)) ^ 0x8000)
-                            dr((mv[i + 2] | (mv[i + 3] << 8)) ^ 0x8000)
-                            i += 4
-                            if t_us:
-                                nxt += dt_us
-                                while t_df(t_us(), nxt) < 0:
-                                    pass
+                lim = n - step + 1
+                while i < lim:
+                    d = (mv[i] << 8) if self._aud_bits == 8 else ((mv[i] | (mv[i + 1] << 8)) ^ 0x8000)
+                    pl.duty_u16(d); pr.duty_u16(d)
+                    i += step
         if self._aud_rem <= 0:
             self.stop_audio()
             return False
@@ -1436,6 +1400,13 @@ class PicoCalcBoard(BoardBase):
             self._aud_dma = None
         self._aud_dma_bufs = None
         self._aud_next_cnt = 0
+        self._aud_pack = None
+        self._aud_feed = None
+        try:
+            import sys as _sys
+            _sys.modules.pop("boards._audio_viper", None)
+        except Exception:
+            pass
         if self._aud_f is not None:
             try:
                 self._aud_f.close()
