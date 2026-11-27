@@ -84,9 +84,15 @@ PIN_SD_SCK   = 18
 PIN_SD_MOSI  = 19
 SD_BAUDRATE  = 12_000_000
 
-# Audio: Dual PWM Piezo / Speaker Outputs
+# Audio: Dual PWM Piezo / Speaker Outputs (RP2350 PWM Slice 5: GP26=ChA, GP27=ChB)
 PIN_AUDIO_L  = 26
 PIN_AUDIO_R  = 27
+_RP2350_PWM5_TOP = 0x400A8074
+
+try:
+    from boards._audio_viper import feed_pwm as _viper_feed_pwm
+except Exception:
+    _viper_feed_pwm = None
 
 # Serial Bridge: UART0 (COM4 dupterm) & Auxiliary Field Console: UART1 (side header)
 UART_BRIDGE_BUS = 0
@@ -190,6 +196,7 @@ class PicoCalcBoard(BoardBase):
         self._aud_total = 0
         self._aud_bps = 1
         self._aud_us = 125
+        self._aud_top = 0
         self._aud_err = ""
 
     def init(self):
@@ -1120,8 +1127,9 @@ class PicoCalcBoard(BoardBase):
                 f.close()
                 return False
             if self._aud_buf is None:
-                self._aud_buf = bytearray(512)
+                self._aud_buf = bytearray(1024)
                 self._aud_mv = memoryview(self._aud_buf)
+            self._aud_top = 0
             if machine is not None:
                 self._aud_pwm_l = machine.PWM(machine.Pin(PIN_AUDIO_L))
                 self._aud_pwm_r = machine.PWM(machine.Pin(PIN_AUDIO_R))
@@ -1129,6 +1137,12 @@ class PicoCalcBoard(BoardBase):
                 self._aud_pwm_r.freq(62500)
                 self._aud_pwm_l.duty_u16(32768)
                 self._aud_pwm_r.duty_u16(32768)
+                try:
+                    t = int(machine.mem32[_RP2350_PWM5_TOP]) & 0xFFFF
+                    if 100 <= t <= 65535:
+                        self._aud_top = t
+                except Exception:
+                    self._aud_top = 0
             self._aud_f = f
             self._aud_rate = rate
             self._aud_ch = ch
@@ -1157,7 +1171,7 @@ class PicoCalcBoard(BoardBase):
                 self.stop_audio()
             return False
         mv = self._aud_mv
-        want = 512 if rem >= 512 else rem
+        want = 1024 if rem >= 1024 else rem
         try:
             n = f.readinto(mv[:want])
         except Exception:
@@ -1170,55 +1184,58 @@ class PicoCalcBoard(BoardBase):
         pl = self._aud_pwm_l
         pr = self._aud_pwm_r
         if pl is not None and pr is not None:
-            dt_us = self._aud_us
-            ch = self._aud_ch
-            bits = self._aud_bits
-            t_us = time.ticks_us if hasattr(time, "ticks_us") else None
-            t_df = time.ticks_diff if hasattr(time, "ticks_diff") else None
-            dl = pl.duty_u16
-            dr = pr.duty_u16
-            i = 0
-            nxt = t_us() if t_us else 0
-            if bits == 8:
-                if ch == 1:
-                    while i < n:
-                        d = mv[i] << 8
-                        dl(d); dr(d)
-                        i += 1
-                        if t_us:
-                            nxt += dt_us
-                            while t_df(t_us(), nxt) < 0:
-                                pass
-                else:
-                    lim = n - 1
-                    while i < lim:
-                        dl(mv[i] << 8); dr(mv[i + 1] << 8)
-                        i += 2
-                        if t_us:
-                            nxt += dt_us
-                            while t_df(t_us(), nxt) < 0:
-                                pass
+            if _viper_feed_pwm is not None and self._aud_top > 0:
+                _viper_feed_pwm(self._aud_buf, n, self._aud_bits, self._aud_ch, self._aud_us, self._aud_top)
             else:
-                if ch == 1:
-                    lim = n - 1
-                    while i < lim:
-                        d = (mv[i] | (mv[i + 1] << 8)) ^ 0x8000
-                        dl(d); dr(d)
-                        i += 2
-                        if t_us:
-                            nxt += dt_us
-                            while t_df(t_us(), nxt) < 0:
-                                pass
+                dt_us = self._aud_us
+                ch = self._aud_ch
+                bits = self._aud_bits
+                t_us = time.ticks_us if hasattr(time, "ticks_us") else None
+                t_df = time.ticks_diff if hasattr(time, "ticks_diff") else None
+                dl = pl.duty_u16
+                dr = pr.duty_u16
+                i = 0
+                nxt = t_us() if t_us else 0
+                if bits == 8:
+                    if ch == 1:
+                        while i < n:
+                            d = mv[i] << 8
+                            dl(d); dr(d)
+                            i += 1
+                            if t_us:
+                                nxt += dt_us
+                                while t_df(t_us(), nxt) < 0:
+                                    pass
+                    else:
+                        lim = n - 1
+                        while i < lim:
+                            dl(mv[i] << 8); dr(mv[i + 1] << 8)
+                            i += 2
+                            if t_us:
+                                nxt += dt_us
+                                while t_df(t_us(), nxt) < 0:
+                                    pass
                 else:
-                    lim = n - 3
-                    while i < lim:
-                        dl((mv[i] | (mv[i + 1] << 8)) ^ 0x8000)
-                        dr((mv[i + 2] | (mv[i + 3] << 8)) ^ 0x8000)
-                        i += 4
-                        if t_us:
-                            nxt += dt_us
-                            while t_df(t_us(), nxt) < 0:
-                                pass
+                    if ch == 1:
+                        lim = n - 1
+                        while i < lim:
+                            d = (mv[i] | (mv[i + 1] << 8)) ^ 0x8000
+                            dl(d); dr(d)
+                            i += 2
+                            if t_us:
+                                nxt += dt_us
+                                while t_df(t_us(), nxt) < 0:
+                                    pass
+                    else:
+                        lim = n - 3
+                        while i < lim:
+                            dl((mv[i] | (mv[i + 1] << 8)) ^ 0x8000)
+                            dr((mv[i + 2] | (mv[i + 3] << 8)) ^ 0x8000)
+                            i += 4
+                            if t_us:
+                                nxt += dt_us
+                                while t_df(t_us(), nxt) < 0:
+                                    pass
         if self._aud_rem <= 0:
             self.stop_audio()
             return False

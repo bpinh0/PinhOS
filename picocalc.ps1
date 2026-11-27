@@ -62,6 +62,7 @@ $DeployManifest = @(
     @{ Local = "boards\__init__.py";    Remote = "/sd/pinhos/boards/__init__.py";   Mpy = $true },
     @{ Local = "boards\base.py";        Remote = "/sd/pinhos/boards/base.py";       Mpy = $true },
     @{ Local = "boards\picocalc.py";    Remote = "/sd/pinhos/boards/picocalc.py";   Mpy = $true },
+    @{ Local = "boards\_audio_viper.py"; Remote = "/sd/pinhos/boards/_audio_viper.py"; Mpy = $true },
     @{ Local = "boards\generic_spi.py"; Remote = "/sd/pinhos/boards/generic_spi.py"; Mpy = $true },
     @{ Local = "core\__init__.py";      Remote = "/sd/pinhos/core/__init__.py";     Mpy = $true },
     @{ Local = "core\config.py";        Remote = "/sd/pinhos/core/config.py";       Mpy = $true },
@@ -194,7 +195,7 @@ function Resolve-MpyManifest($manifest) {
     Write-Host ("[PinhOS] Compiling {0} core OS modules to .mpy bytecode (-O2)..." -f $toCompile.Count) -ForegroundColor Cyan
     if ($nativeMpy) {
         foreach ($job in $toCompile) {
-            & $nativeMpy.Source -O2 -o $job.Out $job.Src
+            & $nativeMpy.Source -O2 -march=armv7emsp -o $job.Out $job.Src
             if ($LASTEXITCODE -ne 0) {
                 throw "[ERROR] mpy-cross failed on $($job.Label)"
             }
@@ -207,7 +208,7 @@ function Resolve-MpyManifest($manifest) {
         foreach ($job in $toCompile) {
             $wSrc = ConvertTo-WslPath $job.Src
             $wOut = ConvertTo-WslPath $job.Out
-            [void]$sb.AppendLine("`"`$MPY`" -O2 -o '$wOut' '$wSrc'")
+            [void]$sb.AppendLine("`"`$MPY`" -O2 -march=armv7emsp -o '$wOut' '$wSrc'")
         }
         $batchFile = Join-Path $buildDir "_compile_mpy.sh"
         [System.IO.File]::WriteAllText($batchFile, ($sb.ToString() -replace "`r`n", "`n"))
