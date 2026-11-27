@@ -87,12 +87,15 @@ SD_BAUDRATE  = 12_000_000
 # Audio: Dual PWM Piezo / Speaker Outputs (RP2350 PWM Slice 5: GP26=ChA, GP27=ChB)
 PIN_AUDIO_L  = 26
 PIN_AUDIO_R  = 27
+_RP2350_PWM5_CC  = 0x400A8070
 _RP2350_PWM5_TOP = 0x400A8074
+_RP2350_DMA_TMR0 = 0x50000420
 
 try:
-    from boards._audio_viper import feed_pwm as _viper_feed_pwm
+    from boards._audio_viper import feed_pwm as _viper_feed_pwm, pack_pwm as _viper_pack_pwm
 except Exception:
     _viper_feed_pwm = None
+    _viper_pack_pwm = None
 
 # Serial Bridge: UART0 (COM4 dupterm) & Auxiliary Field Console: UART1 (side header)
 UART_BRIDGE_BUS = 0
@@ -199,6 +202,11 @@ class PicoCalcBoard(BoardBase):
         self._aud_bps = 1
         self._aud_us = 125
         self._aud_top = 0
+        self._aud_dma = None
+        self._aud_ctrl = 0
+        self._aud_dma_bufs = None
+        self._aud_cur = 0
+        self._aud_next_cnt = 0
         self._aud_err = ""
 
     def init(self):
@@ -1153,6 +1161,40 @@ class PicoCalcBoard(BoardBase):
             self._aud_rem = data_sz
             self._aud_bps = max(1, rate * ch * (bits // 8))
             self._aud_us = max(40, 1000000 // rate)
+            # Engage RP2350 hardware rp2.DMA double-buffering (zero breaks, 1.000x exact pitch)
+            if machine is not None and self._aud_top > 0 and _viper_pack_pwm is not None:
+                try:
+                    import rp2
+                    if hasattr(rp2, "DMA"):
+                        # Configure DMA pacing TIMER0: sys_clk * 1 / y = sample rate (TREQ_SEL=0x3B)
+                        div_y = max(1, min(65535, int(machine.freq()) // rate))
+                        machine.mem32[_RP2350_DMA_TMR0] = (1 << 16) | div_y
+                        self._aud_dma_bufs = (array.array("I", bytearray(8192)), array.array("I", bytearray(8192)))
+                        self._aud_dma = rp2.DMA()
+                        self._aud_ctrl = self._aud_dma.pack_ctrl(
+                            size=2, inc_read=True, inc_write=False, treq_sel=0x3B
+                        )
+                        self._aud_cur = 0
+                        self._aud_next_cnt = 0
+                        c0 = self._fill_dma_buf(0)
+                        if c0 > 0:
+                            self._aud_dma.config(
+                                read=self._aud_dma_bufs[0],
+                                write=_RP2350_PWM5_CC,
+                                count=c0,
+                                ctrl=self._aud_ctrl,
+                                trigger=True,
+                            )
+                            self._aud_next_cnt = self._fill_dma_buf(1)
+                except Exception:
+                    if self._aud_dma is not None:
+                        try:
+                            self._aud_dma.active(0)
+                            self._aud_dma.close()
+                        except Exception:
+                            pass
+                    self._aud_dma = None
+                    self._aud_dma_bufs = None
             return True
         except Exception as e:
             self._aud_err = str(e)[:32]
@@ -1164,8 +1206,51 @@ class PicoCalcBoard(BoardBase):
             self.stop_audio()
             return False
 
+    def _fill_dma_buf(self, slot):
+        """Read next PCM chunk from SD and pack into 32-bit PWM5_CC words for DMA slot 0/1."""
+        f = self._aud_f
+        rem = self._aud_rem
+        if f is None or rem <= 0 or self._aud_dma_bufs is None:
+            return 0
+        # Cap read bytes so packed sample count never exceeds 2048 words (8 KB slot)
+        bps_frame = self._aud_ch * (self._aud_bits // 8)
+        max_b = min(4096, 2048 * bps_frame)
+        want = max_b if rem >= max_b else rem
+        try:
+            n = f.readinto(self._aud_mv[:want])
+        except Exception:
+            return 0
+        if not n:
+            self._aud_rem = 0
+            return 0
+        self._aud_rem = rem - n
+        return int(_viper_pack_pwm(self._aud_buf, self._aud_dma_bufs[slot], n, self._aud_bits, self._aud_ch, self._aud_top))
+
     def step_audio(self):
-        """Feed one pre-allocated 512 B PCM chunk to GP26/GP27 PWM with microsecond pacing (0 alloc)."""
+        """Feed one pre-allocated PCM chunk to GP26/GP27 PWM (non-blocking rp2.DMA double-buffer if active)."""
+        if self._aud_dma is not None:
+            dma = self._aud_dma
+            if dma.active():
+                if self._aud_next_cnt == 0 and self._aud_rem > 0:
+                    self._aud_next_cnt = self._fill_dma_buf(1 - self._aud_cur)
+                return True
+            if self._aud_next_cnt > 0:
+                self._aud_cur = 1 - self._aud_cur
+                cnt = self._aud_next_cnt
+                self._aud_next_cnt = 0
+                dma.config(
+                    read=self._aud_dma_bufs[self._aud_cur],
+                    write=_RP2350_PWM5_CC,
+                    count=cnt,
+                    ctrl=self._aud_ctrl,
+                    trigger=True,
+                )
+                if self._aud_rem > 0:
+                    self._aud_next_cnt = self._fill_dma_buf(1 - self._aud_cur)
+                return True
+            self.stop_audio()
+            return False
+
         f = self._aud_f
         rem = self._aud_rem
         if f is None or rem <= 0:
@@ -1244,6 +1329,12 @@ class PicoCalcBoard(BoardBase):
         return True
 
     def audio_playing(self):
+        if self._aud_dma is not None:
+            try:
+                if self._aud_dma.active() or self._aud_next_cnt > 0:
+                    return True
+            except Exception:
+                pass
         return bool(self._aud_f is not None and self._aud_rem > 0)
 
     def audio_status(self):
@@ -1261,6 +1352,15 @@ class PicoCalcBoard(BoardBase):
         }
 
     def stop_audio(self):
+        if self._aud_dma is not None:
+            try:
+                self._aud_dma.active(0)
+                self._aud_dma.close()
+            except Exception:
+                pass
+            self._aud_dma = None
+        self._aud_dma_bufs = None
+        self._aud_next_cnt = 0
         if self._aud_f is not None:
             try:
                 self._aud_f.close()
