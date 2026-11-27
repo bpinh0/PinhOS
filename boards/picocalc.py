@@ -82,9 +82,10 @@ PIN_SD_MISO  = 16
 PIN_SD_CS    = 17
 PIN_SD_SCK   = 18
 PIN_SD_MOSI  = 19
-SD_BAUDRATE  = 12_000_000
+SD_BAUDRATE  = 25_000_000
+SD_BAUDRATE_FALLBACK = 12_000_000
 
-# Audio: Dual PWM Piezo / Speaker Outputs
+# Audio: Dual PWM Piezo / Speaker Outputs (RP2350 PWM Slice 5: GP26=ChA, GP27=ChB)
 PIN_AUDIO_L  = 26
 PIN_AUDIO_R  = 27
 
@@ -177,19 +178,9 @@ class PicoCalcBoard(BoardBase):
         self._last_bl_poll_ms = 0
         self._last_hw_bl = None
         self._bl_scale = 255
-        # Cooperative PWM WAV audio streaming state (zero per-chunk heap allocation)
-        self._aud_f = None
-        self._aud_pwm_l = None
-        self._aud_pwm_r = None
-        self._aud_buf = None
-        self._aud_mv = None
-        self._aud_rate = 0
-        self._aud_ch = 1
-        self._aud_bits = 8
-        self._aud_rem = 0
-        self._aud_total = 0
-        self._aud_bps = 1
-        self._aud_us = 125
+        self._sd_spi_boosted = False
+        # Lazy-loaded RP2350 DMA/Viper WAV audio engine (0 B SRAM when idle)
+        self._aud = None
         self._aud_err = ""
 
     def init(self):
@@ -849,10 +840,79 @@ class PicoCalcBoard(BoardBase):
             self._sd_mounted = False
             return False
 
+    def _boost_sd_spi(self, baudrate=SD_BAUDRATE, mount_point="/sd"):
+        """
+        Safely boost SPI0 clock to 25 MHz (SD SPI spec max) after mount.
+        Auto-falls back to 12 MHz if the card fails a quick directory read.
+        """
+        if self._sd_spi_boosted:
+            return True
+        spi_obj = None
+        if self._hw is not None:
+            for attr in ("sd", "sdcard"):
+                obj = getattr(self._hw, attr, None)
+                if obj is None:
+                    continue
+                for sub in ("spi", "_spi"):
+                    cand = getattr(obj, sub, None)
+                    if cand is not None and hasattr(cand, "init"):
+                        spi_obj = cand
+                        break
+                if spi_obj is None:
+                    inner = getattr(obj, "sd", None) or getattr(obj, "sdcard", None)
+                    if inner is not None:
+                        cand = getattr(inner, "spi", None) or getattr(inner, "_spi", None)
+                        if cand is not None and hasattr(cand, "init"):
+                            spi_obj = cand
+                if spi_obj is not None:
+                    break
+        try:
+            if spi_obj is not None:
+                spi_obj.init(baudrate=int(baudrate))
+            elif machine is not None:
+                machine.SPI(
+                    SPI_SD_BUS,
+                    baudrate=int(baudrate),
+                    polarity=0,
+                    phase=0,
+                    bits=8,
+                    firstbit=machine.SPI.MSB,
+                    sck=machine.Pin(PIN_SD_SCK),
+                    mosi=machine.Pin(PIN_SD_MOSI),
+                    miso=machine.Pin(PIN_SD_MISO),
+                )
+            else:
+                return False
+            # Verify card still responds cleanly at boosted clock
+            os.listdir(mount_point)
+            self._sd_spi_boosted = True
+            return True
+        except Exception:
+            # Fallback to safe 12 MHz if card/wiring dislikes 25 MHz
+            try:
+                if spi_obj is not None:
+                    spi_obj.init(baudrate=int(SD_BAUDRATE_FALLBACK))
+                elif machine is not None:
+                    machine.SPI(
+                        SPI_SD_BUS,
+                        baudrate=int(SD_BAUDRATE_FALLBACK),
+                        polarity=0,
+                        phase=0,
+                        bits=8,
+                        firstbit=machine.SPI.MSB,
+                        sck=machine.Pin(PIN_SD_SCK),
+                        mosi=machine.Pin(PIN_SD_MOSI),
+                        miso=machine.Pin(PIN_SD_MISO),
+                    )
+            except Exception:
+                pass
+            return False
+
     def mount_sd(self, mount_point="/sd", retries=3):
         """Mount the PicoCalc SPI0 microSD card with automatic retry backoff."""
         self._sd_mount_point = mount_point
         if self.is_sd_mounted(mount_point):
+            self._boost_sd_spi(SD_BAUDRATE, mount_point)
             return True
 
         tries = max(1, int(retries))
@@ -864,6 +924,7 @@ class PicoCalcBoard(BoardBase):
                     if sd_obj is not None and hasattr(sd_obj, "mount"):
                         sd_obj.mount()
                         if self.is_sd_mounted(mount_point):
+                            self._boost_sd_spi(SD_BAUDRATE, mount_point)
                             return True
                 # 2. Try standard machine.SDCard / sdcard driver on SPI0 pins
                 if machine is not None:
@@ -879,6 +940,7 @@ class PicoCalcBoard(BoardBase):
                         sd = sdcard.SDCard(spi, machine.Pin(PIN_SD_CS, machine.Pin.OUT))
                         os.mount(sd, mount_point)
                         if self.is_sd_mounted(mount_point):
+                            self._sd_spi_boosted = True
                             return True
                     except Exception:
                         pass
@@ -891,7 +953,10 @@ class PicoCalcBoard(BoardBase):
                 except Exception:
                     time.sleep(0.1)
 
-        return self.is_sd_mounted(mount_point)
+        if self.is_sd_mounted(mount_point):
+            self._boost_sd_spi(SD_BAUDRATE, mount_point)
+            return True
+        return False
 
     def unmount_sd(self, mount_point="/sd"):
         if not self.is_sd_mounted(mount_point):
@@ -899,6 +964,7 @@ class PicoCalcBoard(BoardBase):
         try:
             os.umount(mount_point)
             self._sd_mounted = False
+            self._sd_spi_boosted = False
             return True
         except Exception:
             return False
@@ -1070,194 +1136,58 @@ class PicoCalcBoard(BoardBase):
             return False
 
     def play_audio(self, path):
-        """
-        Start cooperative non-blocking PCM WAV playback over PicoCalc PWM (GP26 L / GP27 R @ 62.5 kHz).
-        Parses RIFF/WAVE headers (8/16-bit, mono/stereo, 8000-22050 Hz), skips LIST/INFO metadata
-        subchunks cleanly, and lazily allocates one reusable 512 B buffer (zero per-chunk allocation).
-        """
-        import struct
+        """Lazy-load RP2350 chained-DMA WAV player (0 B SRAM when idle)."""
         self.stop_audio()
         self._aud_err = ""
-        f = None
         try:
-            f = open(path, "rb")
-            hdr = f.read(12)
-            if len(hdr) < 12 or hdr[0:4] != b"RIFF" or hdr[8:12] != b"WAVE":
-                self._aud_err = "Not a RIFF/WAVE file"
-                f.close()
-                return False
-            fmt_ok = False
-            ch, rate, bits, data_sz = 1, 8000, 8, 0
-            while True:
-                chdr = f.read(8)
-                if len(chdr) < 8:
-                    break
-                cid, csz = struct.unpack("<4sI", chdr)
-                if cid == b"fmt ":
-                    fb = f.read(min(16, csz))
-                    if len(fb) < 16:
-                        self._aud_err = "Truncated fmt chunk"
-                        f.close()
-                        return False
-                    afmt, ch, rate, _, _, bits = struct.unpack("<HHIIHH", fb)
-                    if csz > 16:
-                        f.seek(csz - 16, 1)
-                    if csz & 1:
-                        f.seek(1, 1)
-                    if afmt != 1 or ch not in (1, 2) or bits not in (8, 16) or rate < 8000 or rate > 22050:
-                        self._aud_err = "Need PCM 8/16b 8-22kHz"
-                        f.close()
-                        return False
-                    fmt_ok = True
-                elif cid == b"data":
-                    data_sz = csz
-                    break
-                else:
-                    # Skip LIST / INFO / JUNK / fact / bext metadata subchunks cleanly
-                    f.seek(csz + (csz & 1), 1)
-            if (not fmt_ok) or data_sz <= 0:
-                self._aud_err = "Missing PCM data chunk"
-                f.close()
-                return False
-            if self._aud_buf is None:
-                self._aud_buf = bytearray(512)
-                self._aud_mv = memoryview(self._aud_buf)
-            if machine is not None:
-                self._aud_pwm_l = machine.PWM(machine.Pin(PIN_AUDIO_L))
-                self._aud_pwm_r = machine.PWM(machine.Pin(PIN_AUDIO_R))
-                self._aud_pwm_l.freq(62500)
-                self._aud_pwm_r.freq(62500)
-                self._aud_pwm_l.duty_u16(32768)
-                self._aud_pwm_r.duty_u16(32768)
-            self._aud_f = f
-            self._aud_rate = rate
-            self._aud_ch = ch
-            self._aud_bits = bits
-            self._aud_total = data_sz
-            self._aud_rem = data_sz
-            self._aud_bps = max(1, rate * ch * (bits // 8))
-            self._aud_us = max(40, 1000000 // rate)
-            return True
+            from boards._audio_viper import WavDmaPlayer
+            p = WavDmaPlayer(PIN_AUDIO_L, PIN_AUDIO_R)
+            if p.play(path):
+                self._aud = p
+                return True
+            self._aud_err = p.err
+            p.stop()
         except Exception as e:
             self._aud_err = str(e)[:32]
-            if f is not None:
-                try:
-                    f.close()
-                except Exception:
-                    pass
-            self.stop_audio()
-            return False
+        self.stop_audio()
+        return False
 
     def step_audio(self):
-        """Feed one pre-allocated 512 B PCM chunk to GP26/GP27 PWM with microsecond pacing (0 alloc)."""
-        f = self._aud_f
-        rem = self._aud_rem
-        if f is None or rem <= 0:
-            if f is not None:
-                self.stop_audio()
+        if self._aud is None:
             return False
-        mv = self._aud_mv
-        want = 512 if rem >= 512 else rem
-        try:
-            n = f.readinto(mv[:want])
-        except Exception:
-            self.stop_audio()
-            return False
-        if not n:
-            self.stop_audio()
-            return False
-        self._aud_rem = rem - n
-        pl = self._aud_pwm_l
-        pr = self._aud_pwm_r
-        if pl is not None and pr is not None:
-            dt_us = self._aud_us
-            ch = self._aud_ch
-            bits = self._aud_bits
-            t_us = time.ticks_us if hasattr(time, "ticks_us") else None
-            t_df = time.ticks_diff if hasattr(time, "ticks_diff") else None
-            dl = pl.duty_u16
-            dr = pr.duty_u16
-            i = 0
-            nxt = t_us() if t_us else 0
-            if bits == 8:
-                if ch == 1:
-                    while i < n:
-                        d = mv[i] << 8
-                        dl(d); dr(d)
-                        i += 1
-                        if t_us:
-                            nxt += dt_us
-                            while t_df(t_us(), nxt) < 0:
-                                pass
-                else:
-                    lim = n - 1
-                    while i < lim:
-                        dl(mv[i] << 8); dr(mv[i + 1] << 8)
-                        i += 2
-                        if t_us:
-                            nxt += dt_us
-                            while t_df(t_us(), nxt) < 0:
-                                pass
-            else:
-                if ch == 1:
-                    lim = n - 1
-                    while i < lim:
-                        d = (mv[i] | (mv[i + 1] << 8)) ^ 0x8000
-                        dl(d); dr(d)
-                        i += 2
-                        if t_us:
-                            nxt += dt_us
-                            while t_df(t_us(), nxt) < 0:
-                                pass
-                else:
-                    lim = n - 3
-                    while i < lim:
-                        dl((mv[i] | (mv[i + 1] << 8)) ^ 0x8000)
-                        dr((mv[i + 2] | (mv[i + 3] << 8)) ^ 0x8000)
-                        i += 4
-                        if t_us:
-                            nxt += dt_us
-                            while t_df(t_us(), nxt) < 0:
-                                pass
-        if self._aud_rem <= 0:
-            self.stop_audio()
-            return False
-        return True
+        if self._aud.step():
+            return True
+        self.stop_audio()
+        return False
 
     def audio_playing(self):
-        return bool(self._aud_f is not None and self._aud_rem > 0)
+        return bool(self._aud is not None and self._aud.playing())
 
     def audio_status(self):
-        playing = self.audio_playing()
-        played = max(0, self._aud_total - self._aud_rem)
-        bps = max(1, self._aud_bps)
+        if self._aud is not None:
+            return self._aud.status()
         return {
-            "playing": playing,
-            "pos_s": played // bps,
-            "dur_s": self._aud_total // bps,
-            "rate": self._aud_rate,
-            "ch": self._aud_ch,
-            "bits": self._aud_bits,
+            "playing": False,
+            "pos_s": 0,
+            "dur_s": 0,
+            "rate": 0,
+            "ch": 1,
+            "bits": 8,
             "error": self._aud_err,
         }
 
     def stop_audio(self):
-        if self._aud_f is not None:
+        if self._aud is not None:
             try:
-                self._aud_f.close()
+                self._aud.stop()
             except Exception:
                 pass
-            self._aud_f = None
-        self._aud_rem = 0
-        for attr in ("_aud_pwm_l", "_aud_pwm_r"):
-            p = getattr(self, attr, None)
-            if p is not None:
-                try:
-                    p.duty_u16(0)
-                    p.deinit()
-                except Exception:
-                    pass
-                setattr(self, attr, None)
+            self._aud = None
+        try:
+            import sys as _sys
+            _sys.modules.pop("boards._audio_viper", None)
+        except Exception:
+            pass
         if machine is None:
             return
         for pin_id in (PIN_AUDIO_L, PIN_AUDIO_R):

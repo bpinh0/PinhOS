@@ -208,6 +208,9 @@ def main(ctx):
     if hasattr(board, "clear_input"):
         board.clear_input()
     poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
+    _ticks_ms = getattr(time, "ticks_ms", None)
+    _ticks_diff = getattr(time, "ticks_diff", None)
+    last_poll_ms = 0
 
     try:
         while True:
@@ -227,7 +230,15 @@ def main(ctx):
                     last_pos_s = ps
                     _draw_now_playing(board, c, tracks[sel] if tracks else None, st, True)
 
-            k = poll_fn() if poll_fn else None
+            k = None
+            if poll_fn:
+                if not now_play or not _ticks_ms:
+                    k = poll_fn()
+                else:
+                    now_ms = _ticks_ms()
+                    if _ticks_diff(now_ms, last_poll_ms) >= 30:
+                        last_poll_ms = now_ms
+                        k = poll_fn()
             if not k:
                 if not now_play:
                     if hasattr(time, "sleep_ms"):
