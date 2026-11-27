@@ -64,6 +64,8 @@ MENU_TREE = {
         {"id": "ntp:auto", "label": "Auto-NTP on Wi-Fi", "dyn": "ntp_auto"},
         {"id": "ntp:resync", "label": "NTP Resync Interval", "dyn": "ntp_resync"},
         {"id": "ntp:tz", "label": "Timezone Offset", "dyn": "tz_off"},
+        {"id": "set:time_fmt", "label": "Time Format", "dyn": "time_fmt"},
+        {"id": "set:date_fmt", "label": "Date Format", "dyn": "date_fmt"},
         {"id": "rtc:date", "label": "Set Date (Manual)", "dyn": "rtc_date"},
         {"id": "rtc:time", "label": "Set Time (Manual)", "dyn": "rtc_time"},
     )),
@@ -96,6 +98,7 @@ MENU_TREE = {
     )),
     "set_about": ("About PinhOS", (
         {"id": "info:version", "label": "OS & UF2 Version", "dyn": "os_ver"},
+        {"id": "info:legal", "label": "License & Legal Notices", "badge": "[VIEW]"},
         {"id": "info:board", "label": "Board & SRAM Summary", "dyn": "sram_kb"},
     )),
 }
@@ -290,11 +293,19 @@ def _dyn_badge(tag, board, ui, manifest, cfg=None):
     if tag == "web_auto":
         return "ON" if (cfg.get("webportal_autostart", False) if cfg else False) else "OFF"
     if tag == "time_badge":
-        return board.get_timestamp_str(True)[:5] + " >"
+        from core.config import format_time
+        return format_time(board, cfg, with_sec=False) + " >"
+    if tag == "time_fmt":
+        return str(cfg.get("time_format", "24h") if cfg else "24h").upper()
+    if tag == "date_fmt":
+        df = str(cfg.get("date_format", "YMD") if cfg else "YMD").upper()
+        return {"DMY": "EU D/M/Y", "MDY": "US M/D/Y"}.get(df, "ISO Y-M-D")
     if tag == "rtc_date":
-        return board.get_timestamp_str()[:10]
+        from core.config import format_date
+        return format_date(board, cfg)
     if tag == "rtc_time":
-        return board.get_timestamp_str(True)[:8]
+        from core.config import format_time
+        return format_time(board, cfg, with_sec=True)
     if tag == "swap_kb":
         kb = int(cfg.get("swap_max_kb", 512) if cfg else 512)
         return "OFF" if kb <= 0 else ("{}MB".format(kb // 1024) if kb >= 1024 else "{}KB".format(kb))
@@ -562,13 +573,25 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                         cfg.set("kb_brightness", nv, save_now=True)
                     status_msg, status_kind = "KB Backlight: {}%".format(nv), "ok"; _sync(force=True)
                 elif aid == "info:bat_rtc":
+                    from core.config import format_datetime
                     b = board.get_battery()
                     show_info_dialog(board, ui, "BATTERY & RTC", [
                         "Battery : {}% ({}mV)".format(b["percent"], b["voltage_mv"]),
                         "State   : {}".format("CHARGING" if b["charging"] else "On Battery"),
-                        "RTC     : " + board.get_timestamp_str(),
+                        "RTC     : " + format_datetime(board, cfg, with_sec=True),
                         "Die Temp: {}C".format(board.get_cpu_temp_c()),
                     ]); _sync(force=True)
+                elif aid == "info:legal":
+                    import sys as _sys
+                    gc.collect()
+                    import ui._legal_view as _leg
+                    try:
+                        _leg.open_legal_viewer(board, ui)
+                    finally:
+                        _leg = None
+                        _sys.modules.pop("ui._legal_view", None)
+                        gc.collect()
+                    _sync(force=True)
                 elif aid == "info:version":
                     show_info_dialog(board, ui, "ABOUT PINHOS", [
                         "OS Ver  : v{}".format(manifest.get("version", "1.0.0-alpha.5.0")),
@@ -680,6 +703,20 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                     if cfg:
                         cfg.set("tz_offset_h", nxt, save_now=True)
                     status_msg, status_kind = "Timezone: UTC{}{}".format("+" if nxt >= 0 else "", nxt), "ok"; _sync(force=True)
+                elif aid == "set:time_fmt":
+                    cur = str(cfg.get("time_format", "24h") if cfg else "24h").lower()
+                    nxt = "12h" if cur == "24h" else "24h"
+                    if cfg:
+                        cfg.set("time_format", nxt, save_now=True)
+                    status_msg, status_kind = "Time Format: " + nxt.upper(), "ok"; _sync(force=True)
+                elif aid == "set:date_fmt":
+                    opts = ("YMD", "DMY", "MDY")
+                    cur = str(cfg.get("date_format", "YMD") if cfg else "YMD").upper()
+                    nxt = opts[(opts.index(cur) + 1) % len(opts)] if cur in opts else "YMD"
+                    if cfg:
+                        cfg.set("date_format", nxt, save_now=True)
+                    lbl = {"DMY": "EU (DD/MM/YYYY)", "MDY": "US (MM/DD/YYYY)"}.get(nxt, "ISO (YYYY-MM-DD)")
+                    status_msg, status_kind = "Date Format: " + lbl, "ok"; _sync(force=True)
                 elif aid == "rtc:date":
                     dt = board.get_rtc_datetime()
                     cur_s = "{:04d}-{:02d}-{:02d}".format(dt[0], dt[1], dt[2])

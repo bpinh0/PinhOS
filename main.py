@@ -588,7 +588,8 @@ def _sync_status_bar(status_bar, ui, board, manifest, chg_phase=0):
     bm = str(cfg.get("battery_indicator", "both") if cfg else "both").lower()
     bat_icon = (bat["percent"], bat["charging"], chg_phase if (bat["charging"] and bat["percent"] < 100) else 0) if bm in ("both", "icon") else None
     bat_txt = "{}%".format(bat["percent"]) if bm in ("both", "pct") else ""
-    clk = board.get_timestamp_str(True)[:5]
+    from core.config import format_time
+    clk = format_time(board, cfg, with_sec=False)
     right_txt = " ".join([x for x in (wf_txt, clk, bat_txt) if x])
 
     status_bar.update(

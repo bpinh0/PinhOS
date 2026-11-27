@@ -57,6 +57,8 @@ DEFAULT_CONFIG = {
     "sleep_timeout_s": 300,
     "rtc_save_interval_s": 300,
     "tz_offset_h": 0,
+    "time_format": "24h",
+    "date_format": "YMD",
     "ntp_auto": True,
     "ntp_resync_s": 3600,
     "ntp_server": "162.159.200.1",
@@ -109,6 +111,49 @@ def restore_rtc_state(board, path=RTC_STATE_PATH):
     except Exception:
         pass
     return False
+
+
+def _extract_dt(dt_or_board):
+    if isinstance(dt_or_board, (tuple, list)) and len(dt_or_board) >= 7:
+        return dt_or_board
+    if dt_or_board is not None and hasattr(dt_or_board, "get_rtc_datetime"):
+        try:
+            return dt_or_board.get_rtc_datetime()
+        except Exception:
+            pass
+    return (2026, 1, 1, 0, 0, 0, 0, 0)
+
+
+def format_time(dt_or_board, cfg=None, with_sec=False):
+    """Format RTC time per config time_format ('24h' or '12h') within StatusBar width budget (#62)."""
+    dt = _extract_dt(dt_or_board)
+    hh, mm, ss = int(dt[4]) % 24, int(dt[5]) % 60, int(dt[6]) % 60
+    tf = str(cfg.get("time_format", "24h") if cfg else "24h").lower()
+    if tf == "12h":
+        ap = "PM" if hh >= 12 else "AM"
+        h12 = hh % 12 or 12
+        if with_sec:
+            return "{:02d}:{:02d}:{:02d} {}".format(h12, mm, ss, ap)
+        return "{}:{:02d}{}".format(h12, mm, ap[0])
+    if with_sec:
+        return "{:02d}:{:02d}:{:02d}".format(hh, mm, ss)
+    return "{:02d}:{:02d}".format(hh, mm)
+
+
+def format_date(dt_or_board, cfg=None):
+    """Format RTC date per config date_format ('DMY' EU, 'MDY' US, 'YMD' ISO) (#62)."""
+    dt = _extract_dt(dt_or_board)
+    yr, mo, dy = int(dt[0]), int(dt[1]), int(dt[2])
+    df = str(cfg.get("date_format", "YMD") if cfg else "YMD").upper()
+    if df == "DMY":
+        return "{:02d}/{:02d}/{:04d}".format(dy, mo, yr)
+    if df == "MDY":
+        return "{:02d}/{:02d}/{:04d}".format(mo, dy, yr)
+    return "{:04d}-{:02d}-{:02d}".format(yr, mo, dy)
+
+
+def format_datetime(dt_or_board, cfg=None, with_sec=False):
+    return format_date(dt_or_board, cfg) + " " + format_time(dt_or_board, cfg, with_sec=with_sec)
 
 
 def _dir_exists(path):

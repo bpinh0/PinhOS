@@ -453,4 +453,20 @@ def test_desktop_home(root="/sd/pinhos"):
     sys.modules.pop("core.sandbox", None)
     gc.collect()
 
+    # 6. Configurable 12h/24h time & EU/US/ISO date formatting (#62) + Legal Notices viewer (#58)
+    from core.config import format_time, format_date
+    _dt = (2026, 11, 27, 4, 15, 7, 9, 0)
+    _assert(format_time(_dt, {"time_format": "24h"}) == "15:07", "24h format failed")
+    _assert(format_time(_dt, {"time_format": "12h"}) == "3:07P", "12h PM format failed")
+    _assert(format_time((2026, 1, 1, 0, 0, 5, 0, 0), {"time_format": "12h"}) == "12:05A", "12h midnight failed")
+    _assert(format_date(_dt, {"date_format": "YMD"}) == "2026-11-27", "ISO YMD failed")
+    _assert(format_date(_dt, {"date_format": "DMY"}) == "27/11/2026", "EU DMY failed")
+    _assert(format_date(_dt, {"date_format": "MDY"}) == "11/27/2026", "US MDY failed")
+    import ui._legal_view as _lv_t
+    _ll = _lv_t.build_legal_lines(root=root, cols=49)
+    _assert(len(_ll) >= 12 and any("PolyForm" in x[0] for x in _ll), "Legal viewer lines missing PolyForm")
+    _lv_t = None
+    sys.modules.pop("ui._legal_view", None)
+    gc.collect()
+
     return "Home+L/R+F1+SchemaV2+Notes<=1KB (d={}B)".format(delta)
