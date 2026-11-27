@@ -226,9 +226,14 @@ def test_phase3_field_tools(root="/sd/pinhos"):
         _assert(shot_p and shot_p.endswith(".bmp"), "screenshot capture failed")
         on1, m1_s = _pm.toggle_serial_link(board, enable=True)
         _assert(on1 and _pm.runtime_state.get("serial_link") is True and "LNK ON" in m1_s, "LNK enable failed")
+        _assert(getattr(board, "_serial_link_enabled", True) is True, "HAL serial link not enabled")
         _assert(_pm._enter_sleep_mode(board, _ui, None, countdown_s=1) is False, "LNK should suppress sleep")
         on2, m2_s = _pm.toggle_serial_link(board, enable=False)
         _assert((not on2) and _pm.runtime_state.get("serial_link") is False, "LNK disable failed")
+        _assert(getattr(board, "_serial_link_enabled", False) is False, "HAL serial link not locked when OFF")
+        # Restore COM4 dupterm immediately so automated COM4 selftest output continues cleanly
+        if hasattr(board, "set_serial_link"):
+            board.set_serial_link(True)
         _pm = None
         sys.modules.pop("main", None)
         sys.modules.pop("_pinhos_main", None)
@@ -247,6 +252,8 @@ def test_phase3_field_tools(root="/sd/pinhos"):
         except OSError:
             pass
         board.close_aux_uart()
+        if hasattr(board, "set_serial_link"):
+            board.set_serial_link(True)
         board.ensure_serial_repl()
 
     return "6 tools OK | SD W:{}K/s R:{}K/s (d={}B)".format(bres["write_kbps"], bres["read_kbps"], delta)

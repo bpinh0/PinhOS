@@ -475,11 +475,14 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
             if ctrl and ku == "Q":
                 try:
                     import sys
-                    m = sys.modules.get("main")
+                    m = sys.modules.get("main") or sys.modules.get("_pinhos_main")
                     if m and hasattr(m, "toggle_serial_link"):
                         on, smsg = m.toggle_serial_link(board, logger)
                         status_msg, status_kind = smsg, ("ok" if on else "info")
                         _sync(force=True)
+                        if on and hasattr(m, "show_serial_link_dialog"):
+                            m.show_serial_link_dialog(board, ui)
+                            _sync(force=True)
                 except Exception:
                     pass
                 continue
@@ -909,9 +912,10 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                 elif aid == "act:sleep":
                     return "SLEEP_NOW"
                 elif aid == "act:repl":
+                    on = False
                     try:
                         import sys
-                        m = sys.modules.get("main")
+                        m = sys.modules.get("main") or sys.modules.get("_pinhos_main")
                         if m and hasattr(m, "toggle_serial_link"):
                             on, smsg = m.toggle_serial_link(board, logger)
                             status_msg, status_kind = smsg, ("ok" if on else "info")
@@ -920,6 +924,15 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                     except Exception:
                         status_msg, status_kind = "COM4 Serial Link toggled", "ok"
                     _sync(force=True)
+                    if on:
+                        try:
+                            import sys as _s_lnk
+                            _ml = _s_lnk.modules.get("main") or _s_lnk.modules.get("_pinhos_main")
+                            if _ml and hasattr(_ml, "show_serial_link_dialog"):
+                                _ml.show_serial_link_dialog(board, ui)
+                                _sync(force=True)
+                        except Exception:
+                            pass
     except KeyboardInterrupt:
         pass
     gc.collect()

@@ -153,6 +153,7 @@ class PicoCalcBoard(BoardBase):
         self._kb = None
         self._i2c = None
         self._uart = None
+        self._serial_link_enabled = True
         self._aux_uart = None
         self._stdin_poll = None
         self._kbuf = bytearray(8)
@@ -608,17 +609,21 @@ class PicoCalcBoard(BoardBase):
         count = 0
         raw = None
 
-        # 0. Non-blocking COM4 (UART0) Ctrl-C interrupt check:
-        # On RP2350 MicroPython, UART(0) on dupterm(0) does not raise KeyboardInterrupt
-        # while ui_loop() polls I2C. Reading 0x03 directly makes COM4 tools work anytime.
+        # 0. Non-blocking COM4 (UART0) Ctrl-C interrupt check (only when LNK serial link is enabled):
+        # When LNK is OFF, silently drain/discard stray RX bytes so host Ctrl+C cannot interrupt UI.
         if self._uart is not None:
             try:
-                if self._uart.any():
-                    ch = self._uart.read(1)
-                    if ch and (b"\x03" in ch):
-                        raise KeyboardInterrupt
-                    if hasattr(os, "dupterm_notify"):
-                        os.dupterm_notify(self._uart)
+                if self._serial_link_enabled:
+                    if self._uart.any():
+                        ch = self._uart.read(1)
+                        if ch and (b"\x03" in ch):
+                            raise KeyboardInterrupt
+                        if hasattr(os, "dupterm_notify"):
+                            os.dupterm_notify(self._uart)
+                else:
+                    n_rx = self._uart.any()
+                    if n_rx:
+                        self._uart.read(n_rx)
             except KeyboardInterrupt:
                 raise
             except Exception:
@@ -1092,12 +1097,38 @@ class PicoCalcBoard(BoardBase):
         """
         return self._uart
 
+    def set_serial_link(self, enabled):
+        """
+        Gate COM4 (UART0 dupterm + Ctrl+C polling) behind explicit LNK mode.
+        When disabled, detaches os.dupterm(None, 0) and drains RX so host serial tools
+        cannot communicate until LNK is enabled (cold-boot, BSOD & Safe Recovery re-enable it).
+        """
+        en = bool(enabled)
+        self._serial_link_enabled = en
+        if en:
+            self.init_uart_bridge(rebind=True)
+            return True
+        try:
+            os.dupterm(None, 0)
+        except Exception:
+            pass
+        if self._uart is not None:
+            try:
+                n_rx = self._uart.any()
+                if n_rx:
+                    self._uart.read(n_rx)
+            except Exception:
+                pass
+        return False
+
     def init_uart_bridge(self, rebind=False):
         """
         Ensure UART(0) GP0/GP1 (CH340 COM4) is attached to os.dupterm(..., 0) at 115200 baud.
-        When rebind=True (e.g. on CTRL+Q LNK toggle or after machine.freq() clock changes),
-        re-initializes UART(0) @ 115200 baud so the baud divisor matches the active CPU clock.
+        When rebind=True (e.g. on LNK enable, BSOD, Safe Recovery, or after machine.freq() changes),
+        re-initializes UART(0) @ 115200 baud and marks serial link active.
         """
+        if rebind:
+            self._serial_link_enabled = True
         if machine is not None and (rebind or self._uart is None):
             try:
                 self._uart = machine.UART(UART_BRIDGE_BUS, UART_BAUDRATE, rxbuf=4096)

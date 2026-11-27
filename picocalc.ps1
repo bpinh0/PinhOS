@@ -754,16 +754,20 @@ if ($Action -in @("com", "check", "ping", "status")) {
         Write-Host "[COM CHECK] Port '$ResolvedPort' opened OK @ $BaudRate baud. Probing PicoCalc REPL..." -ForegroundColor Cyan
         Start-Sleep -Milliseconds 120
         $sp.Write([string][char]3)
-        Start-Sleep -Milliseconds 90
+        Start-Sleep -Milliseconds 120
         $sp.Write([string][char]3)
-        Start-Sleep -Milliseconds 180
+        Start-Sleep -Milliseconds 500
         $sp.Write("`r`n")
-        $probe = Read-UntilIdle $sp 220 1200
+        $probe = Read-UntilIdle $sp 350 1800
+        if ($probe -notmatch ">>>|raw REPL|KeyboardInterrupt|PINHOS") {
+            $sp.Write("`r`n")
+            $probe += Read-UntilIdle $sp 300 1000
+        }
         if ($probe -match ">>>|raw REPL|KeyboardInterrupt|PINHOS") {
             Write-Host "[COM CHECK] PASS: '$ResolvedPort' is OPEN and PicoCalc REPL responded ($($probe.Trim() -replace '\s+', ' '))" -ForegroundColor Green
             exit 0
         } else {
-            Write-Host "[COM CHECK] WARN: '$ResolvedPort' OS port is OPEN (not locked), but PicoCalc REPL did not echo '>>>' (press CTRL+Q / LNK or CTRL+C on boot splash)." -ForegroundColor Yellow
+            Write-Host "[COM CHECK] LOCKED / NO REPL: '$ResolvedPort' opened, but PinhOS did not respond (enable LNK via Shift+F7 / CTRL+Q on PicoCalc)." -ForegroundColor Yellow
             exit 2
         }
     } finally {
