@@ -332,8 +332,9 @@ class DesktopHome(Widget):
         fk, uk = free_b // 1024, used_b // 1024
         self.free_kb = fk
         self.used_kb = uk
-        # Store fine-grained used_kb (KB) & cpu_temp*10 (0.1C) for dynamic Y-axis sparklines
-        self.ram_hist.append(uk)
+        # Store fine-grained free RAM (0.1% of total heap, portable across boards) & cpu_temp*10 (0.1C)
+        ram_free_x10 = (free_b * 1000) // max(1, free_b + used_b)
+        self.ram_hist.append(ram_free_x10)
         if len(self.ram_hist) > self.max_samples:
             self.ram_hist.pop(0)
 
@@ -503,7 +504,7 @@ class DesktopHome(Widget):
         bar_style = theme.style_token("bar_style", "solid") if hasattr(theme, "style_token") else "solid"
         row_w = lw - 10
 
-        def _draw_dyn_spark(hist, x, y, w, h, warn_th, err_th, min_span):
+        def _draw_dyn_spark(hist, x, y, w, h, warn_th, err_th, min_span, low_is_bad=False):
             if full:
                 b.fill_rect(x, y, w, h, c_bg)
                 b.rect(x, y, w, h, c_bdr)
@@ -522,14 +523,17 @@ class DesktopHome(Widget):
                 bh = max(2, min(max_bh, ((v - base) * max_bh) // rng))
                 bx = x + 2 + i * bw
                 if bx + bw <= x + w - 1:
-                    col = c_err if v >= err_th else (c_wrn if v >= warn_th else c_ok)
+                    if low_is_bad:
+                        col = c_err if v < err_th else (c_wrn if v < warn_th else c_ok)
+                    else:
+                        col = c_err if v >= err_th else (c_wrn if v >= warn_th else c_ok)
                     b.fill_rect(bx, y + h - 2 - bh, max(1, bw - 1), bh, col)
 
-        # SRAM text + dynamic Y-axis 20px sparkline (green <140K, amber 140-199K, red >=200K used)
+        # SRAM text + dynamic Y-axis 20px sparkline (>=40% green, 25-39.9% amber, <25% red free)
         y0 = cy + 18
         self._draw_telem_row(b, "sram", "SRAM {}K/{}K".format(self.free_kb, self.used_kb)[:23], lx + 6, y0, row_w, c_inf, c_surf, full)
         sp_x, sp_y, sp_w, sp_h = lx + 6, y0 + 9, lw - 12, 20
-        _draw_dyn_spark(self.ram_hist, sp_x, sp_y, sp_w, sp_h, 140, 200, 12)
+        _draw_dyn_spark(self.ram_hist, sp_x, sp_y, sp_w, sp_h, 400, 250, 30, low_is_bad=True)
 
         # CPU MHz + Temp + dynamic Y-axis 20px sparkline (green <45C, amber 45-58C, red >=58C)
         y1 = sp_y + sp_h + 3
