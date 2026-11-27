@@ -203,4 +203,30 @@ def test_webportal_loopback(root="/sd/pinhos"):
         try: os.remove(full)
         except OSError: pass
         board.ensure_serial_repl()
+
+    # Verify #58 (Legal viewer), #62 (12h/24h + EU/US/ISO date), #75 (per-app logs), #77 (policy gate)
+    gc.collect()
+    from core.config import format_time, format_date
+    _dt = (2026, 11, 27, 4, 15, 7, 9, 0)
+    _assert(format_time(_dt, {"time_format": "24h"}) == "15:07" and format_time(_dt, {"time_format": "12h"}) == "3:07P", "time_fmt fail")
+    _assert(format_time((2026, 1, 1, 0, 0, 5, 0, 0), {"time_format": "12h"}) == "12:05A", "12h midnight fail")
+    _assert(format_date(_dt, {"date_format": "DMY"}) == "27/11/2026" and format_date(_dt, {"date_format": "MDY"}) == "11/27/2026", "date_fmt fail")
+    import ui._legal_view as _lv_t
+    _ll = _lv_t.build_legal_lines(root=root, cols=49)
+    _assert(len(_ll) >= 12 and any("PolyForm" in x[0] for x in _ll), "legal_view fail")
+    _ll = _lv_t = None
+    sys.modules.pop("ui._legal_view", None)
+    gc.collect()
+    from core.sandbox import parse_app_meta, inspect_app, SandboxPolicyError
+    _m = inspect_app(root.rstrip("/") + "/apps/wifi_spectrum.py", strict=True)
+    _assert(_m.get("needs_radio") is True and _m.get("min_block", 0) >= 16384, "wifi_spectrum policy fail")
+    _blk = False
+    try:
+        parse_app_meta('APP_META={"id":"ok_id","name":"x","version":"1","category":"u","entry":"main","min_sram":16384,"ui_modes":["gui"]}\ndef main(ctx): machine.Pin(1)\n', strict=True)
+    except SandboxPolicyError:
+        _blk = True
+    _assert(_blk, "SandboxPolicyError did not block machine.Pin")
+    sys.modules.pop("core.sandbox", None)
+    gc.collect()
+
     return "HTTP 200 ({},/,st,401/403,R/W/D,autostart) d={}B".format(mode[0], delta)

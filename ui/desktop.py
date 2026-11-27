@@ -332,8 +332,8 @@ class DesktopHome(Widget):
         fk, uk = free_b // 1024, used_b // 1024
         self.free_kb = fk
         self.used_kb = uk
-        ram_pct = max(4, min(100, (fk * 100) // 520))
-        self.ram_hist.append(ram_pct)
+        # Store fine-grained used_kb (KB) & cpu_temp*10 (0.1C) for dynamic Y-axis sparklines
+        self.ram_hist.append(uk)
         if len(self.ram_hist) > self.max_samples:
             self.ram_hist.pop(0)
 
@@ -343,8 +343,7 @@ class DesktopHome(Widget):
         except Exception:
             self.cpu_mhz = 150
         self.cpu_temp = board.get_cpu_temp_c() if board else 28.0
-        cpu_pct = max(10, min(100, int((float(self.cpu_temp) - 18.0) * 2.2)))
-        self.cpu_hist.append(cpu_pct)
+        self.cpu_hist.append(int(round(float(self.cpu_temp) * 10.0)))
         if len(self.cpu_hist) > self.max_samples:
             self.cpu_hist.pop(0)
 
@@ -500,44 +499,44 @@ class DesktopHome(Widget):
         c_ok = theme.color("ok")
         c_inf = theme.color("info")
         c_wrn = theme.color("warn")
+        c_err = theme.color("err")
         bar_style = theme.style_token("bar_style", "solid") if hasattr(theme, "style_token") else "solid"
         row_w = lw - 10
 
-        # SRAM text + compact 20px sparkline
+        def _draw_dyn_spark(hist, x, y, w, h, warn_th, err_th, min_span):
+            if full:
+                b.fill_rect(x, y, w, h, c_bg)
+                b.rect(x, y, w, h, c_bdr)
+            else:
+                b.fill_rect(x + 1, y + 1, w - 2, h - 2, c_bg)
+            if not hist:
+                return
+            lo, hi = min(hist), max(hist)
+            span = max(min_span, hi - lo)
+            pad = max(1, span // 4)
+            base = max(0, lo - pad)
+            rng = max(1, (hi + pad) - base)
+            bw = max(3, (w - 4) // max(1, self.max_samples))
+            max_bh = h - 4
+            for i, v in enumerate(hist):
+                bh = max(2, min(max_bh, ((v - base) * max_bh) // rng))
+                bx = x + 2 + i * bw
+                if bx + bw <= x + w - 1:
+                    col = c_err if v >= err_th else (c_wrn if v >= warn_th else c_ok)
+                    b.fill_rect(bx, y + h - 2 - bh, max(1, bw - 1), bh, col)
+
+        # SRAM text + dynamic Y-axis 20px sparkline (green <140K, amber 140-199K, red >=200K used)
         y0 = cy + 18
         self._draw_telem_row(b, "sram", "SRAM {}K/{}K".format(self.free_kb, self.used_kb)[:23], lx + 6, y0, row_w, c_inf, c_surf, full)
         sp_x, sp_y, sp_w, sp_h = lx + 6, y0 + 9, lw - 12, 20
-        if full:
-            b.fill_rect(sp_x, sp_y, sp_w, sp_h, c_bg)
-            b.rect(sp_x, sp_y, sp_w, sp_h, c_bdr)
-        else:
-            b.fill_rect(sp_x + 1, sp_y + 1, sp_w - 2, sp_h - 2, c_bg)
-        if self.ram_hist:
-            bw = max(3, (sp_w - 4) // max(1, self.max_samples))
-            for i, v in enumerate(self.ram_hist):
-                bh = max(2, (v * (sp_h - 4)) // 100)
-                bx = sp_x + 2 + i * bw
-                if bx + bw <= sp_x + sp_w - 1:
-                    b.fill_rect(bx, sp_y + sp_h - 2 - bh, max(1, bw - 1), bh, c_ok if self.free_kb > 64 else c_wrn)
+        _draw_dyn_spark(self.ram_hist, sp_x, sp_y, sp_w, sp_h, 140, 200, 12)
 
-        # CPU MHz + Temp + compact 20px sparkline
+        # CPU MHz + Temp + dynamic Y-axis 20px sparkline (green <45C, amber 45-58C, red >=58C)
         y1 = sp_y + sp_h + 3
         temp_i = int(round(self.cpu_temp))
         self._draw_telem_row(b, "cpu", "CPU {}MHz {}C".format(self.cpu_mhz, temp_i)[:23], lx + 6, y1, row_w, c_txt, c_surf, full)
         csp_y, csp_h = y1 + 9, 20
-        if full:
-            b.fill_rect(sp_x, csp_y, sp_w, csp_h, c_bg)
-            b.rect(sp_x, csp_y, sp_w, csp_h, c_bdr)
-        else:
-            b.fill_rect(sp_x + 1, csp_y + 1, sp_w - 2, csp_h - 2, c_bg)
-        if self.cpu_hist:
-            bw = max(3, (sp_w - 4) // max(1, self.max_samples))
-            c_cpu = c_wrn if self.cpu_mhz > 150 else c_inf
-            for i, v in enumerate(self.cpu_hist):
-                bh = max(2, (v * (csp_h - 4)) // 100)
-                bx = sp_x + 2 + i * bw
-                if bx + bw <= sp_x + sp_w - 1:
-                    b.fill_rect(bx, csp_y + csp_h - 2 - bh, max(1, bw - 1), bh, c_cpu)
+        _draw_dyn_spark(self.cpu_hist, sp_x, csp_y, sp_w, csp_h, 450, 580, 15)
 
         # SD Swap usage bar
         y_sw = csp_y + csp_h + 4
