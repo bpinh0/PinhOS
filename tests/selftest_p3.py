@@ -462,9 +462,11 @@ def test_desktop_home(root="/sd/pinhos"):
     _assert(format_date(_dt, {"date_format": "YMD"}) == "2026-11-27", "ISO YMD failed")
     _assert(format_date(_dt, {"date_format": "DMY"}) == "27/11/2026", "EU DMY failed")
     _assert(format_date(_dt, {"date_format": "MDY"}) == "11/27/2026", "US MDY failed")
+    gc.collect()
     import ui._legal_view as _lv_t
     _ll = _lv_t.build_legal_lines(root=root, cols=49)
     _assert(len(_ll) >= 12 and any("PolyForm" in x[0] for x in _ll), "Legal viewer lines missing PolyForm")
+    _ll = None
     _lv_t = None
     sys.modules.pop("ui._legal_view", None)
     gc.collect()
