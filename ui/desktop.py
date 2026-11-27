@@ -14,6 +14,11 @@ from ui.widgets import Widget, Dialog, draw_styled_frame, draw_styled_bar, draw_
 NOTES_PATH = PINHOS_ROOT + "/notes.txt"
 NOTES_MAX_BYTES = 1024
 
+# Shared bounded sparkline rings (<= 22 small ints each, ~176 B total) so history
+# survives menu/drawer/tool transitions with zero extra heap growth.
+_RAM_HIST = []
+_CPU_HIST = []
+
 QUICK_STRIP = (
     ("1", "TOOL", "cat:toolkit"),
     ("2", "FILE", "cat:files"),
@@ -225,8 +230,8 @@ class DesktopHome(Widget):
         self.last_partial_strip = False
         self.last_partial_telem = False
         self._prev_telem = {}
-        self.ram_hist = []
-        self.cpu_hist = []
+        self.ram_hist = _RAM_HIST
+        self.cpu_hist = _CPU_HIST
         self.max_samples = 22
         self.free_kb = 256
         self.used_kb = 64
