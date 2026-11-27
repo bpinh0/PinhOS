@@ -633,6 +633,8 @@ class _DesktopView:
             drawer_layout=drawer_layout,
             stabilized=stabilized,
             web_active=bool(runtime_state.get("web_active", False)),
+            cpu_pct=int(runtime_state.get("cpu_pct", 0)),
+            cfg=cfg,
         )
         if not status_msg:
             status_msg = "Home | Theme: {} [{}]".format(self.ui.theme.name, self.ui.mode_badge)
@@ -1466,6 +1468,9 @@ def ui_loop(sel_action=0):
     mg_level = 0
     chg_phase = 0
     last_shift_bar = False
+    _cpu_win_ms = _ticks_ms()
+    _cpu_sleep_ms = 0
+    runtime_state["cpu_pct"] = 0
     last_act_ms = _ticks_ms()
     last_rtc_save_ms = _ticks_ms()
     last_ntp_sync_ms = _ticks_ms()
@@ -1923,6 +1928,11 @@ def ui_loop(sel_action=0):
                         pass
 
                 # Refresh live top-bar clock & telemetry strip (dirty-only, zero flicker)
+                _tot_ms = max(1, _ticks_diff(now_idle_ms, _cpu_win_ms))
+                _busy_ms = max(0, _tot_ms - _cpu_sleep_ms)
+                runtime_state["cpu_pct"] = min(100, (_busy_ms * 100) // _tot_ms)
+                _cpu_win_ms = now_idle_ms
+                _cpu_sleep_ms = 0
                 view.sync(
                     board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind,
                     chg_phase=chg_phase, hints=_SHIFT_HINTS if last_shift_bar else _DESKTOP_HINTS,
@@ -1944,7 +1954,10 @@ def ui_loop(sel_action=0):
                     view.render(force=True)
             feed_wdt()
             if runtime_state.get("web_active"):
+                _tw0 = _ticks_ms()
                 step_webportal(20)
+                _dtw = _ticks_diff(_ticks_ms(), _tw0)
+                _cpu_sleep_ms += min(18, max(0, _dtw - 2))
                 _ws = runtime_state.get("web_server")
                 if _ws is not None:
                     if _ws.pending_reboot:
@@ -2003,7 +2016,9 @@ def ui_loop(sel_action=0):
                                 _w.status("rssi")
                         except Exception:
                             pass
+                _ts0 = _ticks_ms()
                 _sleep_ms(30)
+                _cpu_sleep_ms += max(0, _ticks_diff(_ticks_ms(), _ts0))
     except KeyboardInterrupt:
         _stop_repl_watcher()
         stop_webportal(logger=logger)
