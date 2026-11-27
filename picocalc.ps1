@@ -765,6 +765,11 @@ if ($Action -in @("com", "check", "ping", "status")) {
         }
         if ($probe -match ">>>|raw REPL|KeyboardInterrupt|PINHOS") {
             Write-Host "[COM CHECK] PASS: '$ResolvedPort' is OPEN and PicoCalc REPL responded ($($probe.Trim() -replace '\s+', ' '))" -ForegroundColor Green
+            if ($probe -match "Interrupted via serial Ctrl\+C") {
+                # Resume PinhOS UI automatically so a read-only 'com' check doesn't leave the screen at REPL
+                Send-Paced $sp "import sys;sys.path.insert(0,'/sd/pinhos') if '/sd/pinhos' not in sys.path else None;import main;main.ui_loop()`r`n"
+                Start-Sleep -Milliseconds 200
+            }
             exit 0
         } else {
             Write-Host "[COM CHECK] LOCKED / NO REPL: '$ResolvedPort' opened, but PinhOS did not respond (enable LNK via Shift+F7 / CTRL+Q on PicoCalc)." -ForegroundColor Yellow

@@ -1992,6 +1992,12 @@ def ui_loop(sel_action=0):
                 pass
         if hasattr(board, "init_uart_bridge"):
             board.init_uart_bridge(rebind=True)
+        try:
+            board.fill_rect(0, 294, 320, 26, 3)
+            board.text("COM4 REPL ACTIVE (>>>) | Host Ready", 20, 303, 0)
+            board.show()
+        except Exception:
+            pass
         bp("[UI] Interrupted via serial Ctrl+C; returning to REPL.")
     except MemoryError as mem_exc:
         gc.collect(); gc.collect()
