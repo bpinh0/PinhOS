@@ -14,43 +14,55 @@ def _sleep_ms(ms):
         time.sleep(ms / 1000.0)
 
 
-def _stream_lines(path, max_bytes=8192):
-    """Stream text file in <= 512 B chunks (capped at max_bytes) without large heap spikes."""
-    chunks = []
-    rem = int(max_bytes)
+def _append_wrapped(dst, txt, tok, cols=49):
+    if not txt:
+        dst.append(("", "text"))
+        return
+    for i in range(0, len(txt), cols):
+        dst.append((txt[i:i + cols], tok))
+
+
+def _stream_into(dst, path, cols=49, max_bytes=4096, max_lines=115, heading_tok="info"):
+    """Stream text file line-by-line (zero multi-KB intermediate buffer) into wrapped lines."""
+    read_b = 0
+    added = 0
     try:
-        with open(path, "rb") as f:
-            while rem > 0:
-                ch = f.read(min(512, rem))
-                if not ch:
+        with open(path, "r") as f:
+            for raw in f:
+                read_b += len(raw)
+                s = raw.strip()
+                tok = heading_tok if s.startswith("#") else "text"
+                _append_wrapped(dst, s, tok, cols)
+                added += 1
+                if read_b >= max_bytes or len(dst) >= max_lines:
                     break
-                chunks.append(ch)
-                rem -= len(ch)
-        raw = b"".join(chunks).decode("utf-8", "ignore")
-        chunks = None
-        return [ln.rstrip("\r") for ln in raw.split("\n")]
     except OSError:
-        return []
+        return 0
     except Exception:
-        return []
+        return added
+    return added
 
 
 def build_legal_lines(root=PINHOS_ROOT, cols=49):
     """Build wrapped (text, color_token) lines for the License & Legal Notices TextView."""
     r = root.rstrip("/")
-    notice = [ln.strip() for ln in _stream_lines(r + "/NOTICE", max_bytes=1024) if ln.strip()]
-    if not notice:
-        notice = ["Required Notice: Copyright (c) 2026 Bruno Pinho (bpinh0) (https://github.com/bpinh0/PinhOS)"]
-
-    header = [
+    wrapped = []
+    for txt, tok in (
         ("=== PINHOS LICENSE & LEGAL NOTICES ===", "info"),
         ("", "text"),
         ("[REQUIRED NOTICE]", "warn"),
-    ]
-    for ln in notice:
-        header.append((ln, "text"))
+    ):
+        _append_wrapped(wrapped, txt, tok, cols)
 
-    header.extend([
+    if _stream_into(wrapped, r + "/NOTICE", cols=cols, max_bytes=1024, heading_tok="text") == 0:
+        _append_wrapped(
+            wrapped,
+            "Required Notice: Copyright (c) 2026 Bruno Pinho (bpinh0) (https://github.com/bpinh0/PinhOS)",
+            "text",
+            cols,
+        )
+
+    for txt, tok in (
         ("", "text"),
         ("[LICENSE SUMMARY]", "info"),
         ("PolyForm Noncommercial License 1.0.0", "ok"),
@@ -63,24 +75,11 @@ def build_legal_lines(root=PINHOS_ROOT, cols=49):
         ("ClockworkPi PicoCalc HAL & Fonts: OSS/MIT", "text"),
         ("", "text"),
         ("=== FULL LICENSE TEXT ===", "info"),
-    ])
+    ):
+        _append_wrapped(wrapped, txt, tok, cols)
 
-    lic_raw = _stream_lines(r + "/LICENSE", max_bytes=8192)
-    if lic_raw:
-        for ln in lic_raw:
-            s = ln.strip()
-            tok = "info" if s.startswith("#") else "text"
-            header.append((s, tok))
-    else:
-        header.append(("(See https://polyformproject.org/licenses/noncommercial/1.0.0)", "text"))
-
-    wrapped = []
-    for txt, tok in header:
-        if not txt:
-            wrapped.append(("", "text"))
-        else:
-            for i in range(0, len(txt), cols):
-                wrapped.append((txt[i:i + cols], tok))
+    if _stream_into(wrapped, r + "/LICENSE", cols=cols, max_bytes=6144, heading_tok="info") == 0:
+        _append_wrapped(wrapped, "(See https://polyformproject.org/licenses/noncommercial/1.0.0)", "text", cols)
     return wrapped
 
 
