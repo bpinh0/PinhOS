@@ -205,6 +205,7 @@ def test_webportal_loopback(root="/sd/pinhos"):
         board.ensure_serial_repl()
 
     # Verify #58 (Legal viewer), #62 (12h/24h + EU/US/ISO date), #75 (per-app logs), #77 (policy gate)
+    import sys
     gc.collect()
     from core.config import format_time, format_date
     _dt = (2026, 11, 27, 4, 15, 7, 9, 0)
