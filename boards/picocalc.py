@@ -1050,7 +1050,7 @@ class PicoCalcBoard(BoardBase):
     # --- Audio / PWM Buzzer ---
 
     def beep(self, freq=1200, duration_ms=18, volume=50):
-        if not self.config.get("sound", True) or volume <= 0:
+        if not self.config.get("sound", True) or volume <= 0 or self.audio_playing():
             return False
         if machine is None:
             return False
