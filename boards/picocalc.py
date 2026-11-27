@@ -82,7 +82,8 @@ PIN_SD_MISO  = 16
 PIN_SD_CS    = 17
 PIN_SD_SCK   = 18
 PIN_SD_MOSI  = 19
-SD_BAUDRATE  = 12_000_000
+SD_BAUDRATE  = 25_000_000
+SD_BAUDRATE_FALLBACK = 12_000_000
 
 # Audio: Dual PWM Piezo / Speaker Outputs (RP2350 PWM Slice 5: GP26=ChA, GP27=ChB)
 PIN_AUDIO_L  = 26
@@ -186,12 +187,11 @@ class PicoCalcBoard(BoardBase):
         self._last_bl_poll_ms = 0
         self._last_hw_bl = None
         self._bl_scale = 255
+        self._sd_spi_boosted = False
         # Cooperative PWM WAV audio streaming state (zero per-chunk heap allocation)
         self._aud_f = None
         self._aud_pwm_l = None
         self._aud_pwm_r = None
-        self._aud_buf = None
-        self._aud_mv = None
         self._aud_rate = 0
         self._aud_ch = 1
         self._aud_bits = 8
@@ -866,10 +866,79 @@ class PicoCalcBoard(BoardBase):
             self._sd_mounted = False
             return False
 
+    def _boost_sd_spi(self, baudrate=SD_BAUDRATE, mount_point="/sd"):
+        """
+        Safely boost SPI0 clock to 25 MHz (SD SPI spec max) after mount.
+        Auto-falls back to 12 MHz if the card fails a quick directory read.
+        """
+        if self._sd_spi_boosted:
+            return True
+        spi_obj = None
+        if self._hw is not None:
+            for attr in ("sd", "sdcard"):
+                obj = getattr(self._hw, attr, None)
+                if obj is None:
+                    continue
+                for sub in ("spi", "_spi"):
+                    cand = getattr(obj, sub, None)
+                    if cand is not None and hasattr(cand, "init"):
+                        spi_obj = cand
+                        break
+                if spi_obj is None:
+                    inner = getattr(obj, "sd", None) or getattr(obj, "sdcard", None)
+                    if inner is not None:
+                        cand = getattr(inner, "spi", None) or getattr(inner, "_spi", None)
+                        if cand is not None and hasattr(cand, "init"):
+                            spi_obj = cand
+                if spi_obj is not None:
+                    break
+        try:
+            if spi_obj is not None:
+                spi_obj.init(baudrate=int(baudrate))
+            elif machine is not None:
+                machine.SPI(
+                    SPI_SD_BUS,
+                    baudrate=int(baudrate),
+                    polarity=0,
+                    phase=0,
+                    bits=8,
+                    firstbit=machine.SPI.MSB,
+                    sck=machine.Pin(PIN_SD_SCK),
+                    mosi=machine.Pin(PIN_SD_MOSI),
+                    miso=machine.Pin(PIN_SD_MISO),
+                )
+            else:
+                return False
+            # Verify card still responds cleanly at boosted clock
+            os.listdir(mount_point)
+            self._sd_spi_boosted = True
+            return True
+        except Exception:
+            # Fallback to safe 12 MHz if card/wiring dislikes 25 MHz
+            try:
+                if spi_obj is not None:
+                    spi_obj.init(baudrate=int(SD_BAUDRATE_FALLBACK))
+                elif machine is not None:
+                    machine.SPI(
+                        SPI_SD_BUS,
+                        baudrate=int(SD_BAUDRATE_FALLBACK),
+                        polarity=0,
+                        phase=0,
+                        bits=8,
+                        firstbit=machine.SPI.MSB,
+                        sck=machine.Pin(PIN_SD_SCK),
+                        mosi=machine.Pin(PIN_SD_MOSI),
+                        miso=machine.Pin(PIN_SD_MISO),
+                    )
+            except Exception:
+                pass
+            return False
+
     def mount_sd(self, mount_point="/sd", retries=3):
         """Mount the PicoCalc SPI0 microSD card with automatic retry backoff."""
         self._sd_mount_point = mount_point
         if self.is_sd_mounted(mount_point):
+            self._boost_sd_spi(SD_BAUDRATE, mount_point)
             return True
 
         tries = max(1, int(retries))
@@ -881,6 +950,7 @@ class PicoCalcBoard(BoardBase):
                     if sd_obj is not None and hasattr(sd_obj, "mount"):
                         sd_obj.mount()
                         if self.is_sd_mounted(mount_point):
+                            self._boost_sd_spi(SD_BAUDRATE, mount_point)
                             return True
                 # 2. Try standard machine.SDCard / sdcard driver on SPI0 pins
                 if machine is not None:
@@ -896,6 +966,7 @@ class PicoCalcBoard(BoardBase):
                         sd = sdcard.SDCard(spi, machine.Pin(PIN_SD_CS, machine.Pin.OUT))
                         os.mount(sd, mount_point)
                         if self.is_sd_mounted(mount_point):
+                            self._sd_spi_boosted = True
                             return True
                     except Exception:
                         pass
@@ -908,7 +979,10 @@ class PicoCalcBoard(BoardBase):
                 except Exception:
                     time.sleep(0.1)
 
-        return self.is_sd_mounted(mount_point)
+        if self.is_sd_mounted(mount_point):
+            self._boost_sd_spi(SD_BAUDRATE, mount_point)
+            return True
+        return False
 
     def unmount_sd(self, mount_point="/sd"):
         if not self.is_sd_mounted(mount_point):
@@ -916,6 +990,7 @@ class PicoCalcBoard(BoardBase):
         try:
             os.umount(mount_point)
             self._sd_mounted = False
+            self._sd_spi_boosted = False
             return True
         except Exception:
             return False
