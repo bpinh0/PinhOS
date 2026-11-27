@@ -436,4 +436,22 @@ def test_desktop_home(root="/sd/pinhos"):
     _assert('"min_block"' in ws_src and '"needs_radio": True' in ws_src, "wifi_spectrum meta missing min_block/needs_radio")
     _assert("board.poll_input()" not in ws_src and "poll_key" in ws_src, "wifi_spectrum must use poll_key()")
 
+    # 5. Strict SandboxPolicyError pre-flight gate (#77)
+    from core.sandbox import parse_app_meta, inspect_app, SandboxPolicyError
+    for ap_fn in ("hello_world.py", "matrix_deck.py", "wifi_spectrum.py"):
+        _m = inspect_app(root.rstrip("/") + "/apps/" + ap_fn, strict=True)
+        _assert(_m.get("id") and _m.get("min_sram", 0) >= 16384, "Shipped app failed strict policy: " + ap_fn)
+    _bad_cases = (
+        'APP_META={"id":"Bad-ID","name":"x","version":"1","category":"u","entry":"main","min_sram":16384,"ui_modes":["gui"]}\ndef main(ctx): pass\n',
+        'APP_META={"id":"ok_id","name":"x","version":"1","category":"u","entry":"main","min_sram":16384,"ui_modes":["gui"]}\nimport machine\ndef main(ctx): machine.Pin(1)\n',
+        'APP_META={"id":"ok_id","name":"x","version":"1","category":"u","entry":"main","min_sram":16384,"ui_modes":["gui"]}\ndef main(ctx): ctx.board.poll_input()\n',
+    )
+    for _bs in _bad_cases:
+        _blocked = False
+        try:
+            parse_app_meta(_bs, strict=True)
+        except SandboxPolicyError:
+            _blocked = True
+        _assert(_blocked, "Strict policy gate failed to block unsafe app")
+
     return "Home+L/R+F1+SchemaV2+Notes<=1KB (d={}B)".format(delta)
