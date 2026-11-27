@@ -88,9 +88,6 @@ SD_BAUDRATE_FALLBACK = 12_000_000
 # Audio: Dual PWM Piezo / Speaker Outputs (RP2350 PWM Slice 5: GP26=ChA, GP27=ChB)
 PIN_AUDIO_L  = 26
 PIN_AUDIO_R  = 27
-_RP2350_PWM5_CC  = 0x400A8070
-_RP2350_PWM5_TOP = 0x400A8074
-_RP2350_DMA_TMR0 = 0x50000440
 
 # Serial Bridge: UART0 (COM4 dupterm) & Auxiliary Field Console: UART1 (side header)
 UART_BRIDGE_BUS = 0
@@ -182,27 +179,8 @@ class PicoCalcBoard(BoardBase):
         self._last_hw_bl = None
         self._bl_scale = 255
         self._sd_spi_boosted = False
-        # Cooperative PWM WAV audio streaming state (zero per-chunk heap allocation)
-        self._aud_f = None
-        self._aud_pwm_l = None
-        self._aud_pwm_r = None
-        self._aud_rate = 0
-        self._aud_ch = 1
-        self._aud_bits = 8
-        self._aud_rem = 0
-        self._aud_buf = None
-        self._aud_mv = None
-        self._aud_total = 0
-        self._aud_bps = 1
-        self._aud_us = 125
-        self._aud_top = 0
-        self._aud_dma = None
-        self._aud_ctrl = None
-        self._aud_dma_bufs = None
-        self._aud_cur = 0
-        self._aud_armed = None
-        self._aud_pack = None
-        self._aud_feed = None
+        # Lazy-loaded RP2350 DMA/Viper WAV audio engine (0 B SRAM when idle)
+        self._aud = None
         self._aud_err = ""
 
     def init(self):
@@ -1158,318 +1136,58 @@ class PicoCalcBoard(BoardBase):
             return False
 
     def play_audio(self, path):
-        """
-        Start cooperative non-blocking PCM WAV playback over PicoCalc PWM (GP26 L / GP27 R @ 62.5 kHz).
-        Parses RIFF/WAVE headers (8/16-bit, mono/stereo, 8000-22050 Hz), skips LIST/INFO metadata
-        subchunks cleanly, and lazily allocates one reusable 512 B buffer (zero per-chunk allocation).
-        """
-        import struct
+        """Lazy-load RP2350 chained-DMA WAV player (0 B SRAM when idle)."""
         self.stop_audio()
         self._aud_err = ""
-        f = None
         try:
-            f = open(path, "rb")
-            hdr = f.read(12)
-            if len(hdr) < 12 or hdr[0:4] != b"RIFF" or hdr[8:12] != b"WAVE":
-                self._aud_err = "Not a RIFF/WAVE file"
-                f.close()
-                return False
-            fmt_ok = False
-            ch, rate, bits, data_sz = 1, 8000, 8, 0
-            while True:
-                chdr = f.read(8)
-                if len(chdr) < 8:
-                    break
-                cid, csz = struct.unpack("<4sI", chdr)
-                if cid == b"fmt ":
-                    fb = f.read(min(16, csz))
-                    if len(fb) < 16:
-                        self._aud_err = "Truncated fmt chunk"
-                        f.close()
-                        return False
-                    afmt, ch, rate, _, _, bits = struct.unpack("<HHIIHH", fb)
-                    if csz > 16:
-                        f.seek(csz - 16, 1)
-                    if csz & 1:
-                        f.seek(1, 1)
-                    if afmt != 1 or ch not in (1, 2) or bits not in (8, 16) or rate < 8000 or rate > 22050:
-                        self._aud_err = "Need PCM 8/16b 8-22kHz"
-                        f.close()
-                        return False
-                    fmt_ok = True
-                elif cid == b"data":
-                    data_sz = csz
-                    break
-                else:
-                    # Skip LIST / INFO / JUNK / fact / bext metadata subchunks cleanly
-                    f.seek(csz + (csz & 1), 1)
-            if (not fmt_ok) or data_sz <= 0:
-                self._aud_err = "Missing PCM data chunk"
-                f.close()
-                return False
-            if self._aud_buf is None:
-                self._aud_buf = bytearray(4096)
-                self._aud_mv = memoryview(self._aud_buf)
-            self._aud_top = 0
-            if machine is not None:
-                self._aud_pwm_l = machine.PWM(machine.Pin(PIN_AUDIO_L))
-                self._aud_pwm_r = machine.PWM(machine.Pin(PIN_AUDIO_R))
-                self._aud_pwm_l.freq(62500)
-                self._aud_pwm_r.freq(62500)
-                self._aud_pwm_l.duty_u16(32768)
-                self._aud_pwm_r.duty_u16(32768)
-                try:
-                    t = int(machine.mem32[_RP2350_PWM5_TOP]) & 0xFFFF
-                    if 100 <= t <= 65535:
-                        self._aud_top = t
-                except Exception:
-                    self._aud_top = 0
-            self._aud_f = f
-            self._aud_rate = rate
-            self._aud_ch = ch
-            self._aud_bits = bits
-            self._aud_total = data_sz
-            self._aud_rem = data_sz
-            self._aud_bps = max(1, rate * ch * (bits // 8))
-            self._aud_us = max(40, 1000000 // rate)
-            # Lazy-load native ARM Thumb-2 @viper audio helpers (0 B SRAM when idle)
-            self._aud_pack = None
-            self._aud_feed = None
-            try:
-                from boards._audio_viper import feed_pwm, pack_pwm
-                self._aud_pack = pack_pwm
-                self._aud_feed = feed_pwm
-            except Exception:
-                pass
-            # Engage RP2350 dual-channel hardware-chained rp2.DMA ping-pong (0 ns gap, 1.000x pitch)
-            if machine is not None and self._aud_top > 0 and self._aud_pack is not None:
-                try:
-                    import rp2
-                    if hasattr(rp2, "DMA"):
-                        # Configure DMA pacing TIMER0: sys_clk * 1 / y = sample rate (TREQ_SEL=0x3B)
-                        div_y = max(1, min(65535, int(machine.freq()) // rate))
-                        machine.mem32[_RP2350_DMA_TMR0] = (1 << 16) | div_y
-                        self._aud_dma_bufs = (array.array("I", bytearray(8192)), array.array("I", bytearray(8192)))
-                        d0 = rp2.DMA()
-                        d1 = rp2.DMA()
-                        self._aud_dma = (d0, d1)
-                        c_chain = (
-                            d0.pack_ctrl(size=2, inc_read=True, inc_write=False, treq_sel=0x3B, chain_to=d1.channel),
-                            d1.pack_ctrl(size=2, inc_read=True, inc_write=False, treq_sel=0x3B, chain_to=d0.channel),
-                        )
-                        c_stop = (
-                            d0.pack_ctrl(size=2, inc_read=True, inc_write=False, treq_sel=0x3B, chain_to=d0.channel),
-                            d1.pack_ctrl(size=2, inc_read=True, inc_write=False, treq_sel=0x3B, chain_to=d1.channel),
-                        )
-                        self._aud_ctrl = (c_chain, c_stop)
-                        self._aud_cur = 0
-                        self._aud_armed = [False, False]
-                        c0 = self._fill_dma_buf(0)
-                        c1 = self._fill_dma_buf(1) if c0 > 0 else 0
-                        if c0 > 0:
-                            if c1 > 0:
-                                d1.config(
-                                    read=self._aud_dma_bufs[1],
-                                    write=_RP2350_PWM5_CC,
-                                    count=c1,
-                                    ctrl=c_chain[1] if self._aud_rem > 0 else c_stop[1],
-                                    trigger=False,
-                                )
-                                self._aud_armed[1] = True
-                                d0.config(
-                                    read=self._aud_dma_bufs[0],
-                                    write=_RP2350_PWM5_CC,
-                                    count=c0,
-                                    ctrl=c_chain[0],
-                                    trigger=True,
-                                )
-                            else:
-                                d0.config(
-                                    read=self._aud_dma_bufs[0],
-                                    write=_RP2350_PWM5_CC,
-                                    count=c0,
-                                    ctrl=c_stop[0],
-                                    trigger=True,
-                                )
-                            self._aud_armed[0] = True
-                except Exception:
-                    if self._aud_dma is not None:
-                        for _d in self._aud_dma:
-                            try:
-                                _d.active(0)
-                                _d.close()
-                            except Exception:
-                                pass
-                    self._aud_dma = None
-                    self._aud_ctrl = None
-                    self._aud_dma_bufs = None
-                    self._aud_armed = None
-            return True
+            from boards._audio_viper import WavDmaPlayer
+            p = WavDmaPlayer(PIN_AUDIO_L, PIN_AUDIO_R)
+            if p.play(path):
+                self._aud = p
+                return True
+            self._aud_err = p.err
+            p.stop()
         except Exception as e:
             self._aud_err = str(e)[:32]
-            if f is not None:
-                try:
-                    f.close()
-                except Exception:
-                    pass
-            self.stop_audio()
-            return False
-
-    def _fill_dma_buf(self, slot):
-        """Read next PCM chunk from SD and pack into 32-bit PWM5_CC words for DMA slot 0/1."""
-        f = self._aud_f
-        rem = self._aud_rem
-        if f is None or rem <= 0 or self._aud_dma_bufs is None:
-            return 0
-        # Cap read bytes so packed sample count never exceeds 2048 words (8 KB slot)
-        bps_frame = self._aud_ch * (self._aud_bits // 8)
-        max_b = min(4096, 2048 * bps_frame)
-        want = max_b if rem >= max_b else rem
-        try:
-            n = f.readinto(self._aud_mv[:want])
-        except Exception:
-            return 0
-        if not n:
-            self._aud_rem = 0
-            return 0
-        self._aud_rem = rem - n
-        return int(self._aud_pack(self._aud_buf, self._aud_dma_bufs[slot], n, self._aud_bits, self._aud_ch, self._aud_top))
+        self.stop_audio()
+        return False
 
     def step_audio(self):
-        """Refill idle ping-pong DMA buffer while hardware chains continuously (0 ns gap)."""
-        if self._aud_dma is not None:
-            dmas = self._aud_dma
-            cur = self._aud_cur
-            if dmas[cur].active():
-                return True
-            # Hardware already chained from cur -> nxt; refill cur while nxt plays
-            nxt = 1 - cur
-            c_chain, c_stop = self._aud_ctrl
-            c = self._fill_dma_buf(cur) if self._aud_rem > 0 else 0
-            if c > 0:
-                dmas[cur].config(
-                    read=self._aud_dma_bufs[cur],
-                    write=_RP2350_PWM5_CC,
-                    count=c,
-                    ctrl=c_chain[cur] if self._aud_rem > 0 else c_stop[cur],
-                    trigger=False,
-                )
-                self._aud_armed[cur] = True
-                # Underrun safety net: if nxt also finished while Core 0 was busy, restart cur
-                if self._aud_armed[nxt] and not dmas[nxt].active():
-                    dmas[cur].active(1)
-                    return True
-            else:
-                self._aud_armed[cur] = False
-            self._aud_cur = nxt
-            if not self._aud_armed[nxt] or (not dmas[nxt].active() and not self._aud_armed[cur]):
-                self.stop_audio()
-                return False
+        if self._aud is None:
+            return False
+        if self._aud.step():
             return True
-
-        f = self._aud_f
-        rem = self._aud_rem
-        if f is None or rem <= 0:
-            if f is not None:
-                self.stop_audio()
-            return False
-        mv = self._aud_mv
-        want = 4096 if rem >= 4096 else rem
-        try:
-            n = f.readinto(mv[:want])
-        except Exception:
-            self.stop_audio()
-            return False
-        if not n:
-            self.stop_audio()
-            return False
-        self._aud_rem = rem - n
-        pl = self._aud_pwm_l
-        pr = self._aud_pwm_r
-        if pl is not None and pr is not None:
-            if self._aud_feed is not None and self._aud_top > 0:
-                self._aud_feed(self._aud_buf, n, self._aud_bits, self._aud_ch, self._aud_us, self._aud_top)
-            else:
-                # Minimal fallback if _audio_viper is unavailable
-                step = self._aud_ch * (self._aud_bits // 8)
-                i = 0
-                lim = n - step + 1
-                while i < lim:
-                    d = (mv[i] << 8) if self._aud_bits == 8 else ((mv[i] | (mv[i + 1] << 8)) ^ 0x8000)
-                    pl.duty_u16(d); pr.duty_u16(d)
-                    i += step
-        if self._aud_rem <= 0:
-            self.stop_audio()
-            return False
-        return True
+        self.stop_audio()
+        return False
 
     def audio_playing(self):
-        if self._aud_dma is not None:
-            try:
-                if self._aud_dma[0].active() or self._aud_dma[1].active():
-                    return True
-                if self._aud_armed and (self._aud_armed[0] or self._aud_armed[1]):
-                    return True
-            except Exception:
-                pass
-        return bool(self._aud_f is not None and self._aud_rem > 0)
+        return bool(self._aud is not None and self._aud.playing())
 
     def audio_status(self):
-        playing = self.audio_playing()
-        played = max(0, self._aud_total - self._aud_rem)
-        bps = max(1, self._aud_bps)
+        if self._aud is not None:
+            return self._aud.status()
         return {
-            "playing": playing,
-            "pos_s": played // bps,
-            "dur_s": self._aud_total // bps,
-            "rate": self._aud_rate,
-            "ch": self._aud_ch,
-            "bits": self._aud_bits,
+            "playing": False,
+            "pos_s": 0,
+            "dur_s": 0,
+            "rate": 0,
+            "ch": 1,
+            "bits": 8,
             "error": self._aud_err,
         }
 
     def stop_audio(self):
-        if self._aud_dma is not None:
-            for _d in self._aud_dma:
-                try:
-                    _d.active(0)
-                    _d.close()
-                except Exception:
-                    pass
+        if self._aud is not None:
             try:
-                if machine is not None:
-                    machine.mem32[_RP2350_DMA_TMR0] = 0
+                self._aud.stop()
             except Exception:
                 pass
-            self._aud_dma = None
-        self._aud_ctrl = None
-        self._aud_dma_bufs = None
-        self._aud_armed = None
-        self._aud_pack = None
-        self._aud_feed = None
+            self._aud = None
         try:
             import sys as _sys
             _sys.modules.pop("boards._audio_viper", None)
         except Exception:
             pass
-        if self._aud_f is not None:
-            try:
-                self._aud_f.close()
-            except Exception:
-                pass
-            self._aud_f = None
-        self._aud_rem = 0
-        self._aud_buf = None
-        self._aud_mv = None
-        for attr in ("_aud_pwm_l", "_aud_pwm_r"):
-            p = getattr(self, attr, None)
-            if p is not None:
-                try:
-                    p.duty_u16(0)
-                    p.deinit()
-                except Exception:
-                    pass
-                setattr(self, attr, None)
         if machine is None:
             return
         for pin_id in (PIN_AUDIO_L, PIN_AUDIO_R):
