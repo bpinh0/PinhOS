@@ -83,6 +83,8 @@ MENU_TREE = {
         {"id": "set:ram_crit", "label": "RAM Crit (Red <)", "dyn": "ram_crit"},
         {"id": "set:cpu_warn", "label": "CPU Warn (Amber >=)", "dyn": "cpu_warn"},
         {"id": "set:cpu_crit", "label": "CPU Crit (Red >=)", "dyn": "cpu_crit"},
+        {"id": "set:bat_warn", "label": "BAT Warn (Amber <=)", "dyn": "bat_warn"},
+        {"id": "set:bat_crit", "label": "BAT Crit (Red <=)", "dyn": "bat_crit"},
     )),
     "set_bar_snd": ("Status Bar & Sound", (
         {"id": "set:wifi_ind", "label": "Wi-Fi Indicator", "dyn": "wifi_ind"},
@@ -284,6 +286,10 @@ def _dyn_badge(tag, board, ui, manifest, cfg=None):
         return "{}%".format(int(cfg.get("cpu_warn_pct", 50) if cfg else 50))
     if tag == "cpu_crit":
         return "{}%".format(int(cfg.get("cpu_crit_pct", 80) if cfg else 80))
+    if tag == "bat_warn":
+        return "{}%".format(int(cfg.get("bat_warn_pct", 25) if cfg else 25))
+    if tag == "bat_crit":
+        return "{}%".format(int(cfg.get("bat_crit_pct", 10) if cfg else 10))
     if tag == "sram_kb":
         return "{}KB free".format((gc.mem_free() // 1024) if hasattr(gc, "mem_free") else 256)
     if tag == "serial_link":
@@ -623,6 +629,24 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                             nv = opts[-1]
                         cfg.set("cpu_crit_pct", nv, save_now=True)
                     status_msg, status_kind = "CPU Crit: >={}%".format(nv), "ok"; _sync(force=True)
+                elif aid == "set:bat_warn":
+                    opts = (15, 20, 25, 30, 35, 40)
+                    cur = int(cfg.get("bat_warn_pct", 25) if cfg else 25)
+                    nv = opts[(opts.index(cur) + 1) % len(opts)] if cur in opts else 25
+                    if cfg:
+                        cfg.set("bat_warn_pct", nv, save_now=True)
+                        if int(cfg.get("bat_crit_pct", 10)) >= nv:
+                            cfg.set("bat_crit_pct", max(5, nv - 10), save_now=True)
+                    status_msg, status_kind = "BAT Warn: <={}%".format(nv), "ok"; _sync(force=True)
+                elif aid == "set:bat_crit":
+                    opts = (5, 10, 15, 20)
+                    cur = int(cfg.get("bat_crit_pct", 10) if cfg else 10)
+                    nv = opts[(opts.index(cur) + 1) % len(opts)] if cur in opts else 10
+                    if cfg:
+                        if nv >= int(cfg.get("bat_warn_pct", 25)):
+                            nv = opts[0]
+                        cfg.set("bat_crit_pct", nv, save_now=True)
+                    status_msg, status_kind = "BAT Crit: <={}%".format(nv), "ok"; _sync(force=True)
                 elif aid == "info:bat_rtc":
                     from core.config import format_datetime
                     b = board.get_battery()

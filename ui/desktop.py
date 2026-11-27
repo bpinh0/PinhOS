@@ -242,6 +242,8 @@ class DesktopHome(Widget):
         self.ram_crit_pct = 25
         self.cpu_warn_pct = 50
         self.cpu_crit_pct = 80
+        self.bat_warn_pct = 25
+        self.bat_crit_pct = 10
         self.bat_pct = 100
         self.bat_mv = 4150
         self.bat_chg = False
@@ -345,6 +347,9 @@ class DesktopHome(Widget):
                 cc = max(cw + 5, min(99, int(cfg.get("cpu_crit_pct", 80))))
                 self.ram_warn_pct, self.ram_crit_pct = rw, rc
                 self.cpu_warn_pct, self.cpu_crit_pct = cw, cc
+                bw = max(10, min(60, int(cfg.get("bat_warn_pct", 25))))
+                bc = max(5, min(bw - 5, int(cfg.get("bat_crit_pct", 10))))
+                self.bat_warn_pct, self.bat_crit_pct = bw, bc
             except Exception:
                 pass
         # Store fine-grained free RAM (0.1% of total heap, portable across boards) & CPU usage (0.1%)
@@ -569,14 +574,15 @@ class DesktopHome(Widget):
             self._prev_telem["sw_bar"] = sw_bar_key
             draw_styled_bar(b, lx + 6, y_sw + 9, lw - 12, 7, self.swap_pct, sw_bar_key[1], c_bg, c_bdr, style=bar_style, is_tui=is_tui)
 
-        # Battery % + Voltage bar
+        # Battery % + Voltage bar (configurable green / amber / red thresholds)
         y2 = y_sw + 19
         bat_lbl = "BAT {}% {}".format(self.bat_pct, "CHG" if self.bat_chg else "{:.1f}V".format(self.bat_mv / 1000.0))
-        self._draw_telem_row(b, "bat", bat_lbl[:23], lx + 6, y2, row_w, c_ok if (self.bat_chg or self.bat_pct > 25) else c_wrn, c_surf, full)
-        bat_bar_key = (self.bat_pct, c_ok if self.bat_pct > 25 else c_wrn, bar_style)
+        bat_col = c_ok if self.bat_chg else (c_err if self.bat_pct <= self.bat_crit_pct else (c_wrn if self.bat_pct <= self.bat_warn_pct else c_ok))
+        self._draw_telem_row(b, "bat", bat_lbl[:23], lx + 6, y2, row_w, bat_col, c_surf, full)
+        bat_bar_key = (self.bat_pct, bat_col, bar_style)
         if full or self._prev_telem.get("bat_bar") != bat_bar_key:
             self._prev_telem["bat_bar"] = bat_bar_key
-            draw_styled_bar(b, lx + 6, y2 + 9, lw - 12, 7, self.bat_pct, bat_bar_key[1], c_bg, c_bdr, style=bar_style, is_tui=is_tui)
+            draw_styled_bar(b, lx + 6, y2 + 9, lw - 12, 7, self.bat_pct, bat_col, c_bg, c_bdr, style=bar_style, is_tui=is_tui)
 
         # Simultaneous Status Rows below Battery Bar (Row 1: IP, Row 2: SIG/GUARD + Mode, Row 3: WEB, Row 4: BL/SD)
         if full:
