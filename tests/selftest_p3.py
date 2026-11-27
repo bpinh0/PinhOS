@@ -399,12 +399,14 @@ def test_desktop_home(root="/sd/pinhos"):
                 pass
         board.ensure_serial_repl()
 
-    # Release DesktopHome/UI/Theme modules (~55 KB) before running logger/sandbox/legal checks
+    # Release DesktopHome/UI/Theme locals & modules (~65 KB) before logger/sandbox/legal checks
+    _render_once = DesktopHome = show_help_dialog = load_notes = save_notes = append_note = None
+    Theme = ThemeManager = UIEngine = get_font = mv = mv_fb = None
     for _um in ("ui.desktop", "ui.gui", "ui.tui", "ui.engine", "ui.widgets", "ui.fonts", "ui.fonts_ext", "core.theme"):
         sys.modules.pop(_um, None)
     gc.collect(); gc.collect()
 
-    # 4. Compact crash.log heap/block forensics + wifi_spectrum metadata/input check (#75)
+    # 4. Compact crash.log heap/block forensics (#75)
     from core.logger import Logger
     tmp_ldir = root.rstrip("/") + "/logs/_g11_log"
     try:
@@ -426,6 +428,7 @@ def test_desktop_home(root="/sd/pinhos"):
         _assert("== CRASH [" in at and "== ABORT [" in at, "app log missing compact headers")
         _assert("app_wifi_test.log" in ct and len([ln for ln in ct.split("\n") if ln.strip()]) <= 4, "crash.log should stay concise with app log pointer")
     finally:
+        lg = at = ct = None
         for fn in ("crash.log", "system.log", "wdt.log", "app_wifi_test.log"):
             try:
                 os.remove(tmp_ldir + "/" + fn)
@@ -435,8 +438,11 @@ def test_desktop_home(root="/sd/pinhos"):
             os.rmdir(tmp_ldir)
         except OSError:
             pass
+    Logger = None
+    sys.modules.pop("core.logger", None)
+    gc.collect(); gc.collect()
+
     # 5. Strict SandboxPolicyError pre-flight gate (#77)
-    gc.collect()
     from core.sandbox import parse_app_meta, inspect_app, SandboxPolicyError
     for ap_fn in ("hello_world.py", "matrix_deck.py", "wifi_spectrum.py"):
         _m = inspect_app(root.rstrip("/") + "/apps/" + ap_fn, strict=True)
@@ -455,8 +461,9 @@ def test_desktop_home(root="/sd/pinhos"):
         except SandboxPolicyError:
             _blocked = True
         _assert(_blocked, "Strict policy gate failed to block unsafe app")
+    parse_app_meta = inspect_app = SandboxPolicyError = None
     sys.modules.pop("core.sandbox", None)
-    gc.collect()
+    gc.collect(); gc.collect()
 
     # 6. Configurable 12h/24h time & EU/US/ISO date formatting (#62) + Legal Notices viewer (#58)
     from core.config import format_time, format_date

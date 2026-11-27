@@ -22,7 +22,7 @@ def _append_wrapped(dst, txt, tok, cols=49):
         dst.append((txt[i:i + cols], tok))
 
 
-def _stream_into(dst, path, cols=49, max_bytes=6144, heading_tok="info"):
+def _stream_into(dst, path, cols=49, max_bytes=4096, max_lines=115, heading_tok="info"):
     """Stream text file line-by-line (zero multi-KB intermediate buffer) into wrapped lines."""
     read_b = 0
     added = 0
@@ -34,7 +34,7 @@ def _stream_into(dst, path, cols=49, max_bytes=6144, heading_tok="info"):
                 tok = heading_tok if s.startswith("#") else "text"
                 _append_wrapped(dst, s, tok, cols)
                 added += 1
-                if read_b >= max_bytes:
+                if read_b >= max_bytes or len(dst) >= max_lines:
                     break
     except OSError:
         return 0
