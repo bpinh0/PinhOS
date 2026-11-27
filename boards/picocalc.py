@@ -158,7 +158,10 @@ class PicoCalcBoard(BoardBase):
         self._stdin_poll = None
         self._kbuf = bytearray(8)
         self._lut = _build_default_lut()
-        self._refresh_active = False
+        # Core 1 auto-refresh is already active from UF2 cold boot; only call recoverRefresh()
+        # if stop_refresh() was explicitly called (repeated recoverRefresh() wedges Core 1 on RP2350).
+        import sys as _sys
+        self._refresh_active = not bool(_sys.modules.get("__pinhos_disp_stopped__"))
         self._fb_buf = None
         self._fb = None
         self.last_screenshot = None
@@ -262,15 +265,20 @@ class PicoCalcBoard(BoardBase):
                 except Exception:
                     pass
                 self._refresh_active = False
+                import sys as _sys
+                _sys.modules["__pinhos_disp_stopped__"] = True
 
     def recover_refresh(self, force=False):
         if self._disp is not None and hasattr(self._disp, "recoverRefresh"):
-            if force or not self._refresh_active:
+            import sys as _sys
+            stopped = bool(_sys.modules.get("__pinhos_disp_stopped__"))
+            if force or not self._refresh_active or stopped:
                 try:
                     self._disp.recoverRefresh()
                 except Exception:
                     pass
                 self._refresh_active = True
+                _sys.modules.pop("__pinhos_disp_stopped__", None)
 
     def fill(self, color=0):
         if self._disp is not None:
