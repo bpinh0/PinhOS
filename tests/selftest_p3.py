@@ -272,7 +272,7 @@ def test_desktop_home(root="/sd/pinhos"):
     """Gate 11: Desktop Home (GUI+TUI), L/R Quick-Strip, [F1] Help, Theme Schema v2 + 6x8 Fonts & Notes <= 1 KB."""
     # 1. Verify 6-category Settings tree + NTP resync & WDT log picker on a clean heap, then unload ui.menu
     for _k in list(sys.modules):
-        if _k.startswith(("ui.", "core.", "tools.", "net.", "web.")) or _k in ("main", "_pinhos_main"):
+        if _k in ("ui", "core", "tools", "net", "web", "main", "_pinhos_main") or _k.startswith(("ui.", "core.", "tools.", "net.", "web.")):
             sys.modules.pop(_k, None)
     gc.collect(); gc.collect()
     from ui.menu import MENU_TREE
@@ -287,7 +287,7 @@ def test_desktop_home(root="/sd/pinhos"):
     MENU_TREE = None
     set_items = None
     time_items = None
-    for _um in ("ui.menu", "ui._menu_net", "ui._legal_view"):
+    for _um in ("ui", "ui.menu", "ui._menu_net", "ui._legal_view"):
         sys.modules.pop(_um, None)
 
     import ui._log_view as _lv
