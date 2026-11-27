@@ -548,7 +548,8 @@ class DesktopHome(Widget):
 
         # SRAM text + dynamic Y-axis 20px sparkline (configurable free % thresholds)
         y0 = cy + 18
-        self._draw_telem_row(b, "sram", "SRAM {}K/{}K".format(self.free_kb, self.used_kb)[:23], lx + 6, y0, row_w, c_inf, c_surf, full)
+        _rfp = (self.ram_hist[-1] // 10) if self.ram_hist else 0
+        self._draw_telem_row(b, "sram", "SRAM {}K/{}K {}%".format(self.free_kb, self.used_kb, _rfp)[:23], lx + 6, y0, row_w, c_inf, c_surf, full)
         sp_x, sp_y, sp_w, sp_h = lx + 6, y0 + 9, lw - 12, 20
         _draw_dyn_spark(self.ram_hist, sp_x, sp_y, sp_w, sp_h, self.ram_warn_pct * 10, self.ram_crit_pct * 10, 30, low_is_bad=True)
 

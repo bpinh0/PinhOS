@@ -176,6 +176,7 @@ class PicoCalcBoard(BoardBase):
         self._last_bl_set_ms = 0
         self._last_bl_poll_ms = 0
         self._last_hw_bl = None
+        self._bl_scale = 255
 
     def init(self):
         """Initialize PicoCalc display, STM32 I2C southbridge, backlights, and SD card."""
@@ -944,20 +945,20 @@ class PicoCalcBoard(BoardBase):
     # --- Screen & Keyboard Backlight PWM (0..100%) ---
 
     def _read_hw_backlight(self):
-        """Read raw LCD backlight level from STM32 southbridge (returns (val, scale) or None)."""
-        if self._kb is not None and hasattr(self._kb, "backlight"):
+        """Read raw STM32 LCD backlight register (0x05) via kb.read_reg16 or I2C (0..255 or 0..100)."""
+        if self._kb is not None and hasattr(self._kb, "read_reg16"):
             try:
-                v = self._kb.backlight()
-                if isinstance(v, (int, float)):
-                    iv = int(round(v))
-                    return (iv, 255 if iv > 100 else 100)
+                raw = self._kb.read_reg16(REG_SB_LCD_BKL)
+                if isinstance(raw, (bytes, bytearray)) and len(raw) >= 2:
+                    return int(raw[1])
             except Exception:
                 pass
         if self._i2c is not None:
             try:
-                raw = self._i2c.readfrom_mem(SB_I2C_ADDR, REG_SB_LCD_BKL, 2)
+                self._i2c.writeto(SB_I2C_ADDR, bytes([REG_SB_LCD_BKL]))
+                raw = self._i2c.readfrom(SB_I2C_ADDR, 2)
                 if isinstance(raw, (bytes, bytearray)) and len(raw) >= 2:
-                    return (int(raw[1]), 255)
+                    return int(raw[1])
             except Exception:
                 pass
         return None
@@ -971,20 +972,24 @@ class PicoCalcBoard(BoardBase):
         pct = max(0, min(100, int(round(percent))))
         self._backlight_pct = pct
         self._last_bl_set_ms = time.ticks_ms() if hasattr(time, "ticks_ms") else int(time.time() * 1000)
+        ok = False
         if self._kb is not None and hasattr(self._kb, "setBacklight"):
             try:
                 self._kb.setBacklight(pct)
-                self._last_hw_bl = self._read_hw_backlight()
-                return True
+                ok = True
             except Exception:
                 pass
-        if self._i2c is not None:
+        if (not ok) and self._i2c is not None:
             try:
                 self._i2c.writeto_mem(SB_I2C_ADDR, REG_SB_LCD_BKL, bytes([pct]))
-                self._last_hw_bl = self._read_hw_backlight()
-                return True
+                ok = True
             except Exception:
                 pass
+        hw = self._read_hw_backlight()
+        if hw is not None:
+            self._last_hw_bl = hw
+            if pct >= 50:
+                self._bl_scale = 255 if hw > 100 else 100
         return True
 
     def get_backlight(self):
@@ -992,13 +997,14 @@ class PicoCalcBoard(BoardBase):
         now_ms = time.ticks_ms() if hasattr(time, "ticks_ms") else int(time.time() * 1000)
         since_set = time.ticks_diff(now_ms, self._last_bl_set_ms) if hasattr(time, "ticks_diff") else (now_ms - self._last_bl_set_ms)
         since_poll = time.ticks_diff(now_ms, self._last_bl_poll_ms) if hasattr(time, "ticks_diff") else (now_ms - self._last_bl_poll_ms)
-        if (self._last_bl_set_ms == 0 or since_set > 1500) and (self._last_bl_poll_ms == 0 or since_poll > 1000):
+        if (self._last_bl_set_ms == 0 or since_set > 1500) and (self._last_bl_poll_ms == 0 or since_poll > 800):
             self._last_bl_poll_ms = now_ms
             hw = self._read_hw_backlight()
             if hw is not None:
-                if self._last_hw_bl is not None and hw[0] != self._last_hw_bl[0]:
-                    val, scale = hw
-                    self._backlight_pct = max(0, min(100, int(round((val * 100.0) / max(1, scale)))))
+                if hw > 100:
+                    self._bl_scale = 255
+                if self._last_hw_bl is not None and hw != self._last_hw_bl:
+                    self._backlight_pct = max(0, min(100, int(round((hw * 100.0) / max(1, self._bl_scale)))))
                 self._last_hw_bl = hw
         return int(self._backlight_pct)
 
