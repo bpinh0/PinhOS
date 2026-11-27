@@ -271,11 +271,9 @@ def test_phase3_field_tools(root="/sd/pinhos"):
 def test_desktop_home(root="/sd/pinhos"):
     """Gate 11: Desktop Home (GUI+TUI), L/R Quick-Strip, [F1] Help, Theme Schema v2 + 6x8 Fonts & Notes <= 1 KB."""
     # 1. Verify 6-category Settings tree + NTP resync & WDT log picker on a clean heap, then unload ui.menu
-    for _um in (
-        "ui.widgets", "ui.gui", "ui.tui", "ui.engine", "core.theme", "ui.fonts", "ui.desktop",
-        "ui._menu_net", "ui._legal_view", "core.logger", "core.swap", "core.watchdog", "net.wifi", "net.sync",
-    ):
-        sys.modules.pop(_um, None)
+    for _k in list(sys.modules):
+        if _k.startswith(("ui.", "core.", "tools.", "net.", "web.")) or _k in ("main", "_pinhos_main"):
+            sys.modules.pop(_k, None)
     gc.collect(); gc.collect()
     from ui.menu import MENU_TREE
     set_entry = MENU_TREE.get("settings", ("", ()))
