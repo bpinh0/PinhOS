@@ -1,4 +1,4 @@
-# PinhOS Phase 4 ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Cooperative uasyncio WebPortal HTTP Server (web/server.py)
+# PinhOS Phase 4 ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â Cooperative uasyncio WebPortal HTTP Server (web/server.py)
 # Strict RP2350 SRAM discipline: max_conns=3, 5s timeout, <=1KB chunked SD streaming,
 # PINHOS_ROOT path-traversal guard, board.* HAL routing, gc.collect() per request.
 
@@ -726,7 +726,7 @@ class WebServer:
             "temp_c": b.get_cpu_temp_c() if (b and hasattr(b, "get_cpu_temp_c")) else 28.0,
             "battery": b.get_battery() if (b and hasattr(b, "get_battery")) else {"percent": 100, "voltage_mv": 4200, "charging": False},
             "wifi": wf,
-            "version": str(self.manifest.get("version", "1.0.0-alpha.5.0")),
+            "version": str(self.manifest.get("version", "1.0.0-alpha.5.1")),
             "firmware_version": str(self.manifest.get("firmware_version", "")),
             "board": str(b.id) if b else "unknown",
             "root": self.root,
