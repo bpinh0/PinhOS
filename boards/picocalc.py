@@ -197,10 +197,10 @@ class PicoCalcBoard(BoardBase):
         self._aud_us = 125
         self._aud_top = 0
         self._aud_dma = None
-        self._aud_ctrl = 0
+        self._aud_ctrl = None
         self._aud_dma_bufs = None
         self._aud_cur = 0
-        self._aud_next_cnt = 0
+        self._aud_armed = None
         self._aud_pack = None
         self._aud_feed = None
         self._aud_err = ""
@@ -1241,7 +1241,7 @@ class PicoCalcBoard(BoardBase):
                 self._aud_feed = feed_pwm
             except Exception:
                 pass
-            # Engage RP2350 hardware rp2.DMA double-buffering (zero breaks, 1.000x exact pitch)
+            # Engage RP2350 dual-channel hardware-chained rp2.DMA ping-pong (0 ns gap, 1.000x pitch)
             if machine is not None and self._aud_top > 0 and self._aud_pack is not None:
                 try:
                     import rp2
@@ -1250,31 +1250,60 @@ class PicoCalcBoard(BoardBase):
                         div_y = max(1, min(65535, int(machine.freq()) // rate))
                         machine.mem32[_RP2350_DMA_TMR0] = (1 << 16) | div_y
                         self._aud_dma_bufs = (array.array("I", bytearray(8192)), array.array("I", bytearray(8192)))
-                        self._aud_dma = rp2.DMA()
-                        self._aud_ctrl = self._aud_dma.pack_ctrl(
-                            size=2, inc_read=True, inc_write=False, treq_sel=0x3B
+                        d0 = rp2.DMA()
+                        d1 = rp2.DMA()
+                        self._aud_dma = (d0, d1)
+                        c_chain = (
+                            d0.pack_ctrl(size=2, inc_read=True, inc_write=False, treq_sel=0x3B, chain_to=d1.channel),
+                            d1.pack_ctrl(size=2, inc_read=True, inc_write=False, treq_sel=0x3B, chain_to=d0.channel),
                         )
+                        c_stop = (
+                            d0.pack_ctrl(size=2, inc_read=True, inc_write=False, treq_sel=0x3B, chain_to=d0.channel),
+                            d1.pack_ctrl(size=2, inc_read=True, inc_write=False, treq_sel=0x3B, chain_to=d1.channel),
+                        )
+                        self._aud_ctrl = (c_chain, c_stop)
                         self._aud_cur = 0
-                        self._aud_next_cnt = 0
+                        self._aud_armed = [False, False]
                         c0 = self._fill_dma_buf(0)
+                        c1 = self._fill_dma_buf(1) if c0 > 0 else 0
                         if c0 > 0:
-                            self._aud_dma.config(
-                                read=self._aud_dma_bufs[0],
-                                write=_RP2350_PWM5_CC,
-                                count=c0,
-                                ctrl=self._aud_ctrl,
-                                trigger=True,
-                            )
-                            self._aud_next_cnt = self._fill_dma_buf(1)
+                            if c1 > 0:
+                                d1.config(
+                                    read=self._aud_dma_bufs[1],
+                                    write=_RP2350_PWM5_CC,
+                                    count=c1,
+                                    ctrl=c_chain[1] if self._aud_rem > 0 else c_stop[1],
+                                    trigger=False,
+                                )
+                                self._aud_armed[1] = True
+                                d0.config(
+                                    read=self._aud_dma_bufs[0],
+                                    write=_RP2350_PWM5_CC,
+                                    count=c0,
+                                    ctrl=c_chain[0],
+                                    trigger=True,
+                                )
+                            else:
+                                d0.config(
+                                    read=self._aud_dma_bufs[0],
+                                    write=_RP2350_PWM5_CC,
+                                    count=c0,
+                                    ctrl=c_stop[0],
+                                    trigger=True,
+                                )
+                            self._aud_armed[0] = True
                 except Exception:
                     if self._aud_dma is not None:
-                        try:
-                            self._aud_dma.active(0)
-                            self._aud_dma.close()
-                        except Exception:
-                            pass
+                        for _d in self._aud_dma:
+                            try:
+                                _d.active(0)
+                                _d.close()
+                            except Exception:
+                                pass
                     self._aud_dma = None
+                    self._aud_ctrl = None
                     self._aud_dma_bufs = None
+                    self._aud_armed = None
             return True
         except Exception as e:
             self._aud_err = str(e)[:32]
@@ -1307,29 +1336,36 @@ class PicoCalcBoard(BoardBase):
         return int(self._aud_pack(self._aud_buf, self._aud_dma_bufs[slot], n, self._aud_bits, self._aud_ch, self._aud_top))
 
     def step_audio(self):
-        """Feed one pre-allocated PCM chunk to GP26/GP27 PWM (non-blocking rp2.DMA double-buffer if active)."""
+        """Refill idle ping-pong DMA buffer while hardware chains continuously (0 ns gap)."""
         if self._aud_dma is not None:
-            dma = self._aud_dma
-            if dma.active():
-                if self._aud_next_cnt == 0 and self._aud_rem > 0:
-                    self._aud_next_cnt = self._fill_dma_buf(1 - self._aud_cur)
+            dmas = self._aud_dma
+            cur = self._aud_cur
+            if dmas[cur].active():
                 return True
-            if self._aud_next_cnt > 0:
-                self._aud_cur = 1 - self._aud_cur
-                cnt = self._aud_next_cnt
-                self._aud_next_cnt = 0
-                dma.config(
-                    read=self._aud_dma_bufs[self._aud_cur],
+            # Hardware already chained from cur -> nxt; refill cur while nxt plays
+            nxt = 1 - cur
+            c_chain, c_stop = self._aud_ctrl
+            c = self._fill_dma_buf(cur) if self._aud_rem > 0 else 0
+            if c > 0:
+                dmas[cur].config(
+                    read=self._aud_dma_bufs[cur],
                     write=_RP2350_PWM5_CC,
-                    count=cnt,
-                    ctrl=self._aud_ctrl,
-                    trigger=True,
+                    count=c,
+                    ctrl=c_chain[cur] if self._aud_rem > 0 else c_stop[cur],
+                    trigger=False,
                 )
-                if self._aud_rem > 0:
-                    self._aud_next_cnt = self._fill_dma_buf(1 - self._aud_cur)
-                return True
-            self.stop_audio()
-            return False
+                self._aud_armed[cur] = True
+                # Underrun safety net: if nxt also finished while Core 0 was busy, restart cur
+                if self._aud_armed[nxt] and not dmas[nxt].active():
+                    dmas[cur].active(1)
+                    return True
+            else:
+                self._aud_armed[cur] = False
+            self._aud_cur = nxt
+            if not self._aud_armed[nxt] or (not dmas[nxt].active() and not self._aud_armed[cur]):
+                self.stop_audio()
+                return False
+            return True
 
         f = self._aud_f
         rem = self._aud_rem
@@ -1370,7 +1406,9 @@ class PicoCalcBoard(BoardBase):
     def audio_playing(self):
         if self._aud_dma is not None:
             try:
-                if self._aud_dma.active() or self._aud_next_cnt > 0:
+                if self._aud_dma[0].active() or self._aud_dma[1].active():
+                    return True
+                if self._aud_armed and (self._aud_armed[0] or self._aud_armed[1]):
                     return True
             except Exception:
                 pass
@@ -1392,16 +1430,21 @@ class PicoCalcBoard(BoardBase):
 
     def stop_audio(self):
         if self._aud_dma is not None:
+            for _d in self._aud_dma:
+                try:
+                    _d.active(0)
+                    _d.close()
+                except Exception:
+                    pass
             try:
-                self._aud_dma.active(0)
-                self._aud_dma.close()
                 if machine is not None:
                     machine.mem32[_RP2350_DMA_TMR0] = 0
             except Exception:
                 pass
             self._aud_dma = None
+        self._aud_ctrl = None
         self._aud_dma_bufs = None
-        self._aud_next_cnt = 0
+        self._aud_armed = None
         self._aud_pack = None
         self._aud_feed = None
         try:
