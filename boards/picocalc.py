@@ -547,24 +547,25 @@ class PicoCalcBoard(BoardBase):
                 return None
 
             # Key released (state == 3): clear modifier if modifier key, else discard & check next FIFO slot
+            # PicoCalc STM32 scancodes: 0xA1=ALT, 0xA2=LSHIFT, 0xA3=RSHIFT, 0xA4=SYM, 0xA5=CTRL
             if state == 3:
-                if code in (0xA1, 0xA2):
+                if code in (0xA2, 0xA3):
                     self._modifiers &= ~MOD_SHIFT
-                elif code in (0xA3, 0xA5):
+                elif code == 0xA5:
                     self._modifiers &= ~MOD_CTRL
-                elif code == 0xA4:
+                elif code in (0xA1, 0xA4):
                     self._modifiers &= ~MOD_ALT
                 continue
 
             # Key pressed (state == 1) or held (state == 2)
             if state in (1, 2):
-                if code in (0xA1, 0xA2):
+                if code in (0xA2, 0xA3):
                     self._modifiers |= MOD_SHIFT
                     continue
-                if code in (0xA3, 0xA5):
+                if code == 0xA5:
                     self._modifiers |= MOD_CTRL
                     continue
-                if code == 0xA4:
+                if code in (0xA1, 0xA4):
                     self._modifiers |= MOD_ALT
                     continue
                 return bytes([code])
