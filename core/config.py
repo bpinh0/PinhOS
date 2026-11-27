@@ -58,6 +58,8 @@ DEFAULT_CONFIG = {
     "ram_crit_pct": 25,
     "cpu_warn_pct": 50,
     "cpu_crit_pct": 80,
+    "bat_warn_pct": 25,
+    "bat_crit_pct": 10,
     "sleep_timeout_s": 300,
     "rtc_save_interval_s": 300,
     "tz_offset_h": 0,
