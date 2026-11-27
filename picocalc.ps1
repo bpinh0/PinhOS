@@ -56,6 +56,8 @@ $ResolvedPort = Resolve-PicoPort $PortName
 # unless -NoMpy is specified, eliminating on-device AST compiler SRAM spikes.
 $DeployManifest = @(
     @{ Local = "version.json";          Remote = "/sd/pinhos/version.json" },
+    @{ Local = "LICENSE";               Remote = "/sd/pinhos/LICENSE" },
+    @{ Local = "NOTICE";                Remote = "/sd/pinhos/NOTICE" },
     @{ Local = "main.py";               Remote = "/sd/pinhos/main.py";              MpyMain = $true },
     @{ Local = "boards\__init__.py";    Remote = "/sd/pinhos/boards/__init__.py";   Mpy = $true },
     @{ Local = "boards\base.py";        Remote = "/sd/pinhos/boards/base.py";       Mpy = $true },
@@ -78,6 +80,7 @@ $DeployManifest = @(
     @{ Local = "ui\menu.py";            Remote = "/sd/pinhos/ui/menu.py";           Mpy = $true },
     @{ Local = "ui\_menu_net.py";       Remote = "/sd/pinhos/ui/_menu_net.py";      Mpy = $true },
     @{ Local = "ui\_log_view.py";       Remote = "/sd/pinhos/ui/_log_view.py";      Mpy = $true },
+    @{ Local = "ui\_legal_view.py";     Remote = "/sd/pinhos/ui/_legal_view.py";    Mpy = $true },
     @{ Local = "ui\desktop.py";         Remote = "/sd/pinhos/ui/desktop.py";        Mpy = $true },
     @{ Local = "net\__init__.py";       Remote = "/sd/pinhos/net/__init__.py";      Mpy = $true },
     @{ Local = "net\wifi.py";           Remote = "/sd/pinhos/net/wifi.py";          Mpy = $true },

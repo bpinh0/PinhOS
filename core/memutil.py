@@ -42,7 +42,7 @@ def largest_free(cap=98304, step=1024):
 
 
 _TRANSIENT_MODS = (
-    "ui.menu", "ui._menu_net", "ui._log_view", "net.sync",
+    "ui.menu", "ui._menu_net", "ui._log_view", "ui._legal_view", "net.sync",
     "core.sandbox", "boards.generic_spi", "ui.fonts_ext",
 )
 
