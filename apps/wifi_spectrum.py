@@ -14,7 +14,8 @@ APP_META = {
     "category": "Network",
     "description": "2.4 GHz channel congestion & RSSI spectrum analyzer",
     "entry": "main",
-    "min_sram": 24576,
+    "min_sram": 32768,
+    "min_block": 16384,
     "needs_radio": True,
     "ui_modes": ["gui", "tui", "native"],
     "native_libs": [],
@@ -35,13 +36,13 @@ def _rssi_to_h(rssi, max_h=110):
 
 
 def _extract_key(ev):
-    """Safely extract normalized key string from HAL poll_input() events."""
-    if ev is None:
+    """Safely extract normalized key string from HAL poll_key() events."""
+    if ev is None or ev is False or ev == 0 or ev == "":
         return None
     if isinstance(ev, str):
-        return ev.lower()
+        return None if ev == "\x00" else ev.lower()
     if isinstance(ev, int):
-        return chr(ev).lower() if 0 <= ev < 128 else str(ev)
+        return chr(ev).lower() if 1 <= ev < 128 else None
     if isinstance(ev, dict):
         if ev.get("pressed") is False or ev.get("state") == 0:
             return None
@@ -236,26 +237,32 @@ def main(ctx):
     _draw_spectrum(board, theme, [], view_mode, True, None)
     if hasattr(ctx, "yield_"):
         ctx.yield_(step_web=False)
+    gc.collect()
     aps, err = _scan_wifi()
     if hasattr(ctx, "yield_"):
         ctx.yield_(step_web=False)
     _draw_spectrum(board, theme, aps, view_mode, False, err)
+    if hasattr(board, "clear_input"):
+        board.clear_input()
+    poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
 
     while True:
+        _feed_wdt()
         if hasattr(ctx, "yield_"):
             ctx.yield_(step_web=False)
-        ev = board.poll_input()
+        ev = poll_fn() if poll_fn else None
         k_low = _extract_key(ev)
         if k_low is None:
             time.sleep_ms(30)
             continue
 
-        if k_low in ("esc", "key_esc", "\x1b", "q"):
+        if k_low in ("esc", "key_esc", "\x1b", "q", "back", "backspace"):
             break
-        elif k_low in ("r", " ", "enter", "key_enter", "\r", "\n"):
+        elif k_low in ("r", " ", "space", "enter", "key_enter", "\r", "\n"):
             _draw_spectrum(board, theme, aps, view_mode, True, None)
             if hasattr(ctx, "yield_"):
                 ctx.yield_(step_web=False)
+            gc.collect()
             aps, err = _scan_wifi()
             if hasattr(ctx, "yield_"):
                 ctx.yield_(step_web=False)

@@ -142,22 +142,123 @@ class Logger:
             self._append_file(self.crash_log_path, entry + "\n")
         return entry
 
-    def exception(self, context, exc):
+    def _heap_diag(self):
+        """Compact <=48-char heap/fragmentation summary for crash.log on 320x320 LCD."""
+        try:
+            gc.collect()
+            fk = (gc.mem_free() // 1024) if hasattr(gc, "mem_free") else 0
+            uk = (gc.mem_alloc() // 1024) if hasattr(gc, "mem_alloc") else 0
+            try:
+                from core.memutil import largest_free
+                bk = largest_free(cap=98304) // 1024
+            except Exception:
+                bk = fk
+            tag = " (FRAG!)" if (fk >= 48 and bk < 20) else (" (LOW!)" if fk < 32 else "")
+            return "{}K free | {}K blk | {}K used{}".format(fk, bk, uk, tag)
+        except Exception:
+            return "unavailable"
+
+    def _app_log_name(self, app_id):
+        s = "".join([c for c in str(app_id or "app") if ("a" <= c <= "z") or ("A" <= c <= "Z") or ("0" <= c <= "9") or c == "_"])[:16]
+        return "app_{}.log".format(s or "app")
+
+    def _append_capped(self, path, text, max_bytes=4096):
+        try:
+            st = os.stat(path)
+            if int(st[6]) > max_bytes:
+                with open(path, "rb") as f:
+                    f.seek(int(st[6]) - (max_bytes // 2))
+                    f.readline()
+                    tail = f.read(max_bytes // 2)
+                with open(path, "wb") as f:
+                    f.write(tail)
+        except OSError:
+            pass
+        return self._append_file(path, text)
+
+    def app_note(self, app_id, msg, kind="NOTE"):
+        """Write a compact note to /sd/pinhos/logs/app_<id>.log (4KB cap) + 1-line crash.log pointer."""
+        fn = self._app_log_name(app_id)
+        ap = self.log_dir + "/" + fn
+        ts = _now_str()
+        heap_line = self._heap_diag()
+        summary = str(msg)[:92]
+        block = "== {} [{}] ==\nWhy : {}\nHeap: {}\n".format(kind, ts, summary, heap_line)
+        self._append_capped(ap, block)
+        if kind in ("BLOCK", "ABORT", "ANR"):
+            self._append_file(self.crash_log_path, "[{}] APP({}): {} -> {}\n".format(ts, str(app_id)[:16], summary[:56], fn))
+        return self.log("WARN" if kind != "NOTE" else "INFO", "APP({}): {}".format(app_id, summary[:64]), persist=True)
+
+    def app_exception(self, app_id, exc):
+        """Write full compact crash + heap diagnostics to app_<id>.log & 2-line summary to crash.log."""
+        fn = self._app_log_name(app_id)
+        ap = self.log_dir + "/" + fn
+        ts = _now_str()
+        heap_line = self._heap_diag()
         buf = io.StringIO()
         if hasattr(sys, "print_exception"):
             sys.print_exception(exc, buf)
         else:
             import traceback
             traceback.print_exception(type(exc), exc, exc.__traceback__, file=buf)
-        tb_str = buf.getvalue()
-        summary = repr(exc)
-        entry = self.log("CRASH", "{}: {}".format(context, summary), persist=True)
-        crash_block = (
-            "=== PINHOS EXCEPTION [{}] ===\n"
-            "Context: {}\n"
-            "Fault  : {}\n"
+        raw_lines = [ln.strip() for ln in buf.getvalue().split("\n") if ln.strip()]
+        buf = None
+        tb_lines = [ln[:92] for ln in raw_lines if not ln.startswith("Traceback (")]
+        if len(tb_lines) > 4:
+            tb_lines = tb_lines[-4:]
+        tb_str = "\n".join(tb_lines)
+        summary = repr(exc)[:92]
+        app_block = (
+            "== CRASH [{}] ==\n"
+            "Err : {}\n"
+            "Heap: {}\n"
             "{}\n"
-        ).format(_now_str(), context, summary, tb_str)
+        ).format(ts, summary, heap_line, tb_str)
+        self._append_capped(ap, app_block)
+        crash_ptr = (
+            "[{}] APP({}): {}\n"
+            "  Heap: {} -> {}\n"
+        ).format(ts, str(app_id)[:16], summary[:56], heap_line, fn)
+        self._append_file(self.crash_log_path, crash_ptr)
+        return self.log("CRASH", "APP({}): {} [{}]".format(app_id, summary[:50], heap_line), persist=True)
+
+    def crash_note(self, context, msg):
+        """Write a compact 4-line fault/block note with live heap metrics to crash.log."""
+        heap_line = self._heap_diag()
+        summary = str(msg)[:92]
+        entry = self.log("CRASH", "{}: {}".format(context, summary), persist=True)
+        block = (
+            "== BLOCK [{}] ==\n"
+            "Ctx : {}\n"
+            "Why : {}\n"
+            "Heap: {}\n"
+        ).format(_now_str(), str(context)[:36], summary, heap_line)
+        self._append_file(self.crash_log_path, block)
+        return entry
+
+    def exception(self, context, exc):
+        heap_line = self._heap_diag()
+        buf = io.StringIO()
+        if hasattr(sys, "print_exception"):
+            sys.print_exception(exc, buf)
+        else:
+            import traceback
+            traceback.print_exception(type(exc), exc, exc.__traceback__, file=buf)
+        raw_lines = [ln.strip() for ln in buf.getvalue().split("\n") if ln.strip()]
+        buf = None
+        tb_lines = [ln[:92] for ln in raw_lines if not ln.startswith("Traceback (")]
+        if len(tb_lines) > 4:
+            tb_lines = tb_lines[-4:]
+        tb_str = "\n".join(tb_lines)
+        summary = repr(exc)[:92]
+        entry = self.log("CRASH", "{}: {} [{}]".format(context, summary[:60], heap_line), persist=True)
+        crash_block = (
+            "== CRASH [{}] ==\n"
+            "Ctx : {}\n"
+            "Err : {}\n"
+            "Heap: {}\n"
+            "{}\n"
+        ).format(_now_str(), str(context)[:36], summary, heap_line, tb_str)
         self._append_file(self.crash_log_path, crash_block)
         return entry
 
