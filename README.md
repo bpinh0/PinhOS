@@ -2,7 +2,7 @@
 
 **A modular, dual-UI MicroPython operating system and portable field cyberdeck platform for the ClockworkPi PicoCalc & Raspberry Pi Pico 2W (RP2350).**
 
-> 🚀 **Current Pre-Release: `v1.0.0-alpha.5.1`** — Phases 1–4.x + **Phase 5.1** (Theme Schema v2, selectable `6×8` fonts, `Obsidian Amber`, flicker-free partial `DesktopHome` telemetry & persistent sparklines, live `SHIFT` `F1`–`F5` ↔ `F6`–`F10` keybar + `[F1]` Help, `L/R` quick-strip, strict `COM4` `LNK` lock + popup, periodic RTC/NTP, Two-Stage Soft+Hard Watchdog & **MemGuard** SRAM reclaimer) complete & verified **12/12 Self-Test** on real PicoCalc (RP2350) hardware. Next up: SoftAP/Async Wi-Fi, Signed SHA-256 OTA & App Store.
+> 🚀 **Current Pre-Release: `v1.0.0-alpha.5.1.1`** — Phases 1–4.x + **Phase 5.1.1** (Theme Schema v2, selectable `6×8` fonts, `Obsidian Amber`, flicker-free `DesktopHome` with **real Core 0 CPU %**, **SRAM free %**, dynamic Green/Amber/Red sparklines with configurable RAM/CPU/Battery thresholds, live STM32 hardware backlight sync, `SHIFT` `F1`–`F5` ↔ `F6`–`F10` keybar + `[F1]` Help, strict `COM4` `LNK` lock, **App SDK v1** + starter template + `SandboxPolicyError` pre-flight policy gate + `.\picocalc.ps1 lint`, per-app `app_<id>.log` & `ALT+F5` ANR Force-Close, **License & Legal Notices** viewer, configurable `12h`/`24h` & `EU`/`US`/`ISO` date formats, Two-Stage Watchdog & **MemGuard**) complete & verified **12/12 Self-Test** on real PicoCalc (RP2350) hardware. Next up: SoftAP/Async Wi-Fi, Signed SHA-256 OTA & App Store.
 
 | Desktop Home | App Drawer | Settings & Menus | System Telemetry |
 | :---: | :---: | :---: | :---: |
@@ -14,7 +14,7 @@
 
 ## Key Features
 * **Dual-UI & Theme Schema v2 (`ui/`, `themes/`):** Live `[F3]`/`[TAB]` switching between an Android-style Desktop Home (with `LEFT`/`RIGHT` quick-strip category navigation) / 3×2 GUI Mosaic and high-density TUI mode with zero full-screen Python framebuffers, 5 hot-swappable JSON themes (`[F2]`, including **Obsidian Amber**), selectable `570 B` `6x8` bitmap fonts (`default`, `bold`, `retro`, or `/sd/pinhos/fonts/*.bin`), configurable widget chrome, and `[CTRL+P]` 320×320 BMP screenshots.
-* **Resilient RP2350 Kernel (`core/`, `main.py`):** 3-Strike Boot Guard with Safe Recovery & BSOD, Two-Stage Soft + Hard RP2350 Watchdog (`15s`/`30s`/`60s`/`OFF` + **"Not Responding"** Wait/Abort/Reboot dialog & `wdt.log` in `CTRL+L`), **MemGuard** idle/pre-flight SRAM reclaimer with lazy GUI/TUI backends, sandboxed `APP_META` app runner (`< 2 KB` SRAM delta), quota-managed SD `.swap/`, and 33-module pre-compiled `.mpy` (`-O2`, `v6.3`) core OS deployment.
+* **Resilient RP2350 Kernel & App SDK (`core/`, `main.py`, `docs/APP_DEV_GUIDE.md`):** 3-Strike Boot Guard with Safe Recovery & BSOD, Two-Stage Soft + Hard RP2350 Watchdog (`15s`/`30s`/`60s`/`OFF` + **"Not Responding"** dialog), **Android-style `ALT+F5` ANR Force-Close**, per-app `app_<id>.log` + compact `crash.log` heap diagnostics, **MemGuard** SRAM reclaimer, strict pre-flight **`SandboxPolicyError`** app safety gate (`< 2 KB` SRAM delta) + copy-paste template (`docs/templates/app_template.py`) + `.\picocalc.ps1 lint`, quota-managed SD `.swap/`, and 34-module pre-compiled `.mpy` (`-O2`, `v6.3`) core OS deployment.
 * **Built-In Field Tooling (`tools/`):** BusyBox-style CLI shell, streaming text/JSON editor, SD & flash file commander, DNS/TCP/subnet/WoL network probes, HAL-routed `UART1` serial console, and live SRAM/CPU/SD benchmark monitor.
 * **Hardened WebPortal Browser IDE (`web/`):** Non-blocking `uasyncio` HTTP/REST server + zero-dependency Browser IDE over Wi-Fi (live screen capture, virtual keyboard, SD explorer, code/theme editor, remote app launch) secured with fail-closed 16-hex `X-PinhOS-Token` auth, sensitive-file denylist, and 5-fail `429` lockout.
 * **Wi-Fi, Persistent RTC & GitHub Sync (`net/`):** Multi-SSID CYW43439 STA manager with RX-pumped stability, automatic boot & periodic background NTP sync, periodic/sleep/reboot SD `rtc_state.json` retention, and direct GitHub theme/app sync.
@@ -60,6 +60,7 @@ pinhos/
 2. **Insert a FAT32 microSD card**, connect USB-C (`COM4`), and deploy from PowerShell:
    ```powershell
    .\picocalc.ps1 build            # Offline mpy-cross (-O2, v6.3) bytecode & JSON check
+   .\picocalc.ps1 lint             # Offline App SDK contract & safety policy validator
    .\picocalc.ps1 com              # Port & live REPL health check
    .\picocalc.ps1 upload_and_start # Incremental .mpy/SD sync + 5s Boot Guard launch
    .\picocalc.ps1 test             # 12/12 on-device self-test gate
