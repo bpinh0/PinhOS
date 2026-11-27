@@ -1204,8 +1204,12 @@ def ui_loop(sel_action=0):
             try:
                 res = sbx.run_file(path, args=args, wait_on_error=True)
                 res_dict = res
-                smsg = "{} OK (d={}B)".format(label[:16], res.get("sram_delta", 0))
-                skind = "ok" if res.get("ok") else "err"
+                if res.get("aborted"):
+                    smsg = "Force-closed {}".format(label[:18])
+                    skind = "warn"
+                else:
+                    smsg = "{} OK (d={}B)".format(label[:16], res.get("sram_delta", 0))
+                    skind = "ok" if res.get("ok") else "err"
                 if logger:
                     blk = 0
                     try:
@@ -1231,7 +1235,10 @@ def ui_loop(sel_action=0):
                 res_dict = {"ok": False, "error": str(se), "sram_before": gc.mem_free() if hasattr(gc, "mem_free") else 0, "sram_after": gc.mem_free() if hasattr(gc, "mem_free") else 0}
                 if logger:
                     try:
-                        logger.warn("TOOL {} BLOCKED: {}".format(label, str(se)[:80]))
+                        if hasattr(logger, "crash_note"):
+                            logger.crash_note("SANDBOX({})".format(label[:20]), str(se))
+                        else:
+                            logger.warn("TOOL {} BLOCKED: {}".format(label, str(se)[:80]))
                     except Exception:
                         pass
         finally:
@@ -1320,6 +1327,11 @@ def ui_loop(sel_action=0):
             if res == "TOGGLE_WEBPORTAL":
                 # ui.menu has already been purged & GC'd -> ~35 KB extra contiguous SRAM for uasyncio + lwIP!
                 _toggle_webportal_ui()
+            elif isinstance(res, tuple) and len(res) >= 4 and res[0] == "RUN_SANDBOX":
+                # ui.menu has already been purged & GC'd -> ~35 KB extra contiguous SRAM for apps/tools!
+                from core.memutil import ensure_heap
+                ensure_heap(runtime_state, min_free=98304, min_blk=32768)
+                status_msg, status_kind = _exec_sandbox_file(res[1], res[2], res[3])
             theme_mgr._push_to_board(theme_mgr.active)
             view = _mount_view()
             view.sync(board, boot_state, BOOT_STABLE_MS, True, status_msg, status_kind)

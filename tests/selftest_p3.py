@@ -399,4 +399,41 @@ def test_desktop_home(root="/sd/pinhos"):
                 pass
         board.ensure_serial_repl()
 
+    # 4. Compact crash.log heap/block forensics + wifi_spectrum metadata/input check (#75)
+    from core.logger import Logger
+    tmp_ldir = root.rstrip("/") + "/logs/_g11_log"
+    try:
+        try:
+            os.mkdir(tmp_ldir)
+        except OSError:
+            pass
+        lg = Logger(log_dir=tmp_ldir)
+        try:
+            raise MemoryError("alloc 4096")
+        except MemoryError as _me:
+            lg.app_exception("wifi_test", _me)
+        lg.app_note("wifi_test", "Force-closed by user", kind="ABORT")
+        with open(tmp_ldir + "/app_wifi_test.log", "r") as f:
+            at = f.read()
+        with open(tmp_ldir + "/crash.log", "r") as f:
+            ct = f.read()
+        _assert("Heap:" in at and "K free |" in at and "K blk" in at, "app log missing Heap free/blk line")
+        _assert("== CRASH [" in at and "== ABORT [" in at, "app log missing compact headers")
+        _assert("app_wifi_test.log" in ct and len([ln for ln in ct.split("\n") if ln.strip()]) <= 4, "crash.log should stay concise with app log pointer")
+    finally:
+        for fn in ("crash.log", "system.log", "wdt.log", "app_wifi_test.log"):
+            try:
+                os.remove(tmp_ldir + "/" + fn)
+            except OSError:
+                pass
+        try:
+            os.rmdir(tmp_ldir)
+        except OSError:
+            pass
+    ws_path = root.rstrip("/") + "/apps/wifi_spectrum.py"
+    with open(ws_path, "r") as f:
+        ws_src = f.read()
+    _assert('"min_block"' in ws_src and '"needs_radio": True' in ws_src, "wifi_spectrum meta missing min_block/needs_radio")
+    _assert("board.poll_input()" not in ws_src and "poll_key" in ws_src, "wifi_spectrum must use poll_key()")
+
     return "Home+L/R+F1+SchemaV2+Notes<=1KB (d={}B)".format(delta)

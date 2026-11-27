@@ -40,6 +40,11 @@ class SandboxMemoryError(SandboxError):
     pass
 
 
+class SandboxAbort(SandboxError):
+    """Raised when an unresponsive app is force-closed by the user/OS ANR dialog."""
+    pass
+
+
 def get_free_sram():
     """Return free heap bytes in MicroPython (or a 256 KB baseline on standard CPython)."""
     gc.collect()
@@ -508,6 +513,15 @@ class AppContext:
             return self.swap.load(self.app_id, default=default)
         return default
 
+    def log(self, msg):
+        """Append a compact diagnostic note to this app's dedicated /sd/pinhos/logs/app_<id>.log."""
+        if self.logger is not None and hasattr(self.logger, "app_note"):
+            try:
+                return self.logger.app_note(self.app_id, msg, kind="NOTE")
+            except Exception:
+                pass
+        return None
+
     def yield_(self, step_web=True):
         """Cooperative yield for long-running tools: feeds hardware WDT and steps WebPortal/CYW43."""
         if builtins is not None:
@@ -566,12 +580,27 @@ class SandboxRunner:
             b.fill_rect(6, 6, 308, 26, 9)
             b.text("!! SANDBOX APP FAULT ISOLATED !!", 28, 15, 15)
             b.text("APP ID     : {}".format(str(app_id)[:24]), 14, 48, 3)
-            b.text("SRAM DELTA : {} B (RECLAIMED)".format(int(sram_delta)), 14, 68, 10)
-            b.text("EXCEPTION  :", 14, 92, 3)
+            b.text("SRAM DELTA : {} B (RECLAIMED)".format(int(sram_delta)), 14, 66, 10)
+            try:
+                gc.collect()
+                _fk = (gc.mem_free() // 1024) if hasattr(gc, "mem_free") else 0
+                try:
+                    from core.memutil import largest_free
+                    _bk = largest_free(cap=98304) // 1024
+                except Exception:
+                    _bk = _fk
+                _hc = 9 if _bk < 20 else (3 if _fk < 48 else 10)
+                b.text("HEAP       : {}K free | {}K blk".format(_fk, _bk), 14, 84, _hc)
+            except Exception:
+                pass
+            b.text("EXCEPTION  :", 14, 106, 3)
             err = str(error_str or "Unknown error")
-            b.text(err[:36], 14, 110, 15)
+            b.text(err[:36], 14, 124, 15)
             if len(err) > 36:
-                b.text(err[36:72], 14, 126, 15)
+                b.text(err[36:72], 14, 140, 15)
+            if len(err) > 72:
+                b.text(err[72:108], 14, 156, 15)
+            b.text("Log: app_{}.log (^L Logs)".format(str(app_id)[:16]), 14, 248, 6)
             b.fill_rect(10, 276, 300, 30, 8)
             b.rect(10, 276, 300, 30, 3)
             b.text("[ENTER / ESC / Q] Return to OS", 34, 287, 15)
@@ -598,6 +627,52 @@ class SandboxRunner:
             pass
         return None
 
+    def _prompt_anr(self, app_id, reason="App not responding", poll_fn=None):
+        """Android-style 'App Not Responding' dialog: [W/ENT] Keep Waiting or [K/ESC] Force Close."""
+        b = self.board
+        if b is None:
+            return "kill"
+        try:
+            import time
+            b.fill_rect(14, 78, 292, 152, 0)
+            b.rect(14, 78, 292, 152, 11)
+            b.fill_rect(16, 80, 288, 22, 11)
+            b.text("!! APP NOT RESPONDING !!", 48, 87, 0)
+            b.text("App : {}".format(str(app_id)[:28]), 24, 112, 15)
+            b.text("Why : {}".format(str(reason)[:28]), 24, 128, 6)
+            b.hline(20, 146, 280, 11)
+            b.text("[W / ENT] Keep Waiting", 24, 158, 10)
+            b.text("[K / ESC] Force Close App", 24, 178, 9)
+            b.hline(20, 200, 280, 11)
+            b.text("OS remains safe; RAM reclaimed", 24, 210, 6)
+            b.show()
+            b.clear_input()
+            pf = poll_fn or getattr(b, "poll_key", None) or getattr(b, "read_key", None)
+            _wd = sys.modules.get("__pinhos_wdt__")
+            while True:
+                if _wd is not None:
+                    try:
+                        _wd.feed()
+                    except Exception:
+                        pass
+                k = pf() if pf else None
+                if k:
+                    ku = str(k).upper()
+                    if ku in ("W", "ENTER", "RETURN", "SPACE", " "):
+                        b.beep(1300, 12)
+                        return "wait"
+                    if ku in ("K", "ESC", "Q", "BACK", "BACKSPACE", "A"):
+                        b.beep(900, 15)
+                        return "kill"
+                if hasattr(time, "sleep_ms"):
+                    time.sleep_ms(30)
+                else:
+                    time.sleep(0.03)
+        except KeyboardInterrupt:
+            return "kill"
+        except Exception:
+            return "kill"
+
     def _should_purge_mod(self, mod_name):
         """Purge only applet/tool modules — never clear core/net/ui/boards/web singletons (#16)."""
         for keep_pre in ("core", "net", "ui", "boards", "web", "tests", "asyncio", "uasyncio"):
@@ -609,30 +684,45 @@ class SandboxRunner:
         """Unified sandbox lifecycle for run_source() and run_file() (#6, #12, #16)."""
         app_id = meta["id"]
         min_sram = int(meta["min_sram"])
-        web_up = bool(builtins is not None and getattr(builtins, "_pinhos_web_srv", None) is not None)
+        _ws = getattr(builtins, "_pinhos_web_srv", None) if builtins is not None else None
+        _paused_web = False
+        if meta.get("needs_radio") and _ws is not None and hasattr(_ws, "pause") and not getattr(_ws, "_paused", False):
+            try:
+                _paused_web = bool(_ws.pause())
+            except Exception:
+                _paused_web = False
+        web_up = bool(_ws is not None and not _paused_web)
         sram_floor = max(min_sram, 49152 if web_up else 32768)
 
-        gc.collect()
-        free_before = get_free_sram()
-        if free_before < sram_floor:
-            raise SandboxMemoryError(
-                "App '{}' requires {}B free SRAM (OS reserve), only {}B available".format(
-                    app_id, sram_floor, free_before
-                )
-            )
-        min_block = int(meta.get("min_block", 16384))
-        if min_block > 0:
-            try:
-                from core.memutil import largest_free
-                blk = largest_free(cap=max(min_block, 16384))
-                if blk < min_block:
-                    raise SandboxMemoryError(
-                        "App '{}' needs {}B contig SRAM, largest block {}B".format(
-                            app_id, min_block, blk
-                        )
+        try:
+            gc.collect()
+            free_before = get_free_sram()
+            if free_before < sram_floor:
+                raise SandboxMemoryError(
+                    "App '{}' needs {}K free SRAM, only {}K free".format(
+                        app_id, sram_floor // 1024, free_before // 1024
                     )
-            except ImportError:
-                pass
+                )
+            min_block = int(meta.get("min_block", 16384))
+            if min_block > 0:
+                try:
+                    from core.memutil import largest_free
+                    blk = largest_free(cap=max(min_block, 16384))
+                    if blk < min_block:
+                        raise SandboxMemoryError(
+                            "App '{}' needs {}K blk, only {}K blk ({}K free)".format(
+                                app_id, min_block // 1024, blk // 1024, free_before // 1024
+                            )
+                        )
+                except ImportError:
+                    pass
+        except SandboxMemoryError:
+            if _paused_web and _ws is not None and hasattr(_ws, "resume"):
+                try:
+                    _ws.resume()
+                except Exception:
+                    pass
+            raise
 
         modules_before = set(sys.modules.keys())
         if mod_name and mod_name in sys.modules:
@@ -653,23 +743,42 @@ class SandboxRunner:
             except Exception:
                 hooked_builtins = False
 
-        ret_val, err_str, ok = None, None, False
+        ret_val, err_str, ok, aborted = None, None, False, False
         leaked_closed = 0
         purged_modules = []
-        # Feed the hardware WDT on every key poll so idle tool loops never trip it (Refs #28)
+        # Wrap board.poll_key to (1) feed WDT on every poll and (2) intercept ALT+F5 ANR/Force-Close
         _orig_poll = None
         _bd = self.board
-        if _bd is not None and sys.modules.get("__pinhos_wdt__") is not None:
+        _wd = sys.modules.get("__pinhos_wdt__")
+        if _wd is not None and hasattr(_wd, "set_op"):
+            try:
+                _wd.set_op("APP:" + str(app_id)[:24])
+            except Exception:
+                pass
+        if _bd is not None and hasattr(_bd, "poll_key"):
             try:
                 _orig_poll = _bd.poll_key
-                _wd = sys.modules.get("__pinhos_wdt__")
+                _self = self
+                _aid = app_id
 
-                def _wpoll(_o=_orig_poll, _w=_wd):
-                    try:
-                        _w.feed()
-                    except Exception:
-                        pass
-                    return _o()
+                def _wpoll(_o=_orig_poll, _w=_wd, _b=_bd, _s=_self, _a=_aid):
+                    if _w is not None:
+                        try:
+                            _w.feed()
+                        except Exception:
+                            pass
+                    k = _o()
+                    if k and str(k).upper() == "F5":
+                        try:
+                            if _b.get_modifiers() & 4:  # MOD_ALT = 4
+                                if _s._prompt_anr(_a, "Force-check (ALT+F5)", poll_fn=_o) == "kill":
+                                    raise SandboxAbort("Force-closed by user")
+                                return None
+                        except SandboxAbort:
+                            raise
+                        except Exception:
+                            pass
+                    return k
                 _bd.poll_key = _wpoll
             except Exception:
                 _orig_poll = None
@@ -679,15 +788,42 @@ class SandboxRunner:
         except KeyboardInterrupt:
             err_str = "Interrupted (Ctrl-C)"
             ok = False
-        except (Exception, MemoryError) as exc:
-            err_str = repr(exc)
-            if self.logger is not None:
+        except SandboxAbort as ab_exc:
+            err_str = str(ab_exc)
+            ok = False
+            aborted = True
+            if self.logger is not None and hasattr(self.logger, "app_note"):
                 try:
-                    self.logger.exception("SANDBOX({})".format(app_id), exc)
+                    self.logger.app_note(app_id, err_str, kind="ABORT")
                 except Exception:
                     pass
+        except (Exception, MemoryError) as exc:
+            if type(exc).__name__ == "SoftWatchdogAbort":
+                err_str = str(exc) or "ANR: Aborted by Soft WDT"
+                ok = False
+                aborted = True
+                if self.logger is not None and hasattr(self.logger, "app_note"):
+                    try:
+                        self.logger.app_note(app_id, err_str, kind="ANR")
+                    except Exception:
+                        pass
+            else:
+                err_str = repr(exc)
+                if self.logger is not None:
+                    try:
+                        if hasattr(self.logger, "app_exception"):
+                            self.logger.app_exception(app_id, exc)
+                        else:
+                            self.logger.exception("SANDBOX({})".format(app_id), exc)
+                    except Exception:
+                        pass
             exc = None
         finally:
+            if _wd is not None and hasattr(_wd, "set_op"):
+                try:
+                    _wd.set_op("IDLE")
+                except Exception:
+                    pass
             if _orig_poll is not None:
                 try:
                     _bd.poll_key = _orig_poll
@@ -715,15 +851,20 @@ class SandboxRunner:
                     self.board.restore_state()
                 except Exception:
                     pass
+            if _paused_web and _ws is not None and hasattr(_ws, "resume"):
+                try:
+                    _ws.resume()
+                except Exception:
+                    pass
             gc.collect()
             gc.collect()
 
         free_after = get_free_sram()
         sram_delta = max(0, free_before - free_after)
-        if not ok and wait_on_error:
+        if not ok and not aborted and wait_on_error:
             self.show_recovery_screen(app_id, err_str, sram_delta=sram_delta, wait_key=True)
         return {
-            "ok": ok, "app_id": app_id, "meta": meta, "return_value": ret_val,
+            "ok": ok, "aborted": aborted, "app_id": app_id, "meta": meta, "return_value": ret_val,
             "error": err_str, "leaked_handles_closed": leaked_closed,
             "purged_modules": purged_modules, "sram_before": free_before,
             "sram_after": free_after, "sram_delta": sram_delta,

@@ -158,7 +158,10 @@ class PicoCalcBoard(BoardBase):
         self._stdin_poll = None
         self._kbuf = bytearray(8)
         self._lut = _build_default_lut()
-        self._refresh_active = False
+        # Core 1 auto-refresh is already active from UF2 cold boot; only call recoverRefresh()
+        # if stop_refresh() was explicitly called (repeated recoverRefresh() wedges Core 1 on RP2350).
+        import sys as _sys
+        self._refresh_active = not bool(_sys.modules.get("__pinhos_disp_stopped__"))
         self._fb_buf = None
         self._fb = None
         self.last_screenshot = None
@@ -262,15 +265,20 @@ class PicoCalcBoard(BoardBase):
                 except Exception:
                     pass
                 self._refresh_active = False
+                import sys as _sys
+                _sys.modules["__pinhos_disp_stopped__"] = True
 
     def recover_refresh(self, force=False):
         if self._disp is not None and hasattr(self._disp, "recoverRefresh"):
-            if force or not self._refresh_active:
+            import sys as _sys
+            stopped = bool(_sys.modules.get("__pinhos_disp_stopped__"))
+            if force or not self._refresh_active or stopped:
                 try:
                     self._disp.recoverRefresh()
                 except Exception:
                     pass
                 self._refresh_active = True
+                _sys.modules.pop("__pinhos_disp_stopped__", None)
 
     def fill(self, color=0):
         if self._disp is not None:
@@ -539,24 +547,25 @@ class PicoCalcBoard(BoardBase):
                 return None
 
             # Key released (state == 3): clear modifier if modifier key, else discard & check next FIFO slot
+            # PicoCalc STM32 scancodes: 0xA1=ALT, 0xA2=LSHIFT, 0xA3=RSHIFT, 0xA4=SYM, 0xA5=CTRL
             if state == 3:
-                if code in (0xA1, 0xA2):
+                if code in (0xA2, 0xA3):
                     self._modifiers &= ~MOD_SHIFT
-                elif code in (0xA3, 0xA5):
+                elif code == 0xA5:
                     self._modifiers &= ~MOD_CTRL
-                elif code == 0xA4:
+                elif code in (0xA1, 0xA4):
                     self._modifiers &= ~MOD_ALT
                 continue
 
             # Key pressed (state == 1) or held (state == 2)
             if state in (1, 2):
-                if code in (0xA1, 0xA2):
+                if code in (0xA2, 0xA3):
                     self._modifiers |= MOD_SHIFT
                     continue
-                if code in (0xA3, 0xA5):
+                if code == 0xA5:
                     self._modifiers |= MOD_CTRL
                     continue
-                if code == 0xA4:
+                if code in (0xA1, 0xA4):
                     self._modifiers |= MOD_ALT
                     continue
                 return bytes([code])

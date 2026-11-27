@@ -504,10 +504,10 @@ def open_menu_tree(board, ui, theme_mgr, cfg, logger, sandbox, manifest, root_ca
                     stack.append([aid[4:], 0]); status_msg, status_kind = "", "info"; _sync(force=True)
                 elif aid.startswith("tool:") and aid[5:] in TOOL_MAP:
                     p, lbl, wt = TOOL_MAP[aid[5:]]
-                    status_msg, status_kind = run_tool_cb(p, lbl, wt); _sync(force=True)
+                    return ("RUN_SANDBOX", p, lbl, wt)
                 elif aid.startswith("app:"):
                     ap = aid[4:]
-                    status_msg, status_kind = run_tool_cb(ap, it.get("label", "App"), ap.endswith("hello_world.py")); _sync(force=True)
+                    return ("RUN_SANDBOX", ap, it.get("label", "App"), ap.endswith("hello_world.py"))
                 elif aid.startswith("theme:"):
                     t = theme_mgr.apply(aid[6:], persist=True)
                     status_msg, status_kind = "Theme: " + t.name, "ok"; _sync(force=True)
