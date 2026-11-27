@@ -45,6 +45,77 @@ class SandboxAbort(SandboxError):
     pass
 
 
+class SandboxPolicyError(SandboxError):
+    """Raised when an app violates the PinhOS App Contract or calls forbidden OS-breaking APIs."""
+    pass
+
+
+VALID_UI_MODES = ("gui", "tui", "native")
+
+# Forbidden tokens in untrusted apps (apps/*.py): blocked statically BEFORE compile/import
+FORBIDDEN_APP_TOKENS = (
+    ("machine.Pin", "Direct GPIO (machine.Pin) forbidden; use ctx.board HAL"),
+    ("from machine import Pin", "Direct GPIO (Pin) forbidden; use ctx.board HAL"),
+    ("machine.WDT", "Direct WDT access forbidden; OS manages watchdog"),
+    ("machine.reset(", "machine.reset() forbidden in apps"),
+    ("machine.soft_reset(", "machine.soft_reset() forbidden in apps"),
+    ("machine.deepsleep(", "machine.deepsleep() forbidden in apps"),
+    ("os.dupterm(", "os.dupterm() forbidden in apps (breaks COM4)"),
+    ("stopRefresh(", "stopRefresh() forbidden (wedges RP2350 Core 1)"),
+    ("recoverRefresh(", "recoverRefresh() forbidden (wedges RP2350 Core 1)"),
+    ("poll_input(", "board.poll_input() returns int; use board.poll_key()"),
+    ("__pinhos_wdt__", "Internal __pinhos_wdt__ forbidden; use ctx.yield_()"),
+    ("_pinhos_main", "Internal _pinhos_main access forbidden in apps"),
+)
+
+
+def _strip_comment(line):
+    in_q = None
+    esc = False
+    for i, ch in enumerate(line):
+        if in_q is not None:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == in_q:
+                in_q = None
+        else:
+            if ch in ('"', "'"):
+                in_q = ch
+            elif ch == "#":
+                return line[:i]
+    return line
+
+
+def _validate_meta_strict(meta):
+    aid = meta.get("id", "")
+    if len(aid) < 2 or len(aid) > 24 or not ("a" <= aid[0] <= "z"):
+        raise SandboxPolicyError("APP_META['id'] must be 2-24 chars [a-z0-9_], starting with a-z")
+    for ch in aid:
+        if not (("a" <= ch <= "z") or ("0" <= ch <= "9") or ch == "_"):
+            raise SandboxPolicyError("APP_META['id'] has invalid char '{}'; use [a-z0-9_]".format(ch))
+    if meta.get("min_sram", 0) < 16384:
+        raise SandboxPolicyError("APP_META['min_sram'] must be >= 16384 for apps")
+    if "min_block" in meta:
+        mb = meta["min_block"]
+        if not isinstance(mb, int) or isinstance(mb, bool) or mb < 0:
+            raise SandboxPolicyError("APP_META['min_block'] must be a non-negative integer")
+    for m in meta.get("ui_modes", []):
+        if m not in VALID_UI_MODES:
+            raise SandboxPolicyError("Invalid ui_mode '{}'; use gui/tui/native".format(m))
+
+
+def _scan_policy_lines(lines_iter):
+    for lineno, raw in enumerate(lines_iter, 1):
+        code = _strip_comment(raw)
+        if not code.strip():
+            continue
+        for tok, reason in FORBIDDEN_APP_TOKENS:
+            if tok in code:
+                raise SandboxPolicyError("L{}: {}".format(lineno, reason))
+
+
 def get_free_sram():
     """Return free heap bytes in MicroPython (or a 256 KB baseline on standard CPython)."""
     gc.collect()
@@ -254,7 +325,7 @@ def _has_entry_function(source, entry_name):
     return False
 
 
-def parse_app_meta(source):
+def parse_app_meta(source, strict=False):
     """
     Statically parse and validate APP_META from Python source string without
     executing any top-level application code.
@@ -297,14 +368,21 @@ def parse_app_meta(source):
             "App does not define declared entry function 'def {}(ctx):'".format(meta["entry"])
         )
 
+    if strict:
+        _validate_meta_strict(meta)
+        _scan_policy_lines(source.split("\n"))
+
     return meta
 
 
-def inspect_app(app_path):
+def inspect_app(app_path, strict=None):
     """
     Stream-read only the header of an app file (<= 1.5 KB) to statically validate
-    APP_META, then scan line-by-line for the entry function — never slurps large files.
+    APP_META, then scan line-by-line for the entry function and (for apps) OS safety policy.
     """
+    if strict is None:
+        p = str(app_path or "").replace("\\", "/")
+        strict = not ("/tools/" in p or p.startswith("tools/"))
     try:
         with open(app_path, "r") as f:
             head = f.read(1536)
@@ -337,18 +415,32 @@ def inspect_app(app_path):
     if not isinstance(ui_modes, list) or not ui_modes:
         raise SandboxMetaError("APP_META['ui_modes'] must be a non-empty list")
 
+    if strict:
+        _validate_meta_strict(meta)
+
     entry_name = meta["entry"]
     found_entry = _has_entry_function(head, entry_name)
-    if not found_entry:
+    if strict or not found_entry:
         t1 = "def " + str(entry_name) + "("
         t2 = "def " + str(entry_name) + " ("
         try:
             with open(app_path, "r") as f:
+                lineno = 0
                 for line in f:
+                    lineno += 1
                     s = line.strip()
-                    if s.startswith(t1) or s.startswith(t2):
+                    if not found_entry and (s.startswith(t1) or s.startswith(t2)):
                         found_entry = True
+                    if strict:
+                        code = _strip_comment(line)
+                        if code.strip():
+                            for tok, reason in FORBIDDEN_APP_TOKENS:
+                                if tok in code:
+                                    raise SandboxPolicyError("L{}: {}".format(lineno, reason))
+                    elif found_entry:
                         break
+        except SandboxPolicyError:
+            raise
         except Exception as e:
             raise SandboxMetaError("Cannot scan app file '{}': {}".format(app_path, e))
     if not found_entry:

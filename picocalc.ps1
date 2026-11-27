@@ -690,6 +690,28 @@ if ($Action -in @("build", "compile", "mpy")) {
     exit 0
 }
 
+# Offline App SDK contract & safety policy validator (no serial port required)
+if ($Action -in @("lint", "check_app")) {
+    $drv = $ProjectRoot.Substring(0, 1).ToLower()
+    $wslRoot = "/mnt/" + $drv + ($ProjectRoot.Substring(2) -replace "\\", "/")
+    $argPart = ""
+    if ($Arg1 -and $Arg1.Trim().Length -gt 0) {
+        $argPart = " '" + ($Arg1.Trim() -replace "\\", "/") + "'"
+    }
+    $pyCmd = Get-Command python3 -ErrorAction SilentlyContinue
+    if (-not $pyCmd) { $pyCmd = Get-Command python -ErrorAction SilentlyContinue }
+    if ($pyCmd -and $pyCmd.Source -notmatch "WindowsApps") {
+        if ($Arg1 -and $Arg1.Trim().Length -gt 0) {
+            & $pyCmd.Source (Join-Path $ProjectRoot "scripts\check_app.py") $Arg1.Trim()
+        } else {
+            & $pyCmd.Source (Join-Path $ProjectRoot "scripts\check_app.py")
+        }
+        exit $LASTEXITCODE
+    }
+    & wsl -- bash -c "cd '$wslRoot' && python3 scripts/check_app.py$argPart"
+    exit $LASTEXITCODE
+}
+
 # Primary fast transport if mpremote is installed on PATH
 $mpremoteCmd = Get-Command mpremote -ErrorAction SilentlyContinue
 if ((-not $NoMpremote) -and $mpremoteCmd) {

@@ -62,33 +62,28 @@ def _extract_key(ev):
     return str(val).lower() if val is not None else str(ev).lower()
 
 
-def _feed_wdt():
-    try:
-        import sys as _sy
-        _w = _sy.modules.get("__pinhos_wdt__")
-        if _w is not None:
-            _w.feed()
-    except Exception:
-        pass
-
-
-def _scan_wifi():
+def _scan_wifi(yield_fn=None):
     if network is None:
         return [], "No network module"
     try:
-        _feed_wdt()
+        if yield_fn:
+            yield_fn()
         wlan = network.WLAN(network.STA_IF)
         if not wlan.active():
             wlan.active(True)
             time.sleep_ms(600)
-        _feed_wdt()
+        if yield_fn:
+            yield_fn()
         raw = wlan.scan()
-        _feed_wdt()
+        if yield_fn:
+            yield_fn()
         if not raw:
             time.sleep_ms(400)
-            _feed_wdt()
+            if yield_fn:
+                yield_fn()
             raw = wlan.scan()
-            _feed_wdt()
+            if yield_fn:
+                yield_fn()
         aps = []
         for item in raw:
             ssid = item[0]
@@ -233,23 +228,19 @@ def main(ctx):
     if board is None:
         return {"error": "no_board"}
 
+    _y = (lambda: ctx.yield_(step_web=False)) if hasattr(ctx, "yield_") else None
     view_mode = 0
     _draw_spectrum(board, theme, [], view_mode, True, None)
-    if hasattr(ctx, "yield_"):
-        ctx.yield_(step_web=False)
     gc.collect()
-    aps, err = _scan_wifi()
-    if hasattr(ctx, "yield_"):
-        ctx.yield_(step_web=False)
+    aps, err = _scan_wifi(_y)
     _draw_spectrum(board, theme, aps, view_mode, False, err)
     if hasattr(board, "clear_input"):
         board.clear_input()
     poll_fn = getattr(board, "poll_key", None) or getattr(board, "read_key", None)
 
     while True:
-        _feed_wdt()
-        if hasattr(ctx, "yield_"):
-            ctx.yield_(step_web=False)
+        if _y:
+            _y()
         ev = poll_fn() if poll_fn else None
         k_low = _extract_key(ev)
         if k_low is None:
@@ -260,12 +251,8 @@ def main(ctx):
             break
         elif k_low in ("r", " ", "space", "enter", "key_enter", "\r", "\n"):
             _draw_spectrum(board, theme, aps, view_mode, True, None)
-            if hasattr(ctx, "yield_"):
-                ctx.yield_(step_web=False)
             gc.collect()
-            aps, err = _scan_wifi()
-            if hasattr(ctx, "yield_"):
-                ctx.yield_(step_web=False)
+            aps, err = _scan_wifi(_y)
             _draw_spectrum(board, theme, aps, view_mode, False, err)
         elif k_low in ("\t", "tab", "key_tab"):
             view_mode = 1 - view_mode
