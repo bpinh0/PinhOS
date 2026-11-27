@@ -44,7 +44,8 @@ PinhOS runs third-party MicroPython apps from `/sd/pinhos/apps/*.py` inside an i
 
 Your entry function receives `ctx`:
 
-- **`ctx.board`** — Board HAL (`fill`, `fill_rect`, `rect`, `hline`, `vline`, `line`, `pixel`, `text`, `show`, `beep`, `poll_key`, `clear_input`, `get_modifiers`, `get_battery`, `get_timestamp_str`, `get_sd_stats`).
+- **`ctx.board`** — Board HAL (`fill`, `fill_rect`, `rect`, `hline`, `vline`, `line`, `pixel`, `text`, `show`, `beep`, `play_audio`, `step_audio`, `stop_audio`, `audio_playing`, `audio_status`, `poll_key`, `clear_input`, `get_modifiers`, `get_battery`, `get_timestamp_str`, `get_sd_stats`).
+  - **PWM WAV Audio HAL:** Call `ctx.board.play_audio("/sd/music/track.wav")` (8/16-bit PCM, mono/stereo, 8000–22050 Hz; skips `LIST`/`INFO` metadata chunks automatically), then call `ctx.yield_(step_web=False)` in your loop so `step_audio()` streams 512 B chunks with zero per-chunk heap allocation. Query `ctx.board.audio_playing()` / `ctx.board.audio_status()` for progress and call `ctx.board.stop_audio()` to silence PWM (also guaranteed by `SandboxRunner` on exit/force-close).
 - **`ctx.theme`** — Active theme (`ctx.theme.color("bg"|"surface"|"border"|"accent"|"accent_fg"|"text"|"text_muted"|"ok"|"warn"|"err")`).
 - **`ctx.ui`** — Active `UIEngine` (`ctx.ui.mode` is `"gui"` or `"tui"`).
 - **`ctx.open(path, mode)`** / **`ctx.socket(...)`** — Resource-tracked file & socket handles (automatically closed on exit or crash).

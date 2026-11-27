@@ -101,6 +101,7 @@ $DeployManifest = @(
     @{ Local = "apps\matrix_deck.py";   Remote = "/sd/pinhos/apps/matrix_deck.py" },
     @{ Local = "apps\doom_deck.py";     Remote = "/sd/pinhos/apps/doom_deck.py" },
     @{ Local = "apps\wifi_spectrum.py"; Remote = "/sd/pinhos/apps/wifi_spectrum.py" },
+    @{ Local = "apps\audio_player.py";  Remote = "/sd/pinhos/apps/audio_player.py" },
     @{ Local = "tests\selftest.py";     Remote = "/sd/pinhos/tests/selftest.py";    Mpy = $true },
     @{ Local = "tests\selftest_p3.py";  Remote = "/sd/pinhos/tests/selftest_p3.py"; Mpy = $true },
     @{ Local = "tests\selftest_p4.py";  Remote = "/sd/pinhos/tests/selftest_p4.py"; Mpy = $true },

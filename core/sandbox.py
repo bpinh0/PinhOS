@@ -615,7 +615,7 @@ class AppContext:
         return None
 
     def yield_(self, step_web=True):
-        """Cooperative yield for long-running tools: feeds hardware WDT and steps WebPortal/CYW43."""
+        """Cooperative yield for long-running tools: feeds hardware WDT, steps PWM audio, and steps WebPortal."""
         if builtins is not None:
             _w = sys.modules.get("__pinhos_wdt__")
             if _w is not None:
@@ -623,6 +623,11 @@ class AppContext:
                     _w.feed()
                 except Exception:
                     pass
+        if self.board is not None and hasattr(self.board, "audio_playing") and self.board.audio_playing():
+            try:
+                self.board.step_audio()
+            except Exception:
+                pass
         if step_web:
             m = sys.modules.get("main") or sys.modules.get("_pinhos_main")
             if m is not None and hasattr(m, "step_webportal"):
@@ -939,6 +944,11 @@ class SandboxRunner:
             ctx._tracker = ctx.board = ctx.config = ctx.swap = ctx.logger = ctx.theme = ctx.ui = None
             ctx = tracker = None
             if self.board is not None:
+                if hasattr(self.board, "stop_audio"):
+                    try:
+                        self.board.stop_audio()
+                    except Exception:
+                        pass
                 try:
                     self.board.restore_state()
                 except Exception:

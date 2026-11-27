@@ -245,6 +245,15 @@ def test_phase3_field_tools(root="/sd/pinhos"):
             os.remove(shot_p)
         except OSError:
             pass
+        # Verify PWM WAV Audio HAL hooks + apps/audio_player.py strict policy & clean stop_audio()
+        from core.sandbox import inspect_app
+        ap_meta = inspect_app(root.rstrip("/") + "/apps/audio_player.py", strict=True)
+        _assert(ap_meta.get("id") == "audio_player" and ap_meta.get("min_sram", 0) >= 24576, "audio_player meta fail")
+        sys.modules.pop("core.sandbox", None)
+        for _ah in ("play_audio", "step_audio", "stop_audio", "audio_playing"):
+            _assert(hasattr(board, _ah), "Board missing audio HAL hook: " + _ah)
+        _assert(board.audio_playing() is False, "audio_playing should be False initially")
+        board.stop_audio()
         gc.collect()
     finally:
         try:
