@@ -399,6 +399,11 @@ def test_desktop_home(root="/sd/pinhos"):
                 pass
         board.ensure_serial_repl()
 
+    # Release DesktopHome/UI/Theme modules (~55 KB) before running logger/sandbox/legal checks
+    for _um in ("ui.desktop", "ui.gui", "ui.tui", "ui.engine", "ui.widgets", "ui.fonts", "ui.fonts_ext", "core.theme"):
+        sys.modules.pop(_um, None)
+    gc.collect(); gc.collect()
+
     # 4. Compact crash.log heap/block forensics + wifi_spectrum metadata/input check (#75)
     from core.logger import Logger
     tmp_ldir = root.rstrip("/") + "/logs/_g11_log"
