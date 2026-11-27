@@ -90,7 +90,7 @@ PIN_AUDIO_L  = 26
 PIN_AUDIO_R  = 27
 _RP2350_PWM5_CC  = 0x400A8070
 _RP2350_PWM5_TOP = 0x400A8074
-_RP2350_DMA_TMR0 = 0x50000420
+_RP2350_DMA_TMR0 = 0x50000440
 
 # Serial Bridge: UART0 (COM4 dupterm) & Auxiliary Field Console: UART1 (side header)
 UART_BRIDGE_BUS = 0
@@ -1395,6 +1395,8 @@ class PicoCalcBoard(BoardBase):
             try:
                 self._aud_dma.active(0)
                 self._aud_dma.close()
+                if machine is not None:
+                    machine.mem32[_RP2350_DMA_TMR0] = 0
             except Exception:
                 pass
             self._aud_dma = None
