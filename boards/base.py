@@ -290,8 +290,24 @@ class BoardBase:
     def beep(self, freq=1200, duration_ms=20, volume=50):
         return False
 
+    def play_audio(self, path):
+        """Start non-blocking chunked PCM WAV playback from SD path. Returns True on success."""
+        return False
+
+    def step_audio(self):
+        """Cooperatively feed one pre-allocated PCM chunk to PWM audio. Returns True while playing."""
+        return False
+
     def stop_audio(self):
         pass
+
+    def audio_playing(self):
+        """Return True if a non-blocking audio stream is currently active."""
+        return False
+
+    def audio_status(self):
+        """Return compact dict with playback state, elapsed/total seconds, and last error."""
+        return {"playing": False, "pos_s": 0, "dur_s": 0, "rate": 0, "ch": 0, "bits": 0, "error": ""}
 
     # --- RTC & System Telemetry Contract ---
 
